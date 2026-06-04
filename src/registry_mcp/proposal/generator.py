@@ -8,11 +8,11 @@ autonomous proposal generation responsible.
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-import os
 import yaml
 
 from registry_mcp.logging import get_logger

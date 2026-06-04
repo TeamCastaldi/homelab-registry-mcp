@@ -42,6 +42,7 @@ _APPLY_FOOTER = {
     ),
 }
 
+
 class ProposalEngine:
     def __init__(
         self,

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from registry_mcp.discovery.base import DiscoveredService
 from registry_mcp.integrations.authentik.client import AuthentikClient
 from registry_mcp.models import AuthMode, Category, SourceType
-import os
 
 _DEFAULT_INFRA_NAMES = {
     "traefik",
@@ -17,10 +17,12 @@ _DEFAULT_INFRA_NAMES = {
     "vscode",
 }
 
+
 def _build_infra_names() -> set[str]:
     extras = os.getenv("DISCOVERY_EXCLUDE_NAMES", "")
     extra_set = {n.strip() for n in extras.split(",") if n.strip()}
     return _DEFAULT_INFRA_NAMES | extra_set
+
 
 _INFRA_NAMES = _build_infra_names()
 _MEDIA_NAMES = {
