@@ -1,0 +1,36 @@
+# Bootstrap catalog of known homelab services.
+# Seed it with:  registry-mcp-seed examples/services.example.yaml
+services:
+  - name: plex
+    display_name: Plex Media Server
+    category: media
+    host: media-lxc
+    urls:
+      - https://plex.<your-domain>
+    traefik_router: plex
+    auth_mode: none
+    tags: [media, streaming]
+    notes: Movie and TV library.
+
+  - name: gitea
+    display_name: Gitea
+    category: infra
+    host: git-lxc
+    urls:
+      - https://git.<your-domain>
+    traefik_router: gitea
+    auth_mode: internal
+    tags: [git, ci]
+    notes: Self-hosted git with Actions runners.
+
+  - name: vaultwarden
+    display_name: Vaultwarden
+    category: security
+    host: vault-lxc
+    urls:
+      - https://vault.<your-domain>
+    traefik_router: vaultwarden
+    authentik_app_slug: vaultwarden
+    auth_mode: forward_auth
+    tags: [passwords, security]
+    notes: Bitwarden-compatible password manager behind Authentik.

@@ -1,0 +1,42 @@
+services:
+  homelab-registry-mcp:
+    build: .
+    image: homelab-registry-mcp:latest
+    container_name: homelab-registry-mcp
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      MCP_TRANSPORT: streamable-http
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: 8765
+      DOCKER_BASE_URL: unix:///var/run/docker.sock
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - registry-data:/data
+      # Read-only Docker socket: lets DockerDiscoverySource enumerate containers
+      # with traefik.enable=true. Discovery is gated on DOCKER_BASE_URL below.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - traefik
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: "traefik"
+      traefik.http.routers.registry-mcp.rule: "Host(`registry-mcp.<your-domain>`)"
+      traefik.http.routers.registry-mcp.entrypoints: "websecure"
+      traefik.http.routers.registry-mcp.tls: "true"
+      # LAN-only for now. MCP streamable-http clients don't follow Authentik's
+      # login redirect, so ForwardAuth would block them. Reintroduce a real auth
+      # strategy (header/Bearer token, mTLS, etc.) before any public exposure.
+      traefik.http.services.registry-mcp.loadbalancer.server.port: "8765"
+
+volumes:
+  registry-data:
+
+networks:
+  # external: false so first-run `docker compose up` creates the network
+  # automatically. In the homelab, set this to `external: true` and pre-create
+  # the network on the lab host so Traefik can route to this service.
+  traefik:
+    external: false
