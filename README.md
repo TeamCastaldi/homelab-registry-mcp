@@ -1,0 +1,1 @@
+# homelab-registry-mcp
