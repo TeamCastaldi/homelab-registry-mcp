@@ -1,0 +1,76 @@
+version: 2
+
+# ⚠️  uv LIMITATION: Dependabot reads pyproject.toml and pip-style requirements
+# files but does NOT parse uv.lock natively. It will detect top-level
+# dependencies from pyproject.toml and open PRs for those, but transitive
+# pinning in uv.lock is invisible to it.
+#
+# Workaround (recommended): add a CI step that runs
+#   `uv export --no-dev -o requirements.txt`
+# and commits the file. Point the pip ecosystem entry at that file for full
+# transitive coverage. Until then, Dependabot covers direct deps only.
+
+updates:
+  # ── Python dependencies (runtime + dev) ──────────────────────────────────
+  # A single pip entry is required — Dependabot rejects duplicate
+  # package-ecosystem+directory combinations. Both groups live here:
+  # python-runtime batches all production deps; python-dev batches test/lint
+  # tools. The exclude-patterns on python-runtime prevent dev packages from
+  # appearing in both groups.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: UTC
+    open-pull-requests-limit: 5
+    groups:
+      python-runtime:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "pytest*"
+          - "ruff"
+      python-dev:
+        patterns:
+          - "pytest*"
+          - "ruff"
+
+  # ── Docker base image (Dockerfile at repo root) ───────────────────────────
+  # Only tracks the FROM image in the Dockerfile (python:3.12-slim).
+  # docker-compose.yml only references the locally-built image so it adds no
+  # value here and is intentionally omitted.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: UTC
+    open-pull-requests-limit: 2
+    # Suppress patch-level noise (e.g. 3.12.1 → 3.12.2). Only open PRs for
+    # minor or major base-image bumps which may carry security significance.
+    ignore:
+      - dependency-name: "python"
+        update-types:
+          - version-update:semver-patch
+    groups:
+      docker-base:
+        patterns:
+          - "*"
+
+  # ── GitHub Actions ────────────────────────────────────────────────────────
+  # No workflows exist yet. Uncomment this block when .github/workflows/ is
+  # populated to keep action versions automatically up to date.
+  #
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    groups:
+      github-actions:
+  #       patterns:
+  #         - "*"
