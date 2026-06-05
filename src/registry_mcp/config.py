@@ -99,6 +99,13 @@ class Settings(BaseSettings):
     normalization_enabled: bool = Field(default=False)
     normalization_schedule: str = Field(default="weekly")
 
+    # Secrets / git-crypt (Phase C) — all opt-in; off by default.
+    # secrets_key_path takes priority over secrets_git_crypt_key.
+    secrets_enabled: bool = Field(default=True)
+    secrets_repo_path: str | None = Field(default=None)
+    secrets_key_path: str | None = Field(default=None)
+    secrets_git_crypt_key: str | None = Field(default=None)
+
     log_level: str = Field(default="INFO")
 
 

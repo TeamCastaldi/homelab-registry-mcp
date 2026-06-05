@@ -6,6 +6,7 @@ from registry_mcp.tools.hardware import register_hardware_tools
 from registry_mcp.tools.linking import register_linking_tools
 from registry_mcp.tools.proposal import register_proposal_tools
 from registry_mcp.tools.registry import register_registry_tools
+from registry_mcp.tools.secrets import register_secrets_tools
 
 __all__ = [
     "register_discovery_tools",
@@ -14,4 +15,5 @@ __all__ = [
     "register_linking_tools",
     "register_proposal_tools",
     "register_registry_tools",
+    "register_secrets_tools",
 ]
