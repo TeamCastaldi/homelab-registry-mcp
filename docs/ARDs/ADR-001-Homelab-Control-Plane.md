@@ -41,7 +41,7 @@ This ADR addresses all four. The Raspberry Pi 5 is the intended control plane ha
 
 ### 3.1 Control Plane Node (Required)
 
-The control plane node runs homelab-registry-mcp, Gitea, and Ansible. It must be a dedicated machine — it does not run workload services.
+The control plane node runs homelab-registry-mcp and Ansible. It must be a dedicated machine — it does not run workload services.
 
 | Requirement | Minimum / Recommended |
 |---|---|
@@ -71,7 +71,7 @@ A NAS provides NFS-backed persistent storage for both the control plane and work
 
 | Mount | Purpose |
 |---|---|
-| `<NAS_IP>:/appdata  →  /mnt/appdata` | Registry DB, Gitea data, homelab repo clone, service app data |
+| `<NAS_IP>:/appdata  →  /mnt/appdata` | Registry DB, homelab repo clone, service app data |
 | `<NAS_IP>:/media    →  /mnt/media` | Media library (Plex, Jellyfin, etc.) |
 
 > **NOTE** — Without a NAS, the control plane's persistent state must live on the Pi's SD card. This works but is a single point of failure. If you use local storage, establish a backup routine before putting the lab into production use.
@@ -88,7 +88,7 @@ Reference topology (node names and IPs are user-defined):
 
 | Node (example name) | Role | Responsibilities |
 |---|---|---|
-| `control-node` | Control Plane | registry-mcp, Gitea, Ansible. Raspberry Pi. |
+| `control-node` | Control Plane | registry-mcp, Ansible. Raspberry Pi. |
 | `workload-01` | Workload | General services (Traefik, Authentik, applications) |
 | `workload-02` | Workload | Specialised services (e.g. media server with GPU) |
 | `nas` | Storage (optional) | NFS shares for app data and media |
@@ -123,7 +123,7 @@ The full deploy loop:
 
 | # | Actor | Action |
 |---|---|---|
-| 1 | registry-mcp | Detects configuration drift or receives a deploy intent. Opens a PR in the homelab repo on GitHub. |
+| 1 | registry-mcp | Detects configuration drift or receives a deploy intent. Opens a PR in the operator's private homelab repo on GitHub. |
 | 2 | Email (SMTP) | Templated HTML email to the operator: PR summary, diff, Approve button, Request Changes button. |
 | 3 | Operator | Clicks Approve (links to GitHub PR) or Request Changes (opens a conversation). |
 | 4 | GitHub Actions | On PR merge, workflow fires. Triggers Ansible playbook via the self-hosted runner on the control plane node. |
@@ -134,7 +134,7 @@ The full deploy loop:
 
 ### 4.4 GitHub as Canonical Remote — Two Repositories
 
-> **DECISION** — All code and homelab configuration lives on GitHub under the TeamCastaldi organization. The MCP is a public repository licensed MIT. Each operator's homelab configuration lives in a private repository created during first run by the OOBE.
+> **DECISION** — All code and homelab configuration lives on GitHub. The MCP is a public repository licensed MIT. Each operator's homelab configuration lives in a private repository on their own GitHub account or organisation, created during first run by the OOBE.
 
 | Repository | Visibility | Purpose |
 |---|---|---|
@@ -166,37 +166,6 @@ A GitHub Actions workflow builds and pushes the image on every tagged release. T
 
 > **IMPORTANT** — The git-crypt symmetric key must be stored outside the homelab repo — never committed to any repository. Recommended storage: a password manager or secret store already deployed in your lab (e.g. Vaultwarden). The OOBE generates the key and guides you through storing it safely before completing setup.
 
-git-crypt tool surface:
-
-| Tool | Purpose |
-|---|---|
-| `secrets_status` | Show which files are encrypted and whether the repo is unlocked |
-| `secrets_encrypt(path)` | Add a file to `.gitattributes` and encrypt it |
-| `secrets_decrypt(path)` | Temporarily read an encrypted file — no plaintext written to disk |
-| `secrets_add(key, value, path)` | Add or update a key in an encrypted `.env` file |
-| `secrets_rotate(path)` | Re-encrypt a file with a new key (rotation workflow) |
-| `secrets_list_keys(path)` | List keys in an encrypted `.env` without exposing values |
-
-### 4.7 Notifications — SMTP2GO
-
-> **DECISION** — All operator notifications use templated HTML email via SMTP. SMTP2GO is the recommended and validated provider for the free tier. Any SMTP relay supporting AUTH LOGIN or AUTH PLAIN is compatible as a substitute.
-
-SMTP2GO is recommended because it has been in continuous operation since 2006, offers 1,000 emails per month at no cost with no credit card required, does not inject branding or tracking into relayed HTML, and works with a personal email address as the sender — no custom domain is required to get started.
-
-SMTP2GO connection parameters:
-
-| Parameter | Value | Notes |
-|---|---|---|
-| `SMTP_HOST` | `mail.smtp2go.com` | Global routing endpoint |
-| `SMTP_PORT` | `587` | STARTTLS. Use 465 for explicit SSL, 2525 if 587 is blocked. |
-| `SMTP_USERNAME` | `<smtp-user>` | Created in the SMTP2GO console under SMTP Users |
-| `SMTP_PASSWORD` | `<smtp-password>` | Distinct from the SMTP2GO account password |
-| `SMTP_FROM` | `<verified-sender>` | A verified email address or custom domain in SMTP2GO |
-
-> **NOTE** — Without a verified custom domain, SMTP2GO applies a rate limit of 25 emails per hour. This is well above the expected volume for a homelab notification system. Verifying a custom domain is recommended for improved deliverability but is not required to start.
-
-A paid SMTP provider will be documented once one has been validated in production. Only providers that have been run by the maintainer will be recommended here.
-
 ---
 
 ## 5. Out-of-Box Experience (OOBE)
@@ -215,7 +184,7 @@ The OOBE covers the full path from a fresh Debian install to a running, configur
 | # | Question / Action | Branches to / Result |
 |---|---|---|
 | **1** | What is your GitHub username or organization? | Stores git provider config. Walks through GitHub org creation if needed. |
-| **2** | Do you have an existing homelab repo, or should I create one? | Existing: ask for repo name and clone it. New: create private repo, scaffold `nodes/` structure, initial commit. |
+| **2** | Do you have an existing homelab repo, or should I create one? | Existing: ask for repo name and clone it. New: create private repo on GitHub, scaffold `nodes/` structure, initial commit. |
 | **3** | What is the hostname and IP address of this control plane node? | Registers the control plane in the hardware node registry. |
 | **4** | Tell me about your workload node(s). Name, IP, and role for each. | Registers each node. Builds the initial Ansible inventory file. |
 | **5** | Do you have a NAS for shared storage? | Yes: collect NAS IP and share paths, write `/etc/fstab` entries. No: configure local `/mnt/appdata` and `/mnt/media`. |
@@ -224,7 +193,7 @@ The OOBE covers the full path from a fresh Debian install to a running, configur
 | **8** | Generating and distributing SSH keys... | Creates ED25519 key pair on control plane. Runs `ssh-copy-id` to each workload node (prompts for password once per node). Tests passwordless login. |
 | **9** | Configuring workload nodes... | Installs Docker on workload nodes that need it. Configures passwordless sudo for the Ansible user. |
 | **10** | Validating connectivity to all nodes... | Runs `ansible all -m ping`. Reports pass/fail per node. Pauses on failure with diagnostic guidance. |
-| **11** | Registering GitHub Actions runner... | Registers a self-hosted runner on the control plane node to the homelab repo. Configures it to run as a system service. |
+| **11** | Registering GitHub Actions runner... | Registers a self-hosted runner on the control plane node to the homelab repo on GitHub. Configures it to run as a system service. |
 | **12** | Where should notification emails go? | Collects SMTP credentials and recipient address. Sends a test email. Confirms receipt before continuing. |
 | **13** | Generating your `.env` and encrypting secrets... | Creates `.env` with all collected config. Initialises git-crypt. Encrypts `.env`. Guides operator to store the key in a password manager before proceeding. |
 | **14** | Committing initial configuration to your homelab repo... | Commits inventory, `.gitattributes`, encrypted `.env`, and node structure. Pushes to GitHub. |
@@ -261,7 +230,6 @@ All services should be protected regardless of which node they run on. The recom
 
 | Surface | Auth Method | Notes |
 |---|---|---|
-| Gitea (via Traefik) | Authentik SSO | Forward auth via static backend pointing to control plane IP. |
 | registry-mcp (via Traefik) | Authentik SSO | Forward auth via static backend pointing to control plane IP. |
 | Control plane direct ports | Network only | Emergency fallback when Traefik/Authentik node is down. Restrict to trusted network devices where possible. |
 | Ansible SSH | ED25519 key auth | Keys generated on the control plane and never leave it. Passwordless sudo on managed nodes. |
@@ -274,14 +242,13 @@ Control plane services are accessible via two paths. The control plane node does
 
 | Path | Available when | Notes |
 |---|---|---|
-| DNS via Traefik static backend on workload node | Traefik node is up | e.g. `git.<your-domain>` routes to `<CONTROL_PLANE_IP>:3000` via static backend. Authentik forward auth applied. |
+| DNS via Traefik static backend on workload node | Traefik node is up | e.g. `registry.<your-domain>` routes to `<CONTROL_PLANE_IP>:8000` via static backend. Authentik forward auth applied. |
 | Direct `<CONTROL_PLANE_IP>:PORT` | Always | Emergency fallback when Traefik/Authentik node is down. Internal network only. |
 
-Static backend entries in Traefik dynamic config (example):
+Static backend entry in Traefik dynamic config (example):
 
 ```yaml
 # nodes/<workload-node>/core/traefik/dynamic/static-backends.yml
-git.<your-domain>       →  <CONTROL_PLANE_IP>:3000   (Gitea)
 registry.<your-domain>  →  <CONTROL_PLANE_IP>:8000   (registry-mcp)
 ```
 
@@ -297,7 +264,7 @@ homelab-registry-mcp is designed to be discovered and adopted by other homelab o
 |---|---|---|
 | `github.com/TeamCastaldi/homelab-registry-mcp` | Public — MIT | Full source. MIT license. |
 | `ghcr.io/teamcastaldi/homelab-registry-mcp` | Public | Docker image. Tagged releases + latest. |
-| Operator homelab repo | Private | Created per-operator by OOBE. Never public. Contains real node config and encrypted secrets. |
+| Operator homelab repo | Private | Created per-operator by OOBE on their own GitHub account. Never public. Contains real node config and encrypted secrets. |
 
 ### 7.2 Public Release Checklist
 
@@ -444,7 +411,7 @@ Complete MCP tool surface across all domains. All tools are callable by any MCP-
 ### 9.2 Accepted Tradeoffs
 
 - Internet required for deployments. GitHub being unreachable blocks the PR-merge-deploy path. Public image pulls are already an internet dependency, so this does not add a new category of risk.
-- Traefik/Authentik dependency for SSO. If the node running Traefik and Authentik is down, SSO-protected URLs for Gitea and registry-mcp are unreachable. Direct IP:Port access on the Pi is the mitigation.
+- Traefik/Authentik dependency for SSO. If the node running Traefik and Authentik is down, SSO-protected URLs for registry-mcp are unreachable. Direct IP:Port access on the Pi is the mitigation.
 - Flat network is the default assumption. Operators who want VLAN segmentation implement it separately.
 - SD card risk on the Pi. Mitigated by storing all persistent state on external storage.
 - GitHub Actions runner must be healthy to trigger automated deploys. Manual Ansible is always available as a fallback.
@@ -478,7 +445,7 @@ Phases are ordered by dependency. Each phase should be executed as a focused ses
 | **A** | Control Plane Bootstrap | Fresh OS on Pi, NFS or local storage mounts, Docker install, static IP confirmed | — |
 | **B** | GitHub Migration | Create TeamCastaldi org, migrate repo to GitHub, set up ghcr.io image publish workflow, configure GitHub Actions runner | A |
 | **C** | git-crypt + Secrets Tools | Encrypt `.env` files in homelab repo, implement `secrets_*` MCP tools | B |
-| **D** | Service Migration | Move Gitea and registry-mcp to control plane node. Update Traefik static backends. Remove old orchestration tooling. | B, C |
+| **D** | Service Migration | Move registry-mcp to control plane node. Update Traefik static backends. Remove old orchestration tooling. | B, C |
 | **E** | Ansible Deploy Role | Write docker-stack-deploy role. Wire GitHub Actions workflow to trigger Ansible on PR merge. | D |
 | **F** | Email Notifications | Implement email NotificationProvider via SMTP2GO. Templated HTML with Approve / Request Changes buttons. | D |
 | **G** | OOBE | Implement `oobe_*` tool surface. End-to-end test on a clean Pi. Full path from fresh OS to running registry. | E, F |
@@ -492,9 +459,7 @@ Phases are ordered by dependency. Each phase should be executed as a focused ses
 
 - `docs/agentic-design-intent.md` — MCP architectural philosophy and standing policies
 - `docs/plans/project-plan-registry-mcp.md` — Original phased project plan (Phases 1–9)
-- `docs/plans/plan-gitea-write-path.md` — PR-based remediation pipeline design
 - `docs/plans/plan-ansibleSetup.md` — Ansible control node setup reference
-- `documentation/plans/plan-gitcryptMigration.md` — git-crypt migration plan
 - SMTP2GO documentation — https://www.smtp2go.com/docs/
 
 ---
