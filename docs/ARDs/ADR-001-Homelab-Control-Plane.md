@@ -104,8 +104,8 @@ If a NAS is available, mount its shares on the control plane node via `/etc/fsta
 
 ```
 # /etc/fstab — add these lines on the control plane node
-<NAS_IP>:/appdata  /mnt/appdata  nfs  defaults  0  0
-<NAS_IP>:/media    /mnt/media    nfs  defaults  0  0
+<NAS_IP>:/Volume1/appdata /mnt/appdata nfs nfsvers=4.1,_netdev,nofail,x-systemd.automount,x-systemd.idle-timeout=0,noatime,hard 0 0
+<NAS_IP>:/Volume2/media /mnt/media nfs nfsvers=4.1,_netdev,nofail,x-systemd.automount,x-systemd.idle-timeout=0,noatime,soft,timeo=14,retrans=2 0 0
 ```
 
 If no NAS is available, create local directories and accept the single-point-of-failure tradeoff:
