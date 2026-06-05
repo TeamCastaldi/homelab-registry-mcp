@@ -1,5 +1,8 @@
 FROM python:3.12-slim
 
+# git-crypt for encrypted .env file management (Phase C secrets tools)
+RUN apt-get update && apt-get install -y --no-install-recommends git git-crypt && rm -rf /var/lib/apt/lists/*
+
 # uv for reproducible, fast dependency installs
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 

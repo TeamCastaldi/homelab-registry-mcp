@@ -15,6 +15,10 @@ services:
       - "127.0.0.1:8765:8765"
     volumes:
       - registry-data:/data
+      # Homelab repo (git-crypt encrypted .env files + Ansible inventory).
+      # Lives on the Pi's local filesystem — GitHub is the backup, not the NAS.
+      # Path must match SECRETS_REPO_PATH in .env.
+      - /opt/homelab:/opt/homelab:rw
       # Read-only Docker socket: lets DockerDiscoverySource enumerate containers
       # with traefik.enable=true. Discovery is gated on DOCKER_BASE_URL below.
       - /var/run/docker.sock:/var/run/docker.sock:ro

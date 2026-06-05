@@ -28,6 +28,7 @@ from registry_mcp.tools import (
     register_linking_tools,
     register_proposal_tools,
     register_registry_tools,
+    register_secrets_tools,
 )
 
 
@@ -98,6 +99,7 @@ def build_server(settings: Settings | None = None) -> FastMCP:
     register_linking_tools(mcp, store, settings, hardware_store=hardware_store)
     register_hardware_tools(mcp, store, hardware_store)
     register_proposal_tools(mcp, proposal_engine, proposal_store, engine, store)
+    register_secrets_tools(mcp, settings)
 
     @mcp.tool()
     def health() -> dict[str, str]:

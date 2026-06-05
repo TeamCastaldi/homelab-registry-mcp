@@ -146,6 +146,10 @@ at all, and `PROPOSAL_AUTO_CREATE=true` for unattended creation.
 | `PROPOSAL_COMPOSE_PATH_TEMPLATE` | `nodes/{node}/{service}/compose.yaml` | Repo path an app service maps to |
 | `NORMALIZATION_ENABLED` | `false` | Reserved; normalization engine is a later Phase 8 increment |
 | `NORMALIZATION_SCHEDULE` | `weekly` | Reserved |
+| `SECRETS_ENABLED` | `true` | Enables `secrets_*` MCP tools (Phase C git-crypt integration) |
+| `SECRETS_REPO_PATH` | unset | Path to the cloned private homelab repo on this node |
+| `SECRETS_KEY_PATH` | unset | Path to the exported git-crypt key file (priority over env var) |
+| `SECRETS_GIT_CRYPT_KEY` | unset | Base64-encoded git-crypt key bytes (fallback when no key file) |
 | `EVENT_RETENTION_DAYS` | `90` | Old events purged on startup |
 | `LOG_LEVEL` | `INFO` | |
 
