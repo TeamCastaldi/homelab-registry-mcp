@@ -91,6 +91,68 @@ These are the inputs validated during the first real-world OOBE proving run
 | Runner label | Assigned during registration, stored in registry config | Control plane |
 | Git global config | Sets `user.name` and `user.email` | Control plane + each node |
 | `.gitattributes` | Ensures `**/.env filter=git-crypt diff=git-crypt` is present | Homelab repo |
+| Runner → node SSH keypair | Dedicated keypair for runner-to-host deploys; private key stored as `RUNNER_SSH_PRIVATE_KEY` Actions secret | Control plane |
+| Deploy workflow | `.github/workflows/deploy.yml` committed to homelab repo | Homelab repo |
+
+### Runner installation (manual until Phase E Ansible role)
+
+The runner is installed on the control plane node under `/opt/actions-runner`.
+This location is deliberate — not the default `~/actions-runner` — so it is
+owned at the system level and not tied to a user's home directory.
+
+```bash
+sudo mkdir -p /opt/actions-runner
+sudo chown {USER}:{USER} /opt/actions-runner
+cd /opt/actions-runner
+
+# Download ARM64 binary (Raspberry Pi / control plane)
+curl -o actions-runner-linux-arm64-{VERSION}.tar.gz -L \
+  https://github.com/actions/runner/releases/download/v{VERSION}/actions-runner-linux-arm64-{VERSION}.tar.gz
+tar xzf ./actions-runner-linux-arm64-{VERSION}.tar.gz
+
+# Configure with explicit name and label
+./config.sh \
+  --url https://github.com/{GITHUB_USER}/{HOMELAB_REPO} \
+  --token {REGISTRATION_TOKEN} \
+  --name {HOSTNAME} \
+  --labels {HOSTNAME} \
+  --unattended
+
+# Install and start as systemd service
+sudo ./svc.sh install {USER}
+sudo ./svc.sh start
+sudo ./svc.sh status
+```
+
+**Architecture note:** The runner binary must match the control plane CPU
+architecture. GitHub's default selection is x64. Raspberry Pi requires ARM64.
+Select Linux → ARM64 on the GitHub runner registration page.
+
+**Token note:** The registration token expires after 60 minutes. Generate it
+immediately before running `config.sh` and complete registration in the same
+session.
+
+### Runner → node SSH keypair
+
+The runner SSHes to target hosts to execute deploys. A dedicated keypair is
+used — separate from the operator's personal SSH key.
+
+```bash
+# On control plane
+ssh-keygen -t ed25519 -C "runner@{domain}" -f ~/.ssh/id_ed25519_runner
+# No passphrase — required for unattended automation
+
+# Copy public key to each target host
+ssh-copy-id -i ~/.ssh/id_ed25519_runner.pub {USER}@{HOST_IP}
+
+# Test
+ssh -i ~/.ssh/id_ed25519_runner {USER}@{HOST_IP} "echo success"
+```
+
+Store the private key in Vaultwarden as `SSH Key - {hostname} Runner (private)`.
+Add it as a GitHub Actions repository secret named `RUNNER_SSH_PRIVATE_KEY`.
+The deploy workflow writes it to a temp file, uses it, and deletes it in the
+same job step (`if: always()` ensures cleanup on failure too).
 
 ### Ansible boundary
 
@@ -131,6 +193,57 @@ nodes/
   variables sourced from `.env`
 - `compose.yaml` uses `${PROXY_NETWORK:-proxy-net}` for the proxy network name,
   never a hardcoded string
+
+---
+
+## Deploy Workflow
+
+The deploy workflow lives at `.github/workflows/deploy.yml` in the homelab
+config repo. It is the CD layer that connects a Git push to a running service
+on a target host.
+
+### Trigger
+
+Only fires on pushes to `main` that include changes under `nodes/`. Pushes that
+only touch `.github/`, `docs/`, or other non-node paths do not trigger a deploy.
+
+### Change detection
+
+The `detect-changes` job compares `HEAD~1` to `HEAD` and extracts unique
+`{node}/{stack}` pairs from changed file paths. Only stacks with actual file
+changes get deployed. A push touching `nodes/panoptichron/convertx/compose.yaml`
+deploys only ConvertX on Panoptichron — nothing else.
+
+### Deploy job
+
+Runs on the `watchtower` runner (targeted by label). For each changed stack:
+
+1. Resolves the node name to a host IP via a hardcoded `case` statement
+2. Writes the `RUNNER_SSH_PRIVATE_KEY` secret to a temp file
+3. SSHes to the target host and runs:
+   ```bash
+   cd ~/homelab/nodes/{node}/{stack}
+   git pull
+   docker compose pull
+   docker compose up -d
+   ```
+4. Deletes the temp SSH key file (`if: always()` — runs even on failure)
+
+### Node → IP mapping
+
+Currently hardcoded in the workflow with a `TODO` comment to move to GitHub
+Actions variables or registry config during OOBE implementation:
+
+| Node | IP |
+|---|---|
+| `panoptichron` | `10.0.0.201` |
+| `heimdall` | `10.0.0.151` |
+| `waldorf` | `10.0.0.251` |
+
+### Actions version policy
+
+Use `actions/checkout@v4.2.2` or later. Node.js 20 actions are deprecated as
+of June 2026; Node.js 24 becomes the default on June 16th, 2026.
 
 ---
 
@@ -201,6 +314,10 @@ here to prevent future operators from hitting the same problems.
 | base64 decode fails | Trailing stray character in copy/paste (`==c`) | Strip trailing characters, ensure string ends with `==` or `=` or no padding |
 | `git clone` returns "Repository not found" | SSH key registered to personal account but clone URL pointed to org | Use `git@github.com:{GITHUB_USER}/{REPO}.git` not org URL |
 | Container up but browser can't connect | Port not published to host | Add `ports` mapping; remove when Traefik is configured |
+| Runner binary fails with "Exec format error" | x64 binary downloaded for ARM64 host (Raspberry Pi) | Select Linux → ARM64 on GitHub runner registration page |
+| `git push` rejected with "fetch first" | Remote has commits not present locally (e.g. committed from another node) | `git pull --rebase` then push |
+| `git pull --rebase` leaves working directory path invalid | Rebased while inside a deep subdirectory | `cd` back to repo root and push again |
+| Actions warning: Node.js 20 deprecated | `actions/checkout@v4` uses Node.js 20 | Pin to `actions/checkout@v4.2.2` or later |
 
 ---
 
@@ -208,7 +325,8 @@ here to prevent future operators from hitting the same problems.
 
 | Version | Date | Changes |
 |---|---|---|
-| v0.1 | 2026-06-08 | Initial design. First proving run: ConvertX deployed to Panoptichron from GitHub homelab repo with git-crypt encrypted secrets. Runner setup deferred to next session. |
+| v0.1 | 2026-06-08 | Initial design. First proving run: ConvertX deployed to Panoptichron from GitHub homelab repo with git-crypt encrypted secrets. Runner setup deferred. |
+| v0.2 | 2026-06-08 | Runner installed on Watchtower (ARM64, systemd, label: `watchtower`). Runner → node SSH keypair established. Deploy workflow committed to homelab repo. First automated deploy succeeded: ConvertX on Panoptichron in 18 seconds. Full CD pipeline proven end-to-end. |
 
 ---
 
@@ -216,10 +334,13 @@ here to prevent future operators from hitting the same problems.
 
 | Item | Notes |
 |---|---|
-| Runner installation steps | Watchtower, systemd service, label assignment — next session |
-| Ansible role for runner registration | Phase E; OOBE invokes this role |
+| Ansible role for runner registration | Phase E; OOBE invokes this role. Manual steps documented in this ADR until then. |
 | OOBE CLI implementation | Not yet implemented; currently a manual process documented here |
 | Multi-node git config | `user.name` / `user.email` must be set on every node — bake into Ansible bootstrap role |
 | Bitwarden SSH agent | Future improvement for workstation; not applicable to headless nodes |
 | PROXY_NETWORK in compose template | Pattern defined; not yet enforced by OOBE validation |
 | Traefik on Panoptichron | Deferred; port 3000 exposed directly in the interim |
+| Node → IP mapping | Hardcoded in deploy workflow; move to GitHub Actions variables or registry config when OOBE CLI is implemented |
+| MCP `ansible` apply mode | Wiring the MCP write path to the proven GitHub Actions deploy pattern — next phase |
+| Repo clone path convention | Standardized to `~/homelab` on all nodes. Do not use org-namespaced paths. |
+| Komodo migration | Prod services (Heimdall 26, Waldorf 6) still managed by Komodo. Migrate incrementally once first Heimdall service is proven via new pattern. |
