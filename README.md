@@ -89,8 +89,9 @@ In Claude Desktop, add an MCP server with the same URL under Settings.
 
 ## Documentation
 
-- [docs/architecture.md](docs/architecture.md) — layout, the full tool surface,
-  logging, seeding.
-- [docs/development.md](docs/development.md) — local development and smoke test.
-- [docs/agentic-design-intent.md](docs/agentic-design-intent.md) — design
-  rationale and standing policies.
+- [docs/ARDs/ADR-001-Homelab-Control-Plane.md](docs/ARDs/ADR-001-Homelab-Control-Plane.md) — architecture, design decisions, and phased roadmap
+- [docs/ARDs/ADR-002-Client-Interfaces.md](docs/ARDs/ADR-002-Client-Interfaces.md) — MCP client integration and Discord bot interface decisions
+- [docs/ARDs/ARD-003-OOBE-Decisions.md](docs/ARDs/ARD-003-OOBE-Decisions.md) — out-of-box experience decisions
+- [docs/ARDs/ARD-004-Upstream-Version-Detection-and-Update-Proposals.md](docs/ARDs/ARD-004-Upstream-Version-Detection-and-Update-Proposals.md) — upstream version detection and update proposal design
+- [docs/SOPs/SOP-001-Deploy-New-Service.md](docs/SOPs/SOP-001-Deploy-New-Service.md) — runbook for deploying a new service
+- [CLAUDE.md](CLAUDE.md) — developer guide: commands, architecture, conventions

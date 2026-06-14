@@ -2,13 +2,13 @@
 
 ## Context
 
-Phase D moves registry-mcp from Heimdall to Watchtower (the dedicated control plane Pi at `10.0.0.200`). Traefik stays on Heimdall and routes `registry-mcp.castaldifamily.com` to Watchtower via a static backend — no Docker label magic, just an IP:port pointer. Komodo is left running and untouched.
+Phase D moves registry-mcp from Heimdall to Watchtower (the dedicated control plane Pi at `<watchtower-ip>`). Traefik stays on Heimdall and routes `registry-mcp.<your-domain>` to Watchtower via a static backend — no Docker label magic, just an IP:port pointer. Komodo is left running and untouched.
 
 Known infrastructure:
-- **Watchtower**: Pi at `10.0.0.200`, registry-mcp will run here
+- **Watchtower**: Pi at `<watchtower-ip>`, registry-mcp will run here
 - **Heimdall**: Traefik v3.6.5 on `proxy-net`, dynamic config at `/mnt/appdata/komodo/repos/heimdall/homelab/nodes/heimdall/core/traefik/dynamic/` (Komodo-managed git repo, mounted `:ro` into Traefik)
 - **TLS**: Cloudflare DNS challenge (`certResolver: cloudflare`)
-- **Domain**: `castaldifamily.com`
+- **Domain**: `<your-domain>`
 - **Old registry-mcp**: was on Heimdall, already shut down — no data migration needed (starting fresh)
 
 ---
@@ -36,13 +36,13 @@ Create a new dynamic config file in the directory Traefik already watches:
 
 ```yaml
 # registry-mcp.yml
-# Routes registry-mcp.castaldifamily.com → Watchtower (control plane Pi)
+# Routes registry-mcp.<your-domain> → Watchtower (control plane Pi)
 # No auth middleware — MCP clients cannot follow Authentik redirect flows.
 # LAN-only by design; do not add ForwardAuth until a token/mTLS strategy lands.
 http:
   routers:
     registry-mcp:
-      rule: "Host(`registry-mcp.castaldifamily.com`)"
+      rule: "Host(`registry-mcp.<your-domain>`)"
       entrypoints:
         - websecure
       tls:
@@ -53,7 +53,7 @@ http:
     registry-mcp-svc:
       loadBalancer:
         servers:
-          - url: "http://10.0.0.200:8765"
+          - url: "http://<watchtower-ip>:8765"
 ```
 
 Traefik watches `/dynamic` with a file provider — the new file is picked up immediately, no restart needed.
@@ -67,7 +67,7 @@ git -C /mnt/appdata/komodo/repos/heimdall/homelab remote -v
 
 ## Part 3 — Seed the new homelab repo structure (on Watchtower)
 
-The new `ncastaldi/homelab` repo at `/opt/homelab` needs the same path structure so Phase E (Ansible) has a home. Create the skeleton now:
+The new `<your-org>/homelab` repo at `/opt/homelab` needs the same path structure so Phase E (Ansible) has a home. Create the skeleton now:
 
 ```bash
 mkdir -p /opt/homelab/nodes/heimdall/core/traefik/dynamic
@@ -93,8 +93,8 @@ docker compose logs -f registry-mcp   # watch for "scheduler_started"
 
 ## Part 5 — DNS
 
-`registry-mcp.castaldifamily.com` needs a DNS entry pointing to Heimdall (Traefik's host), not Watchtower directly. Check whether this is:
-- **Local DNS** (AdGuard/Pi-hole on the LAN) — add an A record for `registry-mcp.castaldifamily.com` → Heimdall's LAN IP
+`registry-mcp.<your-domain>` needs a DNS entry pointing to Heimdall (Traefik's host), not Watchtower directly. Check whether this is:
+- **Local DNS** (AdGuard/Pi-hole on the LAN) — add an A record for `registry-mcp.<your-domain>` → Heimdall's LAN IP
 - **Cloudflare public DNS** — add an A record there (but ADR says LAN-only, so local DNS is preferred)
 
 Determine which DNS is authoritative for LAN devices before proceeding.
@@ -103,9 +103,9 @@ Determine which DNS is authoritative for LAN devices before proceeding.
 
 ## Verification
 
-1. From Heimdall: `curl -v http://10.0.0.200:8765/` — confirms Watchtower port is reachable
-2. From any LAN device: `curl -v https://registry-mcp.castaldifamily.com/` — confirms Traefik routing + TLS
-3. Traefik dashboard at `https://proxy.castaldifamily.com/dashboard/` — confirm `registry-mcp` router appears
+1. From Heimdall: `curl -v http://<watchtower-ip>:8765/` — confirms Watchtower port is reachable
+2. From any LAN device: `curl -v https://registry-mcp.<your-domain>/` — confirms Traefik routing + TLS
+3. Traefik dashboard at `https://proxy.<your-domain>/dashboard/` — confirm `registry-mcp` router appears
 4. `docker compose logs registry-mcp` on Watchtower — confirm `scheduler_started` and no errors
 5. Call `secrets_status` via an MCP client — confirm it returns repo state
 
