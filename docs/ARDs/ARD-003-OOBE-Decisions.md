@@ -51,12 +51,12 @@ These are the inputs validated during the first real-world OOBE proving run
 
 | Input | Description | Example |
 |---|---|---|
-| `GITHUB_USER` | GitHub username (personal account) | `ncastaldi` |
+| `GITHUB_USER` | GitHub username (personal account) | `<your-github-username>` |
 | `HOMELAB_REPO` | Name of the private homelab config repo | `homelab` |
 | `RUNNER_LABEL` | Label assigned to the self-hosted Actions runner | `watchtower` |
 | `PROXY_NETWORK` | Name of the Docker proxy network on each host | `proxy-net` |
 | `GIT_USER_NAME` | Git commit author name | `Nathan Castaldi` |
-| `GIT_USER_EMAIL` | Git commit author email | `nathan@castaldifamily.com` |
+| `GIT_USER_EMAIL` | Git commit author email | `<operator-email>` |
 
 **Notes:**
 - The homelab config repo lives under the operator's personal GitHub account,
@@ -236,9 +236,9 @@ Actions variables or registry config during OOBE implementation:
 
 | Node | IP |
 |---|---|
-| `panoptichron` | `10.0.0.201` |
-| `heimdall` | `10.0.0.151` |
-| `waldorf` | `10.0.0.251` |
+| `panoptichron` | `<ip-address>` |
+| `heimdall` | `<ip-address>` |
+| `waldorf` | `<ip-address>` |
 
 ### Actions version policy
 
