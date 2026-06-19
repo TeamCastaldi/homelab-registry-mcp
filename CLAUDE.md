@@ -26,6 +26,7 @@ src/registry_mcp/
 ├── models/
 │   ├── service.py         # Service, ServiceSource (SQLModel tables)
 │   ├── event.py           # ChangeEvent, DiscoveryEvent (audit log)
+│   ├── hardware.py        # HardwareNode, HardwareChangeEvent, NodeRole, NodeStatus
 │   └── proposal.py        # Proposal, FindingType, ProposalStatus (Phase 8)
 ├── registry/
 │   ├── store.py           # SQLite CRUD + event recording
@@ -38,6 +39,8 @@ src/registry_mcp/
 ├── dspy/                  # reasoning layer (Phase 7) — DSPy enrichment, confidence-gated
 │   ├── signatures.py      # ResolveServiceIdentity, InferServiceMetadata, SummarizeAccessAudit, GenerateRemediationPatch
 │   └── reasoner.py        # Reasoner: lazy LM config, gates, graceful degradation
+├── hardware/              # hardware node registry (Phase 9a)
+│   └── store.py           # HardwareStore: node CRUD, service linking, capacity summary
 ├── proposal/              # proposal layer (Phase 8) — opens PRs, never merges/writes FS
 │   ├── generator.py       # calls DSPy GenerateRemediationPatch + confidence/YAML gates
 │   ├── engine.py          # create per finding, verification sweep, after_discovery hook
@@ -53,6 +56,8 @@ src/registry_mcp/
 │   ├── events.py          # query change + discovery logs
 │   ├── discovery.py       # run_now / status / list_stale
 │   ├── linking.py         # service_link_authentik + service_get_full_context
+│   ├── hardware.py        # hardware-add-node/get/list/update/delete + link/capacity tools
+│   ├── secrets.py         # secrets_status/encrypt/decrypt/add/rotate/list_keys (Phase C)
 │   └── proposal.py        # proposal_create/list_open/get/cancel/verify (Phase 8)
 ├── logging/events.py      # structlog config with secret redaction
 └── seed.py                # YAML bootstrap logic
@@ -78,6 +83,21 @@ tests/                     # mirrors src/ layout; uses in-memory SQLite
 - Authentik proxy provider `external_host` matched against Traefik router rule hosts
 - Traefik `service_name` matched against Docker container labels
 - `service_get_full_context(id)` returns service + router + auth app + recent events in one call
+
+**Hardware node registry (Phase 9a, `hardware/`):** curated inventory of physical and virtual
+nodes, stored in the same SQLite database as services.
+- `HardwareNode` — one row per node: hostname, role (`pve_host`, `docker_host`, `nas`, `pi`, etc.),
+  status (`confirmed`/`unconfirmed`/`stale`/`offline`), IP/MAC, CPU, RAM, GPU, structured disk and
+  storage-pool lists, Ansible inventory fields, and a `HardwareChangeEvent` audit log.
+- 11 MCP tools: `hardware-add-node`, `hardware-get-node`, `hardware-list-nodes`,
+  `hardware-update-node`, `hardware-delete-node`, `hardware-link-service`,
+  `hardware-node-services`, `hardware-list-unconfirmed`, `hardware-list-stale`,
+  `hardware-capacity-summary`, and a stub `hardware-discover-now` (Phase 9b).
+- Two MCP resources: `hardware://all` (index) and `hardware://{node_id}` (detail).
+- Services can be manually linked to nodes via `hardware-link-service`; the link is
+  surfaced in `service_get_full_context()`.
+- Live Ansible fact-gather discovery (`hardware-discover-now`) is a Phase 9b stub —
+  registration is currently manual via `hardware-add-node`.
 
 **Reasoning layer (Phase 7, `dspy/`):** DSPy enrichment modules, off by default
 (`DSPY_ENABLED=false`). They *reason and return typed results — they never write*.
@@ -197,6 +217,11 @@ Pre-reqs: Traefik on external `traefik` Docker network, DNS for `registry-mcp.<y
 ## Current Status
 
 - **Phase 7 complete**: cross-source linking (Authentik ↔ Traefik ↔ Docker), `service_get_full_context()`, and the DSPy reasoning layer (`ResolveServiceIdentity`, `InferServiceMetadata`, `SummarizeAccessAudit`) — off by default via `DSPY_ENABLED`
-- **Phase 8 in progress**: security write path landed — `GenerateRemediationPatch`, Gitea + Ntfy/Null providers, `Proposal` model/store, proposal engine (create + verification sweep), and the `proposal_*` tools. Off by default (`GIT_*` unset, `PROPOSAL_AUTO_CREATE=false`); see ADR 0002.
+- **Phase 8 in progress**: security write path landed — `GenerateRemediationPatch`, Gitea + Ntfy/Null providers, `Proposal` model/store, proposal engine (create + verification sweep), and the `proposal_*` tools. Off by default (`GIT_*` unset, `PROPOSAL_AUTO_CREATE=false`); see ADR-002.
 - **Phase 8 remaining**: GitHub provider; normalization path (`NormalizeConfigFile`, yamllint, `proposal_normalize`); flipping `PROPOSAL_DRY_RUN=false` against the homelab repo (a deliberate human step); runbooks, cold-restore testing, Ansible provisioning
-- **Deferred**: network probe discovery (`DISCOVERY_NETWORK_ENABLED=false`), real auth (Bearer/mTLS)
+- **Phase 9a complete**: hardware node registry — `HardwareNode` model + `HardwareStore` + 11 MCP tools registered in `server.py`; manual registration only (live discovery is Phase 9b)
+- **Phase C complete**: git-crypt secrets integration — 6 `secrets_*` MCP tools, `scripts/setup-homelab-repo.sh` bootstrap, `git-crypt` in Dockerfile
+- **Phase D complete**: migrated from Heimdall to Watchtower (Pi at `10.0.0.200`); Traefik static backend routes `registry-mcp.castaldifamily.com` → Watchtower; GitHub Actions self-hosted runner operational; first automated CD deploy proven (ConvertX on Panoptichron in 18s); `docker-compose.yml` binds `0.0.0.0:8765`
+- **ADR-004 proposed**: upstream version detection — `HomelabrepoDiscoverySource`, `UpstreamRegistrySource`, `ResolveLatestTag` DSPy module, `IMAGE_UPDATE` proposal type — not yet implemented
+- **OOBE CLI** (ADR-003): fully documented but not yet implemented; currently a manual process
+- **Deferred**: network probe discovery (`DISCOVERY_NETWORK_ENABLED=false`), real auth (Bearer/mTLS), Phase 9b live Ansible fact-gather, multi-node Ansible bootstrap (Phase E)
