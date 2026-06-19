@@ -90,7 +90,7 @@ git push
 
 #### Step A5: Verify deployment
 
-1. Open the Actions tab on `github.com/ncastaldi/homelab`
+1. Open the Actions tab on `github.com/<your-org>/homelab`
 2. Confirm the `Deploy Changed Stacks` workflow triggered
 3. Confirm the `deploy (<node>/<service>)` job completed successfully
 4. Verify the service is reachable at `http://<node-ip>:<port>`

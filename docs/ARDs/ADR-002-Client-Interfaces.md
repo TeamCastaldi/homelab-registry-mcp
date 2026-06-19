@@ -27,7 +27,7 @@ Two complementary channels address this:
 - A web UI provides a persistent, browser-based view of registry state that is always available without opening a chat session. It is the natural home for a status dashboard and, over time, for interactive controls.
 - A Discord bot brings registry awareness into a communication platform many homelab operators already use. It makes the most common queries available as chat commands and can deliver notifications to a channel.
 
-A Discord bot already exists at github.com/ncastaldi/frank-discord. It is functional but not yet ready for public adoption. This ADR formalizes its architecture, defines its relationship to the MCP, and establishes the migration path to the TeamCastaldi organization.
+A Discord bot already exists at github.com/TeamCastaldi/frank-discord. It is functional but not yet ready for public adoption. This ADR formalizes its architecture, defines its relationship to the MCP, and establishes the migration path to the TeamCastaldi organization.
 
 ---
 
@@ -114,7 +114,7 @@ Phase 1 and Phase 2 decisions should not be made in ways that foreclose Phase 3.
 
 | | |
 |---|---|
-| **Current repository** | `github.com/ncastaldi/frank-discord` |
+| **Current repository** | `github.com/TeamCastaldi/frank-discord` |
 | **Target repository** | `github.com/TeamCastaldi/homelab-discord-bot` |
 | **Docker image** | `ghcr.io/teamcastaldi/homelab-discord-bot:latest` |
 | **Current status** | Functional. Commands work. Formatting needs improvement. Not yet ready for public adoption. |
@@ -179,7 +179,7 @@ MCP_API_TOKEN=<service-account-token>
 
 ### 5.6 Migration from frank-discord
 
-The existing bot at github.com/ncastaldi/frank-discord migrates to github.com/TeamCastaldi/homelab-discord-bot. The migration involves:
+The existing bot at github.com/TeamCastaldi/frank-discord migrates to github.com/TeamCastaldi/homelab-discord-bot. The migration involves:
 
 - Rename and transfer the repository to the TeamCastaldi org
 - Refactor command handlers to call MCP tools via the API rather than any direct data access
@@ -262,7 +262,7 @@ These phases are sequenced after ADR-001 Phase H (public release of the core MCP
 ## 10. References
 
 - ADR-001: Homelab Control Plane — Full Vision (companion document)
-- `github.com/ncastaldi/frank-discord` — current Discord bot repository
+- `github.com/TeamCastaldi/frank-discord` — current Discord bot repository
 - discord.py documentation — https://discordpy.readthedocs.io
 - Discord Embed documentation — https://discord.com/developers/docs/resources/message#embed-object
 

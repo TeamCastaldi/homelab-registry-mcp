@@ -97,9 +97,9 @@ In Claude Desktop, add an MCP server with the same URL under Settings.
 
 - [CLAUDE.md](CLAUDE.md) — project structure, architecture, all environment
   variables, key conventions, and current phase status. Start here.
-- [docs/ARDs/](docs/ARDs/) — architecture decision records (control plane design,
-  client interfaces, OOBE, upstream version detection).
-- [docs/SOPs/SOP-001-Deploy-New-Service.md](docs/SOPs/SOP-001-Deploy-New-Service.md) —
-  runbook for deploying a new service to an onboarded node.
-- [docs/plans/phase-d.md](docs/plans/phase-d.md) — migration plan: Heimdall →
-  Watchtower deployment with Traefik static backend.
+- [docs/ARDs/ADR-001-Homelab-Control-Plane.md](docs/ARDs/ADR-001-Homelab-Control-Plane.md) — architecture, design decisions, and phased roadmap
+- [docs/ARDs/ADR-002-Client-Interfaces.md](docs/ARDs/ADR-002-Client-Interfaces.md) — MCP client integration and Discord bot interface decisions
+- [docs/ARDs/ARD-003-OOBE-Decisions.md](docs/ARDs/ARD-003-OOBE-Decisions.md) — out-of-box experience decisions
+- [docs/ARDs/ARD-004-Upstream-Version-Detection-and-Update-Proposals.md](docs/ARDs/ARD-004-Upstream-Version-Detection-and-Update-Proposals.md) — upstream version detection and update proposal design
+- [docs/SOPs/SOP-001-Deploy-New-Service.md](docs/SOPs/SOP-001-Deploy-New-Service.md) — runbook for deploying a new service to an onboarded node
+- [docs/plans/phase-d.md](docs/plans/phase-d.md) — migration plan: Heimdall → Watchtower deployment with Traefik static backend
