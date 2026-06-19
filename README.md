@@ -23,6 +23,9 @@ query and act on.
 - Read-only tools for Traefik and Authentik (routers, middlewares, applications,
   providers, outposts, policies, the audit log) plus a curated registry and
   append-only change and discovery logs.
+- Hardware node inventory: register physical and virtual nodes with role, IP,
+  CPU/RAM/storage specs, and storage-pool capacity; link services to nodes;
+  query aggregate capacity across the lab.
 - Optional LLM reasoning (off by default) for fuzzy cross-source matching,
   metadata enrichment, and access-audit summaries.
 
@@ -32,6 +35,9 @@ query and act on.
   fix, notifies you, and confirms the fix on the next discovery pass. The server
   writes to Git only — it never merges, deploys, or edits files directly, and a
   human reviews every change.
+- Manages encrypted secrets in the homelab Git repo via `git-crypt`: read, add,
+  rotate, and list keys in `.env` files without the operator touching the command
+  line.
 
 ## How to run
 
@@ -89,8 +95,11 @@ In Claude Desktop, add an MCP server with the same URL under Settings.
 
 ## Documentation
 
-- [docs/architecture.md](docs/architecture.md) — layout, the full tool surface,
-  logging, seeding.
-- [docs/development.md](docs/development.md) — local development and smoke test.
-- [docs/agentic-design-intent.md](docs/agentic-design-intent.md) — design
-  rationale and standing policies.
+- [CLAUDE.md](CLAUDE.md) — project structure, architecture, all environment
+  variables, key conventions, and current phase status. Start here.
+- [docs/ARDs/](docs/ARDs/) — architecture decision records (control plane design,
+  client interfaces, OOBE, upstream version detection).
+- [docs/SOPs/SOP-001-Deploy-New-Service.md](docs/SOPs/SOP-001-Deploy-New-Service.md) —
+  runbook for deploying a new service to an onboarded node.
+- [docs/plans/phase-d.md](docs/plans/phase-d.md) — migration plan: Heimdall →
+  Watchtower deployment with Traefik static backend.
