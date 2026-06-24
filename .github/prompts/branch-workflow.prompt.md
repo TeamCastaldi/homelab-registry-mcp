@@ -4,9 +4,9 @@ description: "Interactive menu for git branch-based development workflow with co
 
 ## Config
 <!-- Fill in once when you set up this repo -->
-TEST_COMMAND: pytest tests/ -v
-LINT_COMMAND: ruff check .
-SRC_ROOT: backend/
+TEST_COMMAND: uv run pytest
+LINT_COMMAND: uv run ruff check .
+SRC_ROOT: src/registry_mcp/
 DOCS_ROOT: docs/
 ADR_PATH: docs/ARDs/
 SNAPSHOT_PATH: docs/session-history/

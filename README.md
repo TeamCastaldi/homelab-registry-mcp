@@ -103,3 +103,6 @@ In Claude Desktop, add an MCP server with the same URL under Settings.
 - [docs/ARDs/ARD-004-Upstream-Version-Detection-and-Update-Proposals.md](docs/ARDs/ARD-004-Upstream-Version-Detection-and-Update-Proposals.md) — upstream version detection and update proposal design
 - [docs/SOPs/SOP-001-Deploy-New-Service.md](docs/SOPs/SOP-001-Deploy-New-Service.md) — runbook for deploying a new service to an onboarded node
 - [docs/plans/phase-d.md](docs/plans/phase-d.md) — migration plan: Heimdall → Watchtower deployment with Traefik static backend
+- [CONTRIBUTING.md](CONTRIBUTING.md) — branch naming, commit format, and the local checks to run before a PR
+- [SECURITY.md](SECURITY.md) — security posture, supported versions, and how to report a vulnerability
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — expected conduct in project spaces

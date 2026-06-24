@@ -4,8 +4,8 @@ description: "Structured debugging workflow — Observe, Theorize, Act. Use when
 
 ## Config
 <!-- Fill in once when you set up this repo -->
-TEST_COMMAND: pytest tests/ -v
-SRC_ROOT: backend/
+TEST_COMMAND: uv run pytest
+SRC_ROOT: src/registry_mcp/
 LOG_PATH: logs/
 
 ---
