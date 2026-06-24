@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -9,6 +10,35 @@ from mcp.server.fastmcp import FastMCP
 from registry_mcp.hardware.store import DuplicateNodeError, HardwareStore
 from registry_mcp.models.hardware import HardwareNode, NodeRole
 from registry_mcp.registry import RegistryStore
+
+
+def summarize_discovery_status(nodes: list[HardwareNode]) -> dict[str, Any]:
+    """Aggregate registry state for ``hardware-discovery-status``: node counts by
+    status and the most recent confirmation/sighting. Pure function over a node
+    list so it can be unit-tested without the MCP server. Live push-mode
+    fact-gather remains Phase 9b."""
+    by_status: dict[str, int] = {}
+    last_confirmed: datetime | None = None
+    last_seen: datetime | None = None
+    for node in nodes:
+        # str() keeps the key JSON-safe even if status is a StrEnum.
+        key = str(node.status)
+        by_status[key] = by_status.get(key, 0) + 1
+        # Compare datetimes directly — comparing ISO strings is brittle across
+        # differing tz offsets — and serialize once at the end.
+        if node.last_confirmed_at is not None and (
+            last_confirmed is None or node.last_confirmed_at > last_confirmed
+        ):
+            last_confirmed = node.last_confirmed_at
+        if node.last_seen_at is not None and (last_seen is None or node.last_seen_at > last_seen):
+            last_seen = node.last_seen_at
+    return {
+        "total_nodes": len(nodes),
+        "by_status": by_status,
+        "last_confirmed_at": last_confirmed.isoformat() if last_confirmed else None,
+        "last_seen_at": last_seen.isoformat() if last_seen else None,
+        "push_discovery": "not_implemented (Phase 9b)",
+    }
 
 
 def register_hardware_tools(
@@ -117,11 +147,9 @@ def register_hardware_tools(
 
     @mcp.tool(name="hardware-discovery-status")
     def hardware_discovery_status() -> dict[str, Any]:
-        """Return last pull and push timestamps per discovery source. (Phase 9b — not yet done.)"""
-        return {
-            "status": "not_implemented",
-            "message": "Discovery engine is Phase 9b.",
-        }
+        """Summarize hardware registry state: node counts by status and the most
+        recent confirmation/sighting. Live push-mode fact-gather is Phase 9b."""
+        return summarize_discovery_status(hardware_store.list_nodes())
 
     @mcp.resource("hardware://all")
     def hardware_all_resource() -> list[dict[str, Any]]:
