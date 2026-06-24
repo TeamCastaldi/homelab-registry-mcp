@@ -201,6 +201,44 @@ def test_service_get_full_context_includes_hardware(store, hardware_store, serve
     assert fetched_node.hostname == "workload-01"
 
 
+def test_discovery_status_counts_by_status(hardware_store):
+    from registry_mcp.tools.hardware import summarize_discovery_status
+
+    hardware_store.create_node(_node(hostname="a", display_name="A", status=NodeStatus.confirmed))
+    hardware_store.create_node(_node(hostname="b", display_name="B"))  # unconfirmed
+    hardware_store.create_node(_node(hostname="c", display_name="C", status=NodeStatus.stale))
+
+    summary = summarize_discovery_status(hardware_store.list_nodes())
+    assert summary["total_nodes"] == 3
+    assert summary["by_status"] == {"confirmed": 1, "unconfirmed": 1, "stale": 1}
+    assert summary["push_discovery"] == "not_implemented (Phase 9b)"
+
+
+def test_discovery_status_reports_latest_timestamps():
+    from datetime import UTC, datetime
+
+    from registry_mcp.tools.hardware import summarize_discovery_status
+
+    older = datetime(2026, 1, 1, tzinfo=UTC)
+    newer = datetime(2026, 6, 1, tzinfo=UTC)
+    nodes = [
+        _node(hostname="a", display_name="A", last_confirmed_at=older, last_seen_at=older),
+        _node(hostname="b", display_name="B", last_confirmed_at=newer, last_seen_at=newer),
+    ]
+    summary = summarize_discovery_status(nodes)
+    assert summary["last_confirmed_at"] == newer.isoformat()
+    assert summary["last_seen_at"] == newer.isoformat()
+
+
+def test_discovery_status_empty_registry():
+    from registry_mcp.tools.hardware import summarize_discovery_status
+
+    summary = summarize_discovery_status([])
+    assert summary["total_nodes"] == 0
+    assert summary["by_status"] == {}
+    assert summary["last_confirmed_at"] is None
+
+
 def test_storage_disk_model():
     disk = StorageDisk(device="/dev/sda", size_gb=4000.0, type="hdd")
     assert disk.device == "/dev/sda"

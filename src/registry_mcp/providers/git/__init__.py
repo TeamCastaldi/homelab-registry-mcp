@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from registry_mcp.providers.git.base import GitError, GitProvider, OpenedPR
 from registry_mcp.providers.git.gitea import GiteaGitProvider
+from registry_mcp.providers.git.github import GitHubGitProvider
 
 if TYPE_CHECKING:
     from registry_mcp.config import Settings
@@ -15,6 +16,7 @@ __all__ = [
     "GitProvider",
     "OpenedPR",
     "GiteaGitProvider",
+    "GitHubGitProvider",
     "build_git_provider",
 ]
 
@@ -26,5 +28,7 @@ def build_git_provider(settings: Settings) -> GitProvider | None:
         return None
     if settings.git_provider == "gitea":
         return GiteaGitProvider(settings.git_base_url, settings.git_token)
-    # GitHub/GitLab providers are a follow-up increment; fall back to disabled.
+    if settings.git_provider == "github":
+        return GitHubGitProvider(settings.git_base_url, settings.git_token)
+    # GitLab provider is a follow-up increment; fall back to disabled.
     return None

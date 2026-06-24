@@ -46,7 +46,7 @@ src/registry_mcp/
 │   ├── engine.py          # create per finding, verification sweep, after_discovery hook
 │   └── store.py           # Proposal CRUD (shares the registry SQLite engine)
 ├── providers/             # pluggable write-path backends (behind protocols)
-│   ├── git/               # GitProvider protocol + Gitea impl + factory
+│   ├── git/               # GitProvider protocol + Gitea/GitHub impls + factory
 │   └── notification/      # NotificationProvider protocol + Ntfy/Null + factory
 ├── integrations/
 │   ├── traefik/           # httpx client + 7 MCP tools + resource + prompt
@@ -120,7 +120,7 @@ at all, and `PROPOSAL_AUTO_CREATE=true` for unattended creation.
 - Flow per finding: read current file from Git → DSPy patch → gate → branch →
   commit → open PR (labelled) → notify → persist `Proposal`. `PROPOSAL_DRY_RUN=true`
   stops before any Git write and returns the patch for review.
-- The engine consumes `GitProvider`/`NotificationProvider` protocols (Gitea + Ntfy/Null
+- The engine consumes `GitProvider`/`NotificationProvider` protocols (Gitea/GitHub + Ntfy/Null
   shipped); the discovery engine's `on_pass_complete` hook runs the verification sweep
   (and auto-create when enabled) after each pass — wrapped so it never breaks discovery.
 
@@ -152,7 +152,7 @@ at all, and `PROPOSAL_AUTO_CREATE=true` for unattended creation.
 | `DSPY_CONFIDENCE_THRESHOLD` | `0.7` | Below this, reasoning output is discarded and the deterministic path applies |
 | `DSPY_MAX_TOKENS` | `1024` | Max output tokens per reasoning call |
 | `DSPY_COMPILED_PATH` | unset | Dir of optimized modules saved by a Phase 9 pass; loaded at startup if present |
-| `GIT_PROVIDER` | `gitea` | `gitea` (also Forgejo); `github`/`gitlab` reserved (not yet implemented) |
+| `GIT_PROVIDER` | `gitea` | `gitea` (also Forgejo) or `github` (also GHES via `GIT_BASE_URL`); `gitlab` reserved (not yet implemented) |
 | `GIT_BASE_URL` / `GIT_TOKEN` / `GIT_REPO` | unset | Enables the write path; repo is `owner/name`. All three required |
 | `GIT_BASE_BRANCH` | `main` | Branch PRs target |
 | `NOTIFICATION_PROVIDER` | `none` | `ntfy` or `none` |
@@ -218,7 +218,7 @@ Pre-reqs: Traefik on external `traefik` Docker network, DNS for `registry-mcp.<y
 
 - **Phase 7 complete**: cross-source linking (Authentik ↔ Traefik ↔ Docker), `service_get_full_context()`, and the DSPy reasoning layer (`ResolveServiceIdentity`, `InferServiceMetadata`, `SummarizeAccessAudit`) — off by default via `DSPY_ENABLED`
 - **Phase 8 in progress**: security write path landed — `GenerateRemediationPatch`, Gitea + Ntfy/Null providers, `Proposal` model/store, proposal engine (create + verification sweep), and the `proposal_*` tools. Off by default (`GIT_*` unset, `PROPOSAL_AUTO_CREATE=false`); see ADR-002.
-- **Phase 8 remaining**: GitHub provider; normalization path (`NormalizeConfigFile`, yamllint, `proposal_normalize`); flipping `PROPOSAL_DRY_RUN=false` against the homelab repo (a deliberate human step); runbooks, cold-restore testing, Ansible provisioning
+- **Phase 8 remaining**: normalization path (`NormalizeConfigFile`, yamllint, `proposal_normalize`); flipping `PROPOSAL_DRY_RUN=false` against the homelab repo (a deliberate human step); runbooks, cold-restore testing, Ansible provisioning. (GitHub provider landed — `GitHubGitProvider` alongside Gitea, selected via `GIT_PROVIDER=github`.)
 - **Phase 9a complete**: hardware node registry — `HardwareNode` model + `HardwareStore` + 11 MCP tools registered in `server.py`; manual registration only (live discovery is Phase 9b)
 - **Phase C complete**: git-crypt secrets integration — 6 `secrets_*` MCP tools, `scripts/setup-homelab-repo.sh` bootstrap, `git-crypt` in Dockerfile
 - **Phase D complete**: migrated from Heimdall to Watchtower (Pi at `10.0.0.200`); Traefik static backend routes `registry-mcp.castaldifamily.com` → Watchtower; GitHub Actions self-hosted runner operational; first automated CD deploy proven (ConvertX on Panoptichron in 18s); `docker-compose.yml` binds `0.0.0.0:8765`
