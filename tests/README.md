@@ -39,7 +39,7 @@ tests/
 uv run pytest                            # all tests
 uv run pytest -v tests/test_linking.py   # one file, verbose
 uv run pytest -k linking                 # by keyword
-uv run pytest --cov=src                  # with coverage
+uv run pytest --cov=src                  # with coverage (needs: uv add --dev pytest-cov)
 ```
 
 CI runs `ruff check`, `ruff format --check`, and `pytest -q` on every push — tests
