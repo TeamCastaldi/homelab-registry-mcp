@@ -1,9 +1,10 @@
 """GitHub Git provider (REST API v3).
 
 Implements the same ``GitProvider`` surface as the Gitea provider, talking to
-the GitHub REST API. The token needs ``contents`` read+write and ``pull_requests``
-write scope on the target repo. Like every Git provider, it only touches the
-hosting API — never the local filesystem.
+the GitHub REST API. The token needs read+write access to repository contents
+and pull requests (classic PATs: the ``repo`` scope; fine-grained tokens: the
+Contents and Pull requests repository permissions). Like every Git provider, it
+only touches the hosting API — never the local filesystem.
 """
 
 from __future__ import annotations

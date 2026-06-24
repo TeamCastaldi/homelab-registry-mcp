@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -17,23 +18,25 @@ def summarize_discovery_status(nodes: list[HardwareNode]) -> dict[str, Any]:
     list so it can be unit-tested without the MCP server. Live push-mode
     fact-gather remains Phase 9b."""
     by_status: dict[str, int] = {}
-    last_confirmed_at: str | None = None
-    last_seen_at: str | None = None
+    last_confirmed: datetime | None = None
+    last_seen: datetime | None = None
     for node in nodes:
-        by_status[node.status] = by_status.get(node.status, 0) + 1
-        if node.last_confirmed_at is not None:
-            stamp = node.last_confirmed_at.isoformat()
-            if last_confirmed_at is None or stamp > last_confirmed_at:
-                last_confirmed_at = stamp
-        if node.last_seen_at is not None:
-            stamp = node.last_seen_at.isoformat()
-            if last_seen_at is None or stamp > last_seen_at:
-                last_seen_at = stamp
+        # str() keeps the key JSON-safe even if status is a StrEnum.
+        key = str(node.status)
+        by_status[key] = by_status.get(key, 0) + 1
+        # Compare datetimes directly — comparing ISO strings is brittle across
+        # differing tz offsets — and serialize once at the end.
+        if node.last_confirmed_at is not None and (
+            last_confirmed is None or node.last_confirmed_at > last_confirmed
+        ):
+            last_confirmed = node.last_confirmed_at
+        if node.last_seen_at is not None and (last_seen is None or node.last_seen_at > last_seen):
+            last_seen = node.last_seen_at
     return {
         "total_nodes": len(nodes),
         "by_status": by_status,
-        "last_confirmed_at": last_confirmed_at,
-        "last_seen_at": last_seen_at,
+        "last_confirmed_at": last_confirmed.isoformat() if last_confirmed else None,
+        "last_seen_at": last_seen.isoformat() if last_seen else None,
         "push_discovery": "not_implemented (Phase 9b)",
     }
 

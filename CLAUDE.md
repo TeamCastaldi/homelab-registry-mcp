@@ -152,7 +152,7 @@ at all, and `PROPOSAL_AUTO_CREATE=true` for unattended creation.
 | `DSPY_CONFIDENCE_THRESHOLD` | `0.7` | Below this, reasoning output is discarded and the deterministic path applies |
 | `DSPY_MAX_TOKENS` | `1024` | Max output tokens per reasoning call |
 | `DSPY_COMPILED_PATH` | unset | Dir of optimized modules saved by a Phase 9 pass; loaded at startup if present |
-| `GIT_PROVIDER` | `gitea` | `gitea` (also Forgejo) or `github` (also GHES via `GIT_BASE_URL`); `gitlab` reserved (not yet implemented) |
+| `GIT_PROVIDER` | `gitea` | `gitea` (also Forgejo) or `github` (GitHub.com by default; for GHES set `GIT_BASE_URL` to its API root, e.g. `https://ghe.example.com/api/v3`); `gitlab` reserved (not yet implemented) |
 | `GIT_BASE_URL` / `GIT_TOKEN` / `GIT_REPO` | unset | Enables the write path; repo is `owner/name`. All three required |
 | `GIT_BASE_BRANCH` | `main` | Branch PRs target |
 | `NOTIFICATION_PROVIDER` | `none` | `ntfy` or `none` |

@@ -308,6 +308,24 @@ async def test_github_list_open_prs_filters_by_label():
     assert none == []
 
 
+async def test_github_close_pr():
+    fake = FakeGitHub()
+    opened = await _gh(fake).open_pr(REPO, "T", "B", "patch/x", "main")
+    # FakeGitHub returns 200 for the PATCH; close must complete without raising.
+    await _gh(fake).close_pr(REPO, opened.number)
+
+
+async def test_github_close_pr_error_raises():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"message": "Not Found"})
+
+    provider = GitHubGitProvider(
+        "https://api.github.com", "tok", transport=httpx.MockTransport(handler)
+    )
+    with pytest.raises(GitError):
+        await provider.close_pr(REPO, 999)
+
+
 async def test_github_http_error_status_raises_giterror():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(403, json={"message": "forbidden"})
