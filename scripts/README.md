@@ -13,7 +13,10 @@ scripts are tools for the operator/developer.
 - **`setup-homelab-repo.sh`** — one-time bootstrap of the private homelab Git repo
   (Phase C): creates the repo, initialises `git-crypt`, configures `.gitattributes`
   to encrypt `**/.env`, scaffolds `nodes/`, and exports the key. Backs the
-  `secrets_*` MCP tools.
+  `secrets_*` MCP tools. Cross-platform (macOS, Linux, Windows via WSL/Git Bash);
+  defaults to `$HOME`-relative paths (`$HOME/homelab`,
+  `$HOME/.config/homelab/git-crypt.key`) so it runs without root on a laptop —
+  override via `SECRETS_REPO_PATH` / `SECRETS_KEY_PATH` for the Pi (`/opt/homelab`).
 
 ## What belongs here
 
@@ -34,5 +37,7 @@ scripts are tools for the operator/developer.
   script does, when to use it, and any required environment variables (both
   existing scripts follow this).
 - Never hardcode secrets — read them from environment variables or `.env`.
-- Note any platform assumptions at the top (both scripts target the
-  Debian / Raspberry Pi control plane).
+- Note any platform assumptions at the top. `bootstrap.sh` targets the
+  Debian / Raspberry Pi control plane specifically; `setup-homelab-repo.sh` is
+  cross-platform (macOS, Linux, Windows via WSL) and is meant to run from a
+  developer laptop as well as the Pi.
