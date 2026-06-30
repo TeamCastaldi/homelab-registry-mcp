@@ -56,11 +56,13 @@ The deployment model is a workload node running plain
 Download just the two files you need — no full repo clone required:
 
 ```bash
+VERSION=v0.6.1  # or "main" to track the latest build
 mkdir homelab-registry-mcp && cd homelab-registry-mcp
-curl -fsSL https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/main/docker-compose.yml -o docker-compose.yml
-curl -fsSL https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/main/.env.example -o .env.example
+curl -fsSL "https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/${VERSION}/docker-compose.yml" -o docker-compose.yml
+curl -fsSL "https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/${VERSION}/.env.example" -o .env.example
 cp .env.example .env
 # Set at least TRAEFIK_API_URL, AUTHENTIK_API_URL, AUTHENTIK_TOKEN, DOCKER_BASE_URL.
+# To pin the container image to the same release, add REGISTRY_MCP_VERSION=v0.6.1 to .env.
 ```
 
 `.env.example` documents every option. The write path and the reasoning layer

@@ -1,6 +1,6 @@
 services:
   homelab-registry-mcp:
-    image: ghcr.io/teamcastaldi/homelab-registry-mcp:latest
+    image: ghcr.io/teamcastaldi/homelab-registry-mcp:${REGISTRY_MCP_VERSION:-latest}
     container_name: homelab-registry-mcp
     restart: unless-stopped
     env_file:
