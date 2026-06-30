@@ -219,6 +219,14 @@ class TestSecretsEncrypt:
         assert "error" in result
         assert "traversal" in result["error"].lower()
 
+    async def test_rejects_absolute_path(self, tmp_path: Path) -> None:
+        settings = _settings(secrets_repo_path=str(tmp_path))
+        mcp, tools = _make_mcp()
+        register_secrets_tools(mcp, settings)  # type: ignore[arg-type]
+        result = await tools["secrets_encrypt"]("/etc/passwd")
+        assert "error" in result
+        assert "absolute" in result["error"].lower()
+
 
 # ---------------------------------------------------------------------------
 # secrets_decrypt
@@ -268,6 +276,17 @@ class TestSecretsDecrypt:
 
         assert "error" in result
 
+    async def test_rejects_absolute_path(self, tmp_path: Path) -> None:
+        key_file = tmp_path / "git-crypt.key"
+        key_file.write_bytes(b"fakekey")
+        settings = _settings(secrets_repo_path=str(tmp_path), secrets_key_path=str(key_file))
+
+        mcp, tools = _make_mcp()
+        register_secrets_tools(mcp, settings)  # type: ignore[arg-type]
+        result = await tools["secrets_decrypt"]("/etc/passwd")
+        assert "error" in result
+        assert "absolute" in result["error"].lower()
+
 
 # ---------------------------------------------------------------------------
 # secrets_add
@@ -301,6 +320,17 @@ class TestSecretsAdd:
         assert "EXISTING=value" in content
         assert "NEW_KEY=new_value" in content
 
+    async def test_rejects_absolute_path(self, tmp_path: Path) -> None:
+        key_file = tmp_path / "git-crypt.key"
+        key_file.write_bytes(b"fakekey")
+        settings = _settings(secrets_repo_path=str(tmp_path), secrets_key_path=str(key_file))
+
+        mcp, tools = _make_mcp()
+        register_secrets_tools(mcp, settings)  # type: ignore[arg-type]
+        result = await tools["secrets_add"]("KEY", "val", "/root/.ssh/authorized_keys")
+        assert "error" in result
+        assert "absolute" in result["error"].lower()
+
     async def test_overwrites_existing_key(self, tmp_path: Path) -> None:
         env_file = tmp_path / ".env"
         env_file.write_text("FOO=old\n")
@@ -332,6 +362,17 @@ class TestSecretsAdd:
 
 
 class TestSecretsListKeys:
+    async def test_rejects_absolute_path(self, tmp_path: Path) -> None:
+        key_file = tmp_path / "git-crypt.key"
+        key_file.write_bytes(b"fakekey")
+        settings = _settings(secrets_repo_path=str(tmp_path), secrets_key_path=str(key_file))
+
+        mcp, tools = _make_mcp()
+        register_secrets_tools(mcp, settings)  # type: ignore[arg-type]
+        result = await tools["secrets_list_keys"]("/etc/shadow")
+        assert "error" in result
+        assert "absolute" in result["error"].lower()
+
     async def test_returns_keys_without_values(self, tmp_path: Path) -> None:
         env_file = tmp_path / ".env"
         env_file.write_text("SECRET_A=hunter2\nSECRET_B=password123\n")
