@@ -42,7 +42,7 @@ query and act on.
 ## How to run
 
 The deployment model is a workload node running plain
-`docker compose`, with the image served from a local registry.
+`docker compose`, with the image pulled from GHCR — no source checkout required.
 
 ### Prerequisites
 
@@ -51,28 +51,24 @@ The deployment model is a workload node running plain
   `websecure` TLS entrypoint and DNS for `registry-mcp.<your-domain>` pointing at it.
 - A read-only Authentik service-account token (never an admin token).
 
-### 1. Clone and configure
+### 1. Get the compose file and configure
+
+Download just the two files you need — no full repo clone required:
 
 ```bash
-git clone <repo-url> homelab-registry-mcp
-cd homelab-registry-mcp
+VERSION=v0.6.1  # or "main" to track the latest build
+mkdir homelab-registry-mcp && cd homelab-registry-mcp
+curl -fsSL "https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/${VERSION}/docker-compose.yml" -o docker-compose.yml
+curl -fsSL "https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/${VERSION}/.env.example" -o .env.example
 cp .env.example .env
 # Set at least TRAEFIK_API_URL, AUTHENTIK_API_URL, AUTHENTIK_TOKEN, DOCKER_BASE_URL.
+# To pin the container image to the same release, add REGISTRY_MCP_VERSION=v0.6.1 to .env.
 ```
 
 `.env.example` documents every option. The write path and the reasoning layer
 are off by default.
 
-### 2. Pull the image
-
-```bash
-docker pull ghcr.io/teamcastaldi/homelab-registry-mcp:latest
-```
-
-### 3. Deploy on the target host
-
-The committed `docker-compose.yml` builds locally by default; for the registry
-flow, set its `image:` to the tag you pushed above, then:
+### 2. Deploy on the target host
 
 ```bash
 docker compose pull
@@ -80,7 +76,7 @@ docker compose up -d
 docker compose logs -f homelab-registry-mcp   # expect a scheduler_started line
 ```
 
-### 4. Connect a client
+### 3. Connect a client
 
 The server is reachable at `https://registry-mcp.<your-domain>/mcp` over the
 streamable-http transport.

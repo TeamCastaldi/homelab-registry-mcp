@@ -206,11 +206,16 @@ Fixtures live in `tests/conftest.py` (IsolatedSettings, in-memory store).
 ## Docker / Homelab Deploy
 
 ```bash
-docker compose build
+docker compose pull
 docker compose up -d
-docker compose logs -f registry-mcp   # watch for "scheduler_started"
-docker compose exec registry-mcp registry-mcp-seed examples/services.example.yaml
+docker compose logs -f homelab-registry-mcp   # watch for "scheduler_started"
+
+# Optional: bootstrap registry from a YAML file (no source checkout needed)
+docker compose exec homelab-registry-mcp registry-mcp-seed /path/to/services.yaml
 ```
+
+No source checkout needed on the target host — the image is pulled from
+GHCR. Pin the release by setting `REGISTRY_MCP_VERSION=v0.6.1` in `.env`.
 
 Pre-reqs: Traefik on external `traefik` Docker network, DNS for `registry-mcp.<your-domain>`. Docker socket is mounted read-only.
 
