@@ -16,10 +16,15 @@
 # The OOBE (Phase G) will eventually replace this script with oobe_create_repo
 # and oobe_encrypt_secrets MCP tool calls.
 #
-# Prerequisites on Watchtower:
-#   gh      (GitHub CLI, authenticated: gh auth login)
+# Prerequisites:
+#   gh        (GitHub CLI, authenticated: gh auth login)
 #   git
 #   git-crypt
+#
+# Platform notes:
+#   macOS   — brew install gh git-crypt  (git ships with Xcode CLI tools)
+#   Linux   — apt install git git-crypt  + gh from github.com/cli/cli
+#   Windows — run inside WSL (recommended) or Git Bash; no native support
 #
 # Usage:
 #   chmod +x scripts/setup-homelab-repo.sh
@@ -37,10 +42,11 @@ set -euo pipefail
 # Config (override via env vars)
 # ---------------------------------------------------------------------------
 REPO_NAME="${REPO_NAME:-homelab}"
-SECRETS_REPO_PATH="${SECRETS_REPO_PATH:-/opt/homelab}"
-# Key lives alongside the repo, outside version control, chmod 400.
-# Back it up to Vaultwarden — if the Pi SD card dies, you need the key to decrypt.
-SECRETS_KEY_PATH="${SECRETS_KEY_PATH:-/opt/homelab/.git-crypt.key}"
+SECRETS_REPO_PATH="${SECRETS_REPO_PATH:-${HOME}/homelab}"
+# Key lives outside version control, chmod 400.
+# Back it up to Vaultwarden — if the node dies, you need the key to decrypt.
+# Pi override: SECRETS_KEY_PATH=/opt/homelab/.git-crypt.key
+SECRETS_KEY_PATH="${SECRETS_KEY_PATH:-${HOME}/.config/homelab/git-crypt.key}"
 # Workload node names to scaffold under nodes/ (space-separated)
 WORKLOAD_NODES="${WORKLOAD_NODES:-}"
 
@@ -158,7 +164,7 @@ echo "  1. Back up the git-crypt key to your password manager"
 echo "     (Bitwarden, 1Password, Vaultwarden, etc.)."
 echo ""
 echo "     The key is a binary file — store it as a base64 string:"
-echo "       base64 -w0 ${SECRETS_KEY_PATH}"
+echo "       base64 \"${SECRETS_KEY_PATH}\" | tr -d '\\n'"
 echo "     Copy the output into a new Secure Note in your password manager."
 echo ""
 echo "     To restore: paste the string into SECRETS_GIT_CRYPT_KEY in .env."
@@ -169,7 +175,7 @@ echo "     SECRETS_ENABLED=true"
 echo "     SECRETS_REPO_PATH=${SECRETS_REPO_PATH}"
 echo "     SECRETS_KEY_PATH=${SECRETS_KEY_PATH}"
 echo "     # OR use the base64 env var instead of the key file:"
-echo "     # SECRETS_GIT_CRYPT_KEY=\$(base64 -w0 ${SECRETS_KEY_PATH})"
+echo "     # SECRETS_GIT_CRYPT_KEY=\$(base64 \"${SECRETS_KEY_PATH}\" | tr -d '\\n')"
 echo ""
 echo "  3. Restart the registry-mcp container:"
 echo "     docker compose restart registry-mcp"
