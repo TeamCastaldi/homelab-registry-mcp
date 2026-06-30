@@ -3,11 +3,11 @@
 #
 # Run this once on the control plane node (Watchtower) to:
 #   1. Create a private GitHub repo on your personal account
-#   2. Clone it to SECRETS_REPO_PATH (default /opt/homelab — local to the Pi)
+#   2. Clone it to SECRETS_REPO_PATH (default $HOME/homelab)
 #   3. Initialise git-crypt
 #   4. Write .gitattributes to encrypt **/.env files
 #   5. Create the nodes/ skeleton
-#   6. Export the key to SECRETS_KEY_PATH (default /opt/homelab/.git-crypt.key)
+#   6. Export the key to SECRETS_KEY_PATH (default $HOME/.config/homelab/git-crypt.key)
 #   7. Make an initial commit and push
 #
 # The repo lives on the Pi, not the NAS. GitHub is the off-site backup.
