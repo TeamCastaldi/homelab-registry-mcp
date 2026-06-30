@@ -162,6 +162,23 @@ def _guard(settings: Settings) -> dict[str, Any] | None:
     return None
 
 
+def _check_path(repo: Path, path: str) -> Path:
+    """Return the resolved target path inside repo, or raise ValueError.
+
+    Blocks absolute paths (pathlib discards the base when joined with an
+    absolute right-hand side), dotdot traversal, and symlink escapes.
+    """
+    p = Path(path)
+    if p.is_absolute():
+        raise ValueError("Absolute paths are not allowed.")
+    if ".." in p.parts:
+        raise ValueError("Path traversal is not allowed.")
+    target = (repo / path).resolve()
+    if not target.is_relative_to(repo.resolve()):
+        raise ValueError("Path must be within the repository.")
+    return target
+
+
 # ---------------------------------------------------------------------------
 # Tool registration
 # ---------------------------------------------------------------------------
@@ -210,9 +227,10 @@ def register_secrets_tools(mcp: FastMCP, settings: Settings) -> None:
         except RuntimeError as exc:
             return {"error": str(exc)}
 
-        # Reject path traversal
-        if ".." in Path(path).parts:
-            return {"error": "Path traversal is not allowed."}
+        try:
+            _check_path(repo, path)
+        except ValueError as exc:
+            return {"error": str(exc)}
 
         gitattributes = repo / ".gitattributes"
         current = gitattributes.read_text() if gitattributes.exists() else ""
@@ -250,10 +268,11 @@ def register_secrets_tools(mcp: FastMCP, settings: Settings) -> None:
         except RuntimeError as exc:
             return {"error": str(exc)}
 
-        if ".." in Path(path).parts:
-            return {"error": "Path traversal is not allowed."}
+        try:
+            target = _check_path(repo, path)
+        except ValueError as exc:
+            return {"error": str(exc)}
 
-        target = repo / path
         if not target.exists():
             return {"error": f"File not found: {path}"}
 
@@ -281,8 +300,10 @@ def register_secrets_tools(mcp: FastMCP, settings: Settings) -> None:
         except RuntimeError as exc:
             return {"error": str(exc)}
 
-        if ".." in Path(path).parts:
-            return {"error": "Path traversal is not allowed."}
+        try:
+            target = _check_path(repo, path)
+        except ValueError as exc:
+            return {"error": str(exc)}
 
         # Ensure the file is tracked by git-crypt
         gitattributes = repo / ".gitattributes"
@@ -298,7 +319,6 @@ def register_secrets_tools(mcp: FastMCP, settings: Settings) -> None:
         except RuntimeError as exc:
             return {"error": str(exc)}
 
-        target = repo / path
         target.parent.mkdir(parents=True, exist_ok=True)
         existing = target.read_text() if target.exists() else ""
         data = _parse_dotenv(existing)
@@ -377,10 +397,11 @@ def register_secrets_tools(mcp: FastMCP, settings: Settings) -> None:
         except RuntimeError as exc:
             return {"error": str(exc)}
 
-        if ".." in Path(path).parts:
-            return {"error": "Path traversal is not allowed."}
+        try:
+            target = _check_path(repo, path)
+        except ValueError as exc:
+            return {"error": str(exc)}
 
-        target = repo / path
         if not target.exists():
             return {"error": f"File not found: {path}"}
 
