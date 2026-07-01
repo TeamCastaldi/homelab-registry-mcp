@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.7.2](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.7.1...v0.7.2) (2026-07-01)
+
+
+### Bug Fixes
+
+* **ci:** allow manual publish dispatch and fix release-please token ([62f9749](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/62f974957b6db88f8ebbf577bb028d2a0ab908a9))
+* **ci:** allow manual publish dispatch and fix release-please token ([127cddc](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/127cddc93d2fbb97f869e952db2a813539033ff9))
+* **ci:** guard publish job to tag refs only ([1186379](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/1186379823862de62c6af76c5453a2a70e25c4c5))
+
 ## [0.7.1](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.7.0...v0.7.1) (2026-07-01)
 
 
