@@ -8,6 +8,7 @@ on:
 
 jobs:
   push:
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: read
