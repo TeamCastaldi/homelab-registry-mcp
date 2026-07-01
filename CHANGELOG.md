@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.7.3](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.7.2...v0.7.3) (2026-07-01)
+
+
+### Bug Fixes
+
+* guard importlib.metadata lookup with fallback ([ed0252f](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/ed0252fc3c6863f1b8de17a4e7c10565a531da5f))
+* read version dynamically from package metadata ([7b5378b](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/7b5378bca2cc5307a71e1ca8e06736439425ae8a))
+* read version dynamically from package metadata ([0c98420](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/0c98420e590409233d99576b90475b50ff966585))
+
 ## [0.7.2](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.7.1...v0.7.2) (2026-07-01)
 
 
