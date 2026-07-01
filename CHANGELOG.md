@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.1](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.7.0...v0.7.1) (2026-07-01)
+
+
+### Bug Fixes
+
+* **ci:** build multi-arch Docker image for amd64 and arm64 ([d94a6d6](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/d94a6d675c16a551463566ae1dfc3ad5242671c5))
+* **ci:** build multi-arch Docker image for amd64 and arm64 ([cfef722](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/cfef722e434d92e42b6f7ef5016170c5a891b1e0))
+
 ## [0.7.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.6.2...v0.7.0) (2026-07-01)
 
 
