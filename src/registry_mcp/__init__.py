@@ -1,3 +1,5 @@
 """homelab-registry-mcp: authoritative catalog of homelab services over MCP."""
 
-__version__ = "0.6.1"
+from importlib.metadata import version
+
+__version__ = version("homelab-registry-mcp")
