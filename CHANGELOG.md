@@ -1,0 +1,53 @@
+# Changelog
+
+## [0.7.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.6.2...v0.7.0) (2026-07-01)
+
+
+### Features
+
+* add GitHub git provider and real hardware-discovery-status ([c577e00](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/c577e003ae5e3afbc0320d86f91e587a031a4109))
+* add ruthless code review prompt for enhanced code evaluation ([fae579e](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/fae579e5bb6f7a2088aabcc00c128715c88d36a0))
+* **agents:** add Python Security Reviewer for PII detection and security audits ([f3290d8](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/f3290d806ffd02d5ba8b45d3a25665f5b24a6f6b))
+* initial public release — clean migration from ncastaldi/homelab-registry-mcp ([3f8c073](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/3f8c0739195f041924572c3412a7d04dbb57e878))
+* **phase-c:** git-crypt secrets tools + homelab repo bootstrap ([4ce78f3](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/4ce78f3be415da2c56e67a01f358d6172f861995))
+* **phase-c:** git-crypt secrets tools + homelab repo bootstrap ([c2d980e](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/c2d980e6b087a326ca74ae78eff9f652ae145bcd))
+* **phase-d:** document service migration from Heimdall to Watchtower with detailed steps ([975e394](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/975e394efce199cb098bbc1038503941f9aea4d7))
+* **phase-d:** migrate to Watchtower — port binding + Traefik static backend ([130869d](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/130869df6c6630872b3177918af438a4b3a93d7c))
+* **phase-d:** migrate to Watchtower — port binding + Traefik static backend ([3d23b19](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/3d23b1971409fc895af66ff216e51564d3ad3726))
+* **prompts:** add structured prompt files for GitHub Copilot workflows ([15128c1](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/15128c114aeda727375335646b4bffe7abd98490))
+* pull image from GHCR instead of building from source ([77392b1](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/77392b19ecc51ffd9963f9eaf5de399ace583110))
+* pull image from GHCR, drop build-from-source requirement ([b3eff47](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/b3eff4750eb5cd3481fd485703e406c8a3a5c8aa))
+* **security:** add comprehensive secret scanning report with findings and recommendations ([0c5cc43](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/0c5cc43118b1ef0b11d5c9d7d74f5c5b429ffb7f))
+
+
+### Bug Fixes
+
+* **.gitignore:** clean up Ansible runtime entries and ensure proper ignore patterns ([6c8de52](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/6c8de528dc57afff52b29bc69add3c3d5e877627))
+* add ANTHROPIC_API_KEY to .env.example ([6d8ad05](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/6d8ad0594eb828bc1bc21dfef20b5d18f3632a0c))
+* add ANTHROPIC_API_KEY to .env.example ([a34499a](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/a34499af993f87bbd619136447947d4d8e42d25d))
+* add missing uv.lock for Docker build ([87f524e](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/87f524e66bf8673e3cbaec8bf035419a4baae209))
+* address Copilot review — version pinning and seed docs ([49138fd](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/49138fdec3964f9a23d224c9d864be4389a3aeef))
+* restore .gitignore lost during rebase conflict ([1b20d9a](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/1b20d9a7d2798212758d17bfce765fd732f77cd8))
+* **secrets:** block absolute paths to prevent arbitrary file read/write ([370dc6f](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/370dc6fa12917cbd009bc1b9f9c5c4ac63b53fa0))
+* **setup-script:** generic password manager instructions + base64 how-to ([e9edb97](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/e9edb978248b9030463dd80459cfe33f93d56e08))
+* **setup-script:** generic password manager instructions + base64 how-to ([c1d189c](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/c1d189cd5fe7e8e70075f28d6c3222a546294b3a))
+* **setup:** cross-platform compatibility for setup-homelab-repo.sh ([01a65de](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/01a65de6e514e81045fe0da72ca907ebac57845c))
+* **setup:** cross-platform compatibility for setup-homelab-repo.sh ([d11c06a](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/d11c06ac5f8038b76601084e407415841a1e44af))
+* **setup:** update stale header defaults and clarify .env path expansion ([7ffa483](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/7ffa483f937a03c7a092e69d2c962eafa2c1bb00))
+
+
+### Documentation
+
+* add governance, contribution, and project structure guides ([6bcc2bc](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/6bcc2bc5ff12df6026d2d9f18cc34121c2ef2a73))
+* add MIT license ([23fc77e](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/23fc77e65628b919f26bc39bdcd6200b6d6a9609))
+* add project-template governance + doc-structure artifacts and align prompts ([fa39c04](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/fa39c04f28bb46eabf4aca40a7f4ddd7d124d179))
+* add ruthless code review (2026-06-30) ([b1fbe44](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/b1fbe44bf738a9da72243dd2bc89740201b15195))
+* reflect secrets path-validation fix and cross-platform setup script ([c4b44f1](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/c4b44f1710dcc0086b04e827ad3166a2fb0f883f))
+* reflect secrets path-validation fix and cross-platform setup script ([6668258](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/6668258660ebc4e4bce103bbae17fbc0a8f5351d))
+* resolve merge conflict in README Documentation section ([a07262d](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/a07262da2c730a498aec98b2e1c6057c3e61455b))
+* sanitize personal details and fix README documentation links ([39c6837](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/39c683793bb253ef2d83ed8b1cc7f12e336d024c))
+* sync CLAUDE.md and README with hardware module and current phase status ([0de21cf](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/0de21cf99a3ff4d2ed9271faac6c3baebbad6d35))
+* sync CLAUDE.md and README with hardware module and current phase status ([ace2f4d](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/ace2f4dd2883220c0a7c61aaef14bb776bf45f98))
+* **tests:** note pytest-cov requirement for the coverage example ([7c8bb57](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/7c8bb57b5c84945d52a6682f4c2259750527ac0c))
+* update ADR-001 to reflect changes in control plane requirements and repository structure ([70d681e](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/70d681eddbe2ab671184ffde092a36f67c1b1e20))
+* update NFS mount instructions for control plane to reflect new volume paths and options ([89f707b](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/89f707b7176738479b6ce8727e41c14ada239c10))
