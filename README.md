@@ -56,7 +56,7 @@ The deployment model is a workload node running plain
 Download just the two files you need — no full repo clone required:
 
 ```bash
-VERSION=v0.6.1  # or "main" to track the latest build
+VERSION=v0.6.2  # or "main" to track the latest build
 mkdir homelab-registry-mcp && cd homelab-registry-mcp
 curl -fsSL "https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/${VERSION}/docker-compose.yml" -o docker-compose.yml
 curl -fsSL "https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/${VERSION}/.env.example" -o .env.example

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "python",
+  "packages": {
+    ".": {
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "README.md",
+          "search-by-regex": "VERSION=v[0-9]+\\.[0-9]+\\.[0-9]+"
+        }
+      ]
+    }
+  }
+}
