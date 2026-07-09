@@ -187,9 +187,10 @@ def _check_path(repo: Path, path: str) -> Path:
 def register_secrets_tools(mcp: FastMCP, settings: Settings, read_only: bool = False) -> None:
     """Register the six secrets_* MCP tools.
 
-    When `read_only` is set (a failed `system_health_check` at startup), the
-    tools that mutate the homelab repo (encrypt/add/rotate) refuse to run
-    regardless of git-crypt configuration; status/decrypt/list_keys stay usable.
+    When `read_only` is set (startup health check failed; see
+    `system_health_check`), the tools that mutate the homelab repo
+    (encrypt/add/rotate) refuse to run regardless of git-crypt configuration;
+    status/decrypt/list_keys stay usable.
     """
 
     def _read_only_error() -> dict[str, Any] | None:

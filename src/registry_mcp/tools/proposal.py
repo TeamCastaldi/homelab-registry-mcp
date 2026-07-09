@@ -24,8 +24,9 @@ def register_proposal_tools(
 
     All tools degrade gracefully when the write path is not configured: the
     create/cancel paths return a structured error rather than raising. When
-    `read_only` is set (a failed `system_health_check` at startup), those same
-    two tools refuse to open or close PRs regardless of Git configuration.
+    `read_only` is set (startup health check failed; see `system_health_check`),
+    those same two tools refuse to open or close PRs regardless of Git
+    configuration.
     """
 
     def _read_only_error() -> dict[str, Any] | None:

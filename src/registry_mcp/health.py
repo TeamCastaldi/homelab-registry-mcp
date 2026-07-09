@@ -45,8 +45,10 @@ def _check_git_repo(settings: Settings) -> HealthCheckResult:
     if not settings.secrets_repo_path:
         return HealthCheckResult("git_repo", False, "SECRETS_REPO_PATH is not configured")
     repo = Path(settings.secrets_repo_path)
-    if not repo.is_dir():
+    if not repo.exists():
         return HealthCheckResult("git_repo", False, f"{repo} does not exist")
+    if not repo.is_dir():
+        return HealthCheckResult("git_repo", False, f"{repo} is not a directory")
     if not (repo / ".git").exists():
         return HealthCheckResult("git_repo", False, f"{repo} is not a git repository")
     return HealthCheckResult("git_repo", True, str(repo))
@@ -56,8 +58,10 @@ def _check_ansible_cfg(settings: Settings) -> HealthCheckResult:
     if not settings.ansible_cfg_path:
         return HealthCheckResult("ansible_cfg", False, "ANSIBLE_CFG_PATH is not configured")
     path = Path(settings.ansible_cfg_path)
-    if not path.is_file():
+    if not path.exists():
         return HealthCheckResult("ansible_cfg", False, f"{path} not found")
+    if not path.is_file():
+        return HealthCheckResult("ansible_cfg", False, f"{path} is not a file")
     return HealthCheckResult("ansible_cfg", True, str(path))
 
 
@@ -65,8 +69,10 @@ def _check_ssh_key(settings: Settings) -> HealthCheckResult:
     if not settings.ssh_key_path:
         return HealthCheckResult("ssh_key", False, "SSH_KEY_PATH is not configured")
     path = Path(settings.ssh_key_path)
-    if not path.is_file():
+    if not path.exists():
         return HealthCheckResult("ssh_key", False, f"{path} not found")
+    if not path.is_file():
+        return HealthCheckResult("ssh_key", False, f"{path} is not a file")
     return HealthCheckResult("ssh_key", True, str(path))
 
 
