@@ -41,17 +41,40 @@ query and act on.
 
 ## How to run
 
-The deployment model is a workload node running plain
-`docker compose`, with the image pulled from GHCR — no source checkout required.
+### Option A: fresh control-plane node (recommended)
 
-### Prerequisites
+For a brand-new Raspberry Pi (or other Debian/Ubuntu host) that will run
+homelab-registry-mcp as its dedicated control plane, `scripts/install.sh` does
+everything in one shot: installs Git, clones this repo, provisions the OS
+(Docker, Ansible, `uv`, `git-crypt`, the GitHub CLI, an SSH key), prompts you for
+the Traefik/Authentik/Git config and an optional DSPy (Advanced AI Reasoning)
+opt-in, writes `.env`, brings the server up with `docker compose up -d`, and
+only then applies a static IP — so the server is already running by the time
+the SSH session drops.
+
+```bash
+VERSION=main  # or a tagged release, e.g. v0.7.3
+curl -fsSL "https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/${VERSION}/scripts/install.sh" | bash
+```
+
+Every prompt can be pre-seeded with an environment variable of the same name
+for non-interactive use. See [scripts/README.md](scripts/README.md) for the
+full step-by-step and `scripts/bootstrap.sh`, the lower-level provisioning
+script it calls.
+
+### Option B: existing Docker host
+
+If Docker is already set up on the host, skip straight to the compose file —
+the image is pulled from GHCR and no source checkout is required.
+
+#### Prerequisites
 
 - A host with Docker and the Compose plugin.
 - Traefik running on an external Docker network named `traefik`, with a
   `websecure` TLS entrypoint and DNS for `registry-mcp.<your-domain>` pointing at it.
 - A read-only Authentik service-account token (never an admin token).
 
-### 1. Get the compose file and configure
+#### 1. Get the compose file and configure
 
 Download just the two files you need — no full repo clone required:
 
@@ -68,7 +91,7 @@ cp .env.example .env
 `.env.example` documents every option. The write path and the reasoning layer
 are off by default.
 
-### 2. Deploy on the target host
+#### 2. Deploy on the target host
 
 ```bash
 docker compose pull
@@ -76,7 +99,7 @@ docker compose up -d
 docker compose logs -f homelab-registry-mcp   # expect a scheduler_started line
 ```
 
-### 3. Connect a client
+### Connect a client
 
 The server is reachable at `https://registry-mcp.<your-domain>/mcp` over the
 streamable-http transport.
