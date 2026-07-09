@@ -87,6 +87,7 @@ class Reasoner:
         self._summarize: Any = None
         self._patch: Any = None
         self._patch_lm: Any = None
+        self._revise: Any = None
 
     # -- lazy setup --------------------------------------------------------
     def _ensure(self) -> None:
@@ -95,6 +96,7 @@ class Reasoner:
         import dspy
 
         from registry_mcp.dspy.signatures import (
+            ApplyReviewFeedback,
             GenerateRemediationPatch,
             InferServiceMetadata,
             ResolveServiceIdentity,
@@ -119,6 +121,9 @@ class Reasoner:
             max_tokens=self._settings.dspy_patch_max_tokens,
         )
         self._patch.set_lm(self._patch_lm)
+        self._revise = dspy.ChainOfThought(ApplyReviewFeedback)
+        # Also emits a whole file; reuse the patch LM's larger token budget.
+        self._revise.set_lm(self._patch_lm)
         self._load_compiled()
         self._configured = True
         _log.info("reasoning_configured", model=self._settings.dspy_model)
@@ -135,6 +140,7 @@ class Reasoner:
             (self._infer, "infer_metadata.json"),
             (self._summarize, "summarize_access.json"),
             (self._patch, "remediation_patch.json"),
+            (self._revise, "apply_review_feedback.json"),
         ):
             full = os.path.join(path, fname)
             if not os.path.exists(full):
@@ -288,6 +294,37 @@ class Reasoner:
             "commit_message": getattr(pred, "commit_message", "") or "",
             "pr_title": getattr(pred, "pr_title", "") or "",
             "pr_body": getattr(pred, "pr_body", "") or "",
+            "confidence": _as_float(getattr(pred, "confidence", 0.0)),
+            "reasoning": getattr(pred, "reasoning", "") or "",
+        }
+
+    def apply_review_feedback(
+        self, *, file_path: str, current_file: str, feedback: str
+    ) -> dict | None:
+        """Revise a file on an open proposal PR per a human reviewer's comment.
+
+        Returns the raw module outputs (including ``confidence``) so the
+        proposal layer can enforce its own gate; returns None only when the
+        reasoning layer is disabled or the call errors. Same no-fallback rule
+        as ``generate_remediation_patch``: a None or low-confidence result
+        must be rejected, never hand-applied.
+        """
+        if not self.enabled:
+            return None
+        self._ensure()
+        try:
+            pred = self._revise(file_path=file_path, current_file=current_file, feedback=feedback)
+        except Exception as exc:
+            _log.warning(
+                "reasoning_failed",
+                op="apply_review_feedback",
+                error=str(exc),
+                partial_response=_last_completion(self._patch_lm),
+            )
+            return None
+        return {
+            "revised_file": getattr(pred, "revised_file", "") or "",
+            "commit_message": getattr(pred, "commit_message", "") or "",
             "confidence": _as_float(getattr(pred, "confidence", 0.0)),
             "reasoning": getattr(pred, "reasoning", "") or "",
         }

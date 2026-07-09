@@ -15,12 +15,15 @@ REPO = "nathan/homelab"
 class FakeGitea:
     """Minimal in-memory Gitea API over an httpx MockTransport."""
 
-    def __init__(self, files: dict[str, str] | None = None):
+    def __init__(
+        self, files: dict[str, str] | None = None, comments: dict[int, list] | None = None
+    ):
         self.files = dict(files or {})
         self.branches: list[dict] = []
         self.commits: list[dict] = []
         self.pulls: list[dict] = []
         self.labels = [{"id": 7, "name": "homelab-registry-mcp"}]
+        self.comments: dict[int, list[dict]] = dict(comments or {})
         self._next_pr = 41
 
     def transport(self) -> httpx.MockTransport:
@@ -69,6 +72,13 @@ class FakeGitea:
             return httpx.Response(200, json=[p for p in self.pulls])
         if "/pulls/" in path and method == "PATCH":
             return httpx.Response(200, json={"state": "closed"})
+        if "/issues/" in path and path.endswith("/comments") and method == "GET":
+            number = int(path.split("/issues/", 1)[1].split("/comments")[0])
+            all_comments = self.comments.get(number, [])
+            page = int(request.url.params.get("page", "1"))
+            limit = int(request.url.params.get("limit", "100"))
+            start = (page - 1) * limit
+            return httpx.Response(200, json=all_comments[start : start + limit])
         return httpx.Response(500, json={"message": f"unhandled {method} {path}"})
 
 
@@ -142,6 +152,26 @@ async def test_http_error_status_raises_giterror():
         await provider.create_branch(REPO, "x", "main")
 
 
+async def test_list_pr_comments_returns_comments_for_that_pr():
+    fake = FakeGitea(comments={41: [{"id": 1, "user": {"login": "nathan"}, "body": "looks good"}]})
+    comments = await _provider(fake).list_pr_comments(REPO, 41)
+    assert comments == [{"id": 1, "user": {"login": "nathan"}, "body": "looks good"}]
+
+
+async def test_list_pr_comments_empty_when_none_posted():
+    fake = FakeGitea()
+    comments = await _provider(fake).list_pr_comments(REPO, 41)
+    assert comments == []
+
+
+async def test_list_pr_comments_paginates_past_first_page():
+    many = [{"id": i, "user": {"login": "nathan"}, "body": f"comment {i}"} for i in range(1, 151)]
+    fake = FakeGitea(comments={41: many})
+    comments = await _provider(fake).list_pr_comments(REPO, 41)
+    assert len(comments) == 150
+    assert [c["id"] for c in comments] == list(range(1, 151))
+
+
 # --- factory --------------------------------------------------------------
 
 
@@ -175,12 +205,15 @@ def test_build_git_provider_github():
 class FakeGitHub:
     """Minimal in-memory GitHub REST API over an httpx MockTransport."""
 
-    def __init__(self, files: dict[str, str] | None = None):
+    def __init__(
+        self, files: dict[str, str] | None = None, comments: dict[int, list] | None = None
+    ):
         self.files = dict(files or {})
         self.refs: list[dict] = []
         self.commits: list[dict] = []
         self.pulls: list[dict] = []
         self.labels_added: list[dict] = []
+        self.comments: dict[int, list[dict]] = dict(comments or {})
         self._next_pr = 41
 
     def transport(self) -> httpx.MockTransport:
@@ -233,6 +266,13 @@ class FakeGitHub:
             return httpx.Response(200, json=list(self.pulls))
         if "/pulls/" in path and method == "PATCH":
             return httpx.Response(200, json={"state": "closed"})
+        if "/issues/" in path and path.endswith("/comments") and method == "GET":
+            number = int(path.split("/issues/", 1)[1].split("/comments")[0])
+            all_comments = self.comments.get(number, [])
+            page = int(request.url.params.get("page", "1"))
+            limit = int(request.url.params.get("limit", "100"))
+            start = (page - 1) * limit
+            return httpx.Response(200, json=all_comments[start : start + limit])
         return httpx.Response(500, json={"message": f"unhandled {method} {path}"})
 
 
@@ -340,3 +380,25 @@ async def test_github_http_error_status_raises_giterror():
 def test_github_provider_defaults_base_url_when_none():
     provider = GitHubGitProvider(None, "tok")
     assert provider._base == "https://api.github.com"
+
+
+async def test_github_list_pr_comments_returns_comments_for_that_pr():
+    fake = FakeGitHub(
+        comments={41: [{"id": 1, "user": {"login": "nathan"}, "body": "please revert this"}]}
+    )
+    comments = await _gh(fake).list_pr_comments(REPO, 41)
+    assert comments == [{"id": 1, "user": {"login": "nathan"}, "body": "please revert this"}]
+
+
+async def test_github_list_pr_comments_empty_when_none_posted():
+    fake = FakeGitHub()
+    comments = await _gh(fake).list_pr_comments(REPO, 41)
+    assert comments == []
+
+
+async def test_github_list_pr_comments_paginates_past_first_page():
+    many = [{"id": i, "user": {"login": "nathan"}, "body": f"comment {i}"} for i in range(1, 151)]
+    fake = FakeGitHub(comments={41: many})
+    comments = await _gh(fake).list_pr_comments(REPO, 41)
+    assert len(comments) == 150
+    assert [c["id"] for c in comments] == list(range(1, 151))

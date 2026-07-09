@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from mcp.server.fastmcp import FastMCP
 
 from registry_mcp import __version__
@@ -171,6 +172,29 @@ def main() -> None:
             ),
         )
         scheduler = build_scheduler(_engine, settings) if _engine.sources else None
+
+        # Comment polling (Phase 3): never scheduled when the write path isn't
+        # configured, or when the startup health check failed (read-only mode).
+        _read_only = not check_health(settings).healthy
+        if (
+            settings.proposal_comment_poll_enabled
+            and _proposal_engine.configured
+            and not _read_only
+        ):
+            if scheduler is None:
+                scheduler = AsyncIOScheduler()
+            scheduler.add_job(
+                _proposal_engine.poll_pr_comments,
+                "interval",
+                seconds=settings.proposal_comment_poll_interval_seconds,
+                id="proposal-comment-poll",
+                replace_existing=True,
+            )
+            get_logger("proposal.engine").info(
+                "comment_poll_scheduled",
+                interval_seconds=settings.proposal_comment_poll_interval_seconds,
+            )
+
         if scheduler is not None:
             scheduler.start()
             get_logger("discovery.scheduler").info(

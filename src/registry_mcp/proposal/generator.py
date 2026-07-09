@@ -161,3 +161,52 @@ class PatchGenerator:
             pr_body=raw.get("pr_body", "") or "",
             reasoning=raw.get("reasoning", "") or "",
         )
+
+    async def revise(self, *, file_path: str, current_file: str, feedback: str) -> PatchResult:
+        """Revise a file on an open proposal PR per human review feedback.
+
+        Same gates as ``generate()``: credential scrub, confidence threshold,
+        YAML validity. No rule-based fallback — a failed gate is a rejection,
+        never a hand-applied change.
+        """
+        raw = self._reasoner.apply_review_feedback(
+            file_path=file_path, current_file=current_file, feedback=feedback
+        )
+        if raw is None:
+            return PatchResult(
+                ok=False,
+                rejection_reason="reasoning layer unavailable (DSPY_ENABLED=false or call errored)",
+            )
+
+        patch = raw.get("revised_file", "") or ""
+        patch, scrubbed = _scrub_credentials(patch)
+        if scrubbed:
+            _log.warning("revision_scrubbed_credentials", file_path=file_path)
+
+        confidence = float(raw.get("confidence", 0.0))
+        if confidence < self._threshold:
+            reason = f"confidence {confidence:.2f} below threshold {self._threshold:.2f}"
+            _log.info("revision_rejected", file_path=file_path, reason=reason)
+            return PatchResult(ok=False, confidence=confidence, rejection_reason=reason)
+
+        if not patch.strip():
+            return PatchResult(
+                ok=False, confidence=confidence, rejection_reason="revised file is empty"
+            )
+
+        patch = patch.replace("\t", "  ")
+
+        try:
+            yaml.safe_load(patch)
+        except yaml.YAMLError as exc:
+            reason = f"revised file is not valid YAML: {exc}"
+            _log.warning("revision_rejected", file_path=file_path, reason=reason)
+            return PatchResult(ok=False, confidence=confidence, rejection_reason=reason)
+
+        return PatchResult(
+            ok=True,
+            confidence=confidence,
+            patch=patch,
+            commit_message=raw.get("commit_message", "") or "fix: apply review feedback",
+            reasoning=raw.get("reasoning", "") or "",
+        )

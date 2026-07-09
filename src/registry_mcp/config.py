@@ -95,6 +95,18 @@ class Settings(BaseSettings):
     # Template for the compose file an app service maps to in the Git repo.
     proposal_compose_path_template: str = Field(default="nodes/{node}/{service}/compose.yaml")
 
+    # Conversational loop (Phase 3) — opt-in polling of PR comments so a human
+    # can request changes to an open proposal PR without leaving GitHub/Gitea.
+    # Never runs when the startup health check failed (read-only mode).
+    proposal_comment_poll_enabled: bool = Field(default=False)
+    proposal_comment_poll_interval_seconds: int = Field(default=300)
+    # Fail-closed allowlist: comma-separated GitHub/Gitea usernames whose PR
+    # comments are trusted to trigger an autonomous commit. Empty (the default)
+    # means no comment is trusted, even with polling enabled — a PR is visible
+    # to anyone with repo access, and an unauthenticated commenter must never be
+    # able to steer a committed change.
+    proposal_comment_allowed_users: str = Field(default="")
+
     # Normalization (opt-in; engine deferred to a later Phase 8 increment).
     normalization_enabled: bool = Field(default=False)
     normalization_schedule: str = Field(default="weekly")

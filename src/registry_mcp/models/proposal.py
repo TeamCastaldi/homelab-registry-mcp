@@ -49,5 +49,9 @@ class Proposal(SQLModel, table=True):
     rejection_reason: str | None = Field(default=None)
     confidence: float | None = Field(default=None)
     actor: str = Field(default="discovery")
+    # Highest PR comment id already handled by poll_pr_comments (GitHub/Gitea
+    # comment ids are monotonically increasing) — prevents reprocessing the
+    # same human feedback on every poll.
+    last_comment_id: int | None = Field(default=None)
     created_at: datetime = Field(default_factory=utcnow, index=True)
     resolved_at: datetime | None = Field(default=None)

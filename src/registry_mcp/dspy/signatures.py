@@ -115,6 +115,38 @@ class GenerateRemediationPatch(dspy.Signature):
     reasoning: str = dspy.OutputField(desc="Why this patch resolves the finding")
 
 
+class ApplyReviewFeedback(dspy.Signature):
+    """Given the current content of a file on an open remediation PR and a
+    human reviewer's comment requesting a change, produce the revised file.
+
+    Output the COMPLETE revised file content, never a diff — Git computes the
+    diff. Change only what the feedback asks for; preserve every other line,
+    comment, and value verbatim. If the feedback is unclear, out of scope for
+    this file, or you are not confident the revision is correct and complete,
+    say so with a low confidence score rather than guessing.
+
+    IMPORTANT: Never include real credentials, tokens, or secrets in the
+    revised file. Use descriptive placeholders for any secret values."""
+
+    file_path: str = dspy.InputField(desc="Path of the file being revised")
+    current_file: str = dspy.InputField(
+        desc="Current content of the file on the PR branch, verbatim"
+    )
+    feedback: str = dspy.InputField(desc="The human reviewer's PR comment")
+
+    revised_file: str = dspy.OutputField(
+        desc=(
+            "Complete revised file content addressing the feedback. "
+            "CRITICAL: Never include real credentials, tokens, passwords, or "
+            "API keys. Any environment variable that holds a secret MUST use "
+            "a placeholder value in the format <replace-with-X>."
+        )
+    )
+    commit_message: str = dspy.OutputField(desc="Conventional commit message for this revision")
+    confidence: float = dspy.OutputField(desc="0.0 to 1.0 confidence the revision is correct")
+    reasoning: str = dspy.OutputField(desc="Why this revision addresses the feedback")
+
+
 class SummarizeAccessAudit(dspy.Signature):
     """Summarize Authentik access events for one application into a structured,
     pre-reasoned report, so the client receives a synthesis rather than raw

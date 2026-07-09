@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from sqlalchemy import text
 from sqlalchemy.engine import Engine
 from sqlmodel import Session, col, select
 
@@ -16,6 +17,18 @@ class ProposalStore:
 
     def __init__(self, engine: Engine) -> None:
         self.engine = engine
+        self._migrate(engine)
+
+    @staticmethod
+    def _migrate(engine) -> None:
+        """Apply any missing columns to the proposal table (forward-only, additive
+        only) — same convention as `RegistryStore._migrate()`, so a `registry.db`
+        from before `last_comment_id` was added keeps working without a fresh DB."""
+        with engine.connect() as conn:
+            existing = {row[1] for row in conn.execute(text("PRAGMA table_info(proposal)"))}
+            if "last_comment_id" not in existing:
+                conn.execute(text("ALTER TABLE proposal ADD COLUMN last_comment_id INTEGER"))
+                conn.commit()
 
     def create(self, proposal: Proposal) -> Proposal:
         with Session(self.engine) as session:
