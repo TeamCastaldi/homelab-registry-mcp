@@ -165,7 +165,7 @@ at all, and `PROPOSAL_AUTO_CREATE=true` for unattended creation.
 | `PROPOSAL_LABEL` | `homelab-registry-mcp` | Label applied to opened PRs |
 | `PROPOSAL_COMPOSE_PATH_TEMPLATE` | `nodes/{node}/{service}/compose.yaml` | Repo path an app service maps to |
 | `PROPOSAL_COMMENT_POLL_ENABLED` | `false` | Poll open proposal PRs for comments and push a DSPy-revised commit in response (never scheduled in read-only mode) |
-| `PROPOSAL_COMMENT_POLL_INTERVAL_SECONDS` | `300` | |
+| `PROPOSAL_COMMENT_POLL_INTERVAL_SECONDS` | `300` | Poll interval (seconds) when `PROPOSAL_COMMENT_POLL_ENABLED=true` |
 | `PROPOSAL_COMMENT_ALLOWED_USERS` | unset | Comma-separated GitHub/Gitea usernames trusted to trigger a revision. **Fails closed** — empty means every comment is ignored |
 | `NORMALIZATION_ENABLED` | `false` | Reserved; normalization engine is a later Phase 8 increment |
 | `NORMALIZATION_SCHEDULE` | `weekly` | Reserved |
