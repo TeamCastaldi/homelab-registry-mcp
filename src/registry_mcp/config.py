@@ -106,6 +106,12 @@ class Settings(BaseSettings):
     secrets_key_path: str | None = Field(default=None)
     secrets_git_crypt_key: str | None = Field(default=None)
 
+    # Startup health checks (Phase 2) — control-plane provisioning prerequisites
+    # for the GitOps/Ansible write path. Absolute paths only: pydantic-settings
+    # reads these as literal strings, so `~`/`$HOME` are not expanded.
+    ansible_cfg_path: str | None = Field(default=None)
+    ssh_key_path: str | None = Field(default=None)
+
     log_level: str = Field(default="INFO")
 
 

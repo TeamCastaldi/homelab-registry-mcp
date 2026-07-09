@@ -18,12 +18,24 @@ def register_proposal_tools(
     proposals: ProposalStore,
     discovery_engine: DiscoveryEngine,
     store: RegistryStore,
+    read_only: bool = False,
 ) -> None:
     """Register the `proposal_*` write-path tools.
 
     All tools degrade gracefully when the write path is not configured: the
-    create/cancel paths return a structured error rather than raising.
+    create/cancel paths return a structured error rather than raising. When
+    `read_only` is set (startup health check failed; see `system_health_check`),
+    those same two tools refuse to open or close PRs regardless of Git
+    configuration.
     """
+
+    def _read_only_error() -> dict[str, Any] | None:
+        if read_only:
+            return {
+                "error": "Server is in read-only mode (startup health check failed). "
+                "Run system_health_check for details."
+            }
+        return None
 
     @mcp.tool()
     async def proposal_create(service_id: str) -> dict[str, Any]:
@@ -33,6 +45,8 @@ def register_proposal_tools(
         and (unless `PROPOSAL_DRY_RUN=true`) opens a PR. Low-confidence patches
         are recorded as rejected and flagged for manual review instead.
         """
+        if err := _read_only_error():
+            return err
         return await engine.create_for_service(service_id)
 
     @mcp.tool()
@@ -51,6 +65,8 @@ def register_proposal_tools(
     @mcp.tool()
     async def proposal_cancel(proposal_id: str) -> dict[str, Any]:
         """Close a proposal's PR without merging and mark it cancelled."""
+        if err := _read_only_error():
+            return err
         return await engine.cancel(proposal_id)
 
     @mcp.tool()

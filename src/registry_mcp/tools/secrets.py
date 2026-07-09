@@ -184,8 +184,22 @@ def _check_path(repo: Path, path: str) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def register_secrets_tools(mcp: FastMCP, settings: Settings) -> None:
-    """Register the six secrets_* MCP tools."""
+def register_secrets_tools(mcp: FastMCP, settings: Settings, read_only: bool = False) -> None:
+    """Register the six secrets_* MCP tools.
+
+    When `read_only` is set (startup health check failed; see
+    `system_health_check`), the tools that mutate the homelab repo
+    (encrypt/add/rotate) refuse to run regardless of git-crypt configuration;
+    status/decrypt/list_keys stay usable.
+    """
+
+    def _read_only_error() -> dict[str, Any] | None:
+        if read_only:
+            return {
+                "error": "Server is in read-only mode (startup health check failed). "
+                "Run system_health_check for details."
+            }
+        return None
 
     @mcp.tool()
     async def secrets_status() -> dict[str, Any]:
@@ -220,6 +234,8 @@ def register_secrets_tools(mcp: FastMCP, settings: Settings) -> None:
         The file is encrypted on the next git push. Existing unencrypted history is not
         rewritten — only future commits are encrypted.
         """
+        if err := _read_only_error():
+            return err
         if err := _guard(settings):
             return err
         try:
@@ -292,6 +308,8 @@ def register_secrets_tools(mcp: FastMCP, settings: Settings) -> None:
         in .gitattributes it is added automatically. Changes are staged (git add)
         but NOT committed — the operator controls commits.
         """
+        if err := _read_only_error():
+            return err
         if err := _guard(settings):
             return err
         try:
@@ -343,6 +361,8 @@ def register_secrets_tools(mcp: FastMCP, settings: Settings) -> None:
         `path` is not used for filtering — rotation affects the entire repo. It is
         accepted for API symmetry and future per-file rotation support.
         """
+        if err := _read_only_error():
+            return err
         if err := _guard(settings):
             return err
         try:
