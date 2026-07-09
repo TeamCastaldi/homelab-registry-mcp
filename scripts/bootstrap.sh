@@ -110,13 +110,11 @@ require_root_or_sudo
 # --- COLLECT STATIC IP UPFRONT ---
 
 if [ "$SKIP_NETWORK" == "true" ]; then
-    echo "This script will (--skip-network: static IP step deferred):"
+    echo "This script will (--skip-network: static IP application deferred):"
     echo "  - Set hostname to \"${HOSTNAME}\""
     echo "  - Install Docker, Ansible, uv, git-crypt, gh"
     echo "  - Generate an ED25519 SSH key (if none exists)"
     echo ""
-    # No IP collected yet in this mode — run --network-only later to apply one.
-    TARGET_IP="pending (run with --network-only to apply)"
 else
     echo "This script will:"
     echo "  - Set hostname to \"${HOSTNAME}\""
@@ -126,24 +124,26 @@ else
     echo ""
     echo "You are currently connected via: $(ip route get 8.8.8.8 2>/dev/null | awk '{print $7; exit}' || echo 'unknown')"
     echo ""
-
-    read -rp "Enter static IP for ${STATIC_IFACE} [${DEFAULT_IP}]: " TARGET_IP
-    TARGET_IP="${TARGET_IP:-${DEFAULT_IP}}"
-
-    # Validate IP format
-    if ! [[ "$TARGET_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        die "Invalid IP address: $TARGET_IP"
-    fi
-
-    echo ""
-    echo "Configuration:"
-    echo "  Hostname:      ${HOSTNAME}"
-    echo "  Interface:     ${STATIC_IFACE}"
-    echo "  Static IP:     ${TARGET_IP}/24"
-    echo "  Gateway:       ${GATEWAY}"
-    echo "  DNS:           ${DNS_PRIMARY}, ${DNS_SECONDARY}"
-    echo ""
 fi
+
+# The IP is always collected (facts/inventory in Phase 5 need it whether or not
+# it's applied here) — --skip-network only defers *applying* it to Phase 6.
+read -rp "Enter static IP for ${STATIC_IFACE} [${DEFAULT_IP}]: " TARGET_IP
+TARGET_IP="${TARGET_IP:-${DEFAULT_IP}}"
+
+# Validate IP format
+if ! [[ "$TARGET_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    die "Invalid IP address: $TARGET_IP"
+fi
+
+echo ""
+echo "Configuration:"
+echo "  Hostname:      ${HOSTNAME}"
+echo "  Interface:     ${STATIC_IFACE}"
+echo "  Static IP:     ${TARGET_IP}/24"
+echo "  Gateway:       ${GATEWAY}"
+echo "  DNS:           ${DNS_PRIMARY}, ${DNS_SECONDARY}"
+echo ""
 
 if [ "$DRY_RUN" == "true" ]; then
     echo "[DRY-RUN] Would perform the following — no changes made:"

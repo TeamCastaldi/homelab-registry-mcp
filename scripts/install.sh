@@ -75,10 +75,15 @@ prompt_secret() {
 }
 
 # Set KEY=VALUE in .env, replacing an existing line or appending a new one.
-# No-op when VALUE is empty so unanswered prompts leave the .env.example default.
+# By default, no-ops when VALUE is empty so unanswered prompts leave the
+# .env.example default untouched. Pass allow_empty=true to force-blank a key
+# instead (e.g. an optional integration the operator deliberately skipped —
+# otherwise its non-empty .env.example placeholder would silently survive).
 set_env() {
-    local key="$1" value="$2"
-    [ -z "$value" ] && return
+    local key="$1" value="$2" allow_empty="${3:-false}"
+    if [ -z "$value" ] && [ "$allow_empty" != "true" ]; then
+        return
+    fi
     local escaped
     escaped=$(printf '%s' "$value" | sed -e 's/\\/\\\\/g' -e 's/&/\\&/g' -e 's/|/\\|/g')
     if grep -q "^${key}=" .env; then
@@ -103,8 +108,13 @@ if command -v git &>/dev/null; then
     info "git already installed: $(git --version)"
 else
     action "Installing git..."
-    sudo apt-get update -qq
-    sudo apt-get install -y -qq git
+    if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+        apt-get update -qq
+        apt-get install -y -qq git
+    else
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq git
+    fi
     info "git installed: $(git --version)"
 fi
 
@@ -146,7 +156,7 @@ header "[STEP 3] Configuration"
 echo "These populate .env — press Enter to leave any optional value blank/default."
 echo ""
 
-prompt TRAEFIK_API_URL "Traefik API URL (e.g. http://10.0.0.10:8080)"
+prompt TRAEFIK_API_URL "Traefik API URL (e.g. http://10.0.0.10:8080, blank to disable Traefik discovery)"
 
 prompt AUTHENTIK_API_URL "Authentik API URL (e.g. https://sso.example.com/api/v3, blank to skip)"
 if [ -n "${AUTHENTIK_API_URL:-}" ]; then
@@ -179,15 +189,17 @@ if [ -f .env ]; then
     warn ".env already exists — leaving it untouched. Edit it by hand if these values changed."
 else
     cp .env.example .env
-    set_env TRAEFIK_API_URL "${TRAEFIK_API_URL:-}"
-    set_env AUTHENTIK_API_URL "${AUTHENTIK_API_URL:-}"
-    set_env AUTHENTIK_TOKEN "${AUTHENTIK_TOKEN:-}"
-    set_env GIT_PROVIDER "${GIT_PROVIDER:-}"
-    set_env GIT_REPO "${GIT_REPO:-}"
-    set_env GIT_TOKEN "${GIT_TOKEN:-}"
-    set_env GIT_BASE_URL "${GIT_BASE_URL:-}"
+    # allow_empty=true on the optional integrations so leaving a prompt blank
+    # actually disables it, instead of silently keeping the .env.example placeholder.
+    set_env TRAEFIK_API_URL "${TRAEFIK_API_URL:-}" true
+    set_env AUTHENTIK_API_URL "${AUTHENTIK_API_URL:-}" true
+    set_env AUTHENTIK_TOKEN "${AUTHENTIK_TOKEN:-}" true
+    set_env GIT_PROVIDER "${GIT_PROVIDER:-}" true
+    set_env GIT_REPO "${GIT_REPO:-}" true
+    set_env GIT_TOKEN "${GIT_TOKEN:-}" true
+    set_env GIT_BASE_URL "${GIT_BASE_URL:-}" true
     set_env DSPY_ENABLED "${DSPY_ENABLED}"
-    set_env ANTHROPIC_API_KEY "${ANTHROPIC_API_KEY:-}"
+    set_env ANTHROPIC_API_KEY "${ANTHROPIC_API_KEY:-}" true
     info ".env written"
 fi
 
