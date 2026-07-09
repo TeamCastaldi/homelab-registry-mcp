@@ -18,22 +18,34 @@ VALID_PATCH = {
     "reasoning": "router had no auth middleware",
 }
 
+VALID_REVISION = {
+    "revised_file": "services:\n  plex:\n    image: plex\n    restart: unless-stopped\n",
+    "commit_message": "fix: apply review feedback",
+    "confidence": 0.9,
+    "reasoning": "reviewer asked for a restart policy",
+}
+
 
 class FakeReasoner:
-    def __init__(self, result=VALID_PATCH):
+    def __init__(self, result=VALID_PATCH, revision_result=VALID_REVISION):
         self.result = result
+        self.revision_result = revision_result
 
     def generate_remediation_patch(self, **kwargs):
         return self.result
 
+    def apply_review_feedback(self, **kwargs):
+        return self.revision_result
+
 
 class FakeGit:
-    def __init__(self, files=None):
+    def __init__(self, files=None, comments=None):
         self.files = files or {}
         self.branches = []
         self.commits = []
         self.opened = []
         self.closed = []
+        self.comments = comments or {}
 
     async def read_file(self, repo, path, ref):
         return self.files.get(path, "services: {}\n")
@@ -43,6 +55,7 @@ class FakeGit:
 
     async def commit_file(self, repo, path, content, branch, message):
         self.commits.append({"path": path, "content": content, "branch": branch})
+        self.files[path] = content
 
     async def open_pr(self, repo, title, body, branch, base, label=None):
         number = 100 + len(self.opened)
@@ -54,6 +67,9 @@ class FakeGit:
 
     async def close_pr(self, repo, number):
         self.closed.append(number)
+
+    async def list_pr_comments(self, repo, number):
+        return self.comments.get(number, [])
 
 
 class FakeNotifier:
@@ -237,6 +253,87 @@ async def test_after_discovery_disabled_when_not_configured(store):
     engine, proposals = _engine(store, settings=_settings(proposal_auto_create=True), git=None)
     await engine.after_discovery()  # no-op, must not raise
     assert proposals.list_open() == []
+
+
+# --- conversational loop (Phase 3) -------------------------------------------
+
+
+async def test_apply_review_feedback_pushes_commit_and_updates_proposal(store):
+    service = _conflicted(store)
+    notifier = FakeNotifier()
+    git = FakeGit()
+    engine, proposals = _engine(store, git=git, notifier=notifier)
+    created = await engine.create_for_service(service.id)
+    proposal = proposals.get(created["id"])
+
+    comment = {"id": 501, "user": {"login": "nathan"}, "body": "please add a restart policy"}
+    updated = await engine.apply_review_feedback(proposal, comment)
+
+    assert updated.last_comment_id == 501
+    assert "restart: unless-stopped" in updated.diff
+    assert git.commits[-1]["branch"] == proposal.branch
+    assert git.commits[-1]["content"] == updated.diff
+    assert any("revised per feedback" in s["title"] for s in notifier.sent)
+
+
+async def test_apply_review_feedback_rejects_low_confidence_without_committing(store):
+    service = _conflicted(store)
+    notifier = FakeNotifier()
+    git = FakeGit()
+    reasoner = FakeReasoner(revision_result={**VALID_REVISION, "confidence": 0.2})
+    engine, proposals = _engine(store, git=git, notifier=notifier, reasoner=reasoner)
+    created = await engine.create_for_service(service.id)
+    proposal = proposals.get(created["id"])
+    commits_before = len(git.commits)
+
+    comment = {"id": 501, "user": {"login": "nathan"}, "body": "please add a restart policy"}
+    updated = await engine.apply_review_feedback(proposal, comment)
+
+    assert updated.last_comment_id == 501  # never reprocessed even though rejected
+    assert len(git.commits) == commits_before  # nothing pushed
+    assert any("manual review" in s["title"] for s in notifier.sent)
+
+
+async def test_apply_review_feedback_refuses_to_commit_to_base_branch(store):
+    service = _conflicted(store)
+    git = FakeGit()
+    engine, proposals = _engine(store, git=git)
+    created = await engine.create_for_service(service.id)
+    proposal = proposals.get(created["id"])
+    proposal.branch = engine._settings.git_base_branch  # simulate corrupted state
+    commits_before = len(git.commits)
+
+    comment = {"id": 1, "user": {"login": "nathan"}, "body": "please fix this"}
+    try:
+        await engine.apply_review_feedback(proposal, comment)
+        raised = False
+    except Exception:
+        raised = True
+    assert raised
+    assert len(git.commits) == commits_before  # the guard fires before any git call
+
+
+async def test_poll_pr_comments_processes_new_comments_once(store):
+    service = _conflicted(store)
+    git = FakeGit()
+    engine, proposals = _engine(store, git=git)
+    created = await engine.create_for_service(service.id)
+
+    git.comments[created["pr_number"]] = [
+        {"id": 1, "user": {"login": "nathan"}, "body": "please add a restart policy"}
+    ]
+    await engine.poll_pr_comments()
+    assert len(git.commits) == 2  # the initial proposal commit + the revision
+
+    # A second poll with no new comments must not push another commit.
+    await engine.poll_pr_comments()
+    assert len(git.commits) == 2
+
+
+async def test_poll_pr_comments_noop_when_not_configured(store):
+    _conflicted(store)
+    engine, _ = _engine(store, git=None)
+    await engine.poll_pr_comments()  # must not raise
 
 
 # --- store ------------------------------------------------------------------

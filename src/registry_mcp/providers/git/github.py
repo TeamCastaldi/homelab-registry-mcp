@@ -158,3 +158,11 @@ class GitHubGitProvider:
             "PATCH", f"repos/{repo}/pulls/{number}", json={"state": "closed"}
         )
         self._raise_for(response, "close_pr")
+
+    async def list_pr_comments(self, repo: str, number: int) -> list[dict]:
+        """List comments on a PR. PRs are issues in the GitHub API, so this
+        reads the issue comments endpoint — it does not include inline review
+        comments on specific diff lines."""
+        response = await self._request("GET", f"repos/{repo}/issues/{number}/comments")
+        self._raise_for(response, "list_pr_comments")
+        return response.json()
