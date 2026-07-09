@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.9.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.8.0...v0.9.0) (2026-07-09)
+
+
+### Features
+
+* add startup health checks and read-only degradation (Phase 2) ([2c32617](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/2c3261788c07b96652fcd5800b6312f8e05c16f3))
+
+
+### Bug Fixes
+
+* address Copilot review on health checks ([546dc65](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/546dc65b104ef732a3e843c872b8c82c969849fa))
+
 ## [0.8.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.7.3...v0.8.0) (2026-07-09)
 
 
