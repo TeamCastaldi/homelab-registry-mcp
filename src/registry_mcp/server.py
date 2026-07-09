@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
@@ -14,6 +15,7 @@ from registry_mcp.discovery.engine import DiscoveryEngine, build_sources
 from registry_mcp.discovery.scheduler import build_scheduler
 from registry_mcp.dspy import Reasoner, build_reasoner
 from registry_mcp.hardware import HardwareStore
+from registry_mcp.health import check_health
 from registry_mcp.integrations.authentik import register_authentik_tools
 from registry_mcp.integrations.traefik import register_traefik_tools
 from registry_mcp.logging import configure_logging, get_logger
@@ -62,6 +64,13 @@ def build_server(settings: Settings | None = None) -> FastMCP:
     store = RegistryStore(settings.registry_db_path)
     store.purge_old_events(settings.event_retention_days)
     hardware_store = HardwareStore(store.engine)
+    health = check_health(settings)
+    read_only = not health.healthy
+    if read_only:
+        get_logger("registry.server").warning(
+            "starting_read_only",
+            failed_checks=[c.name for c in health.checks if not c.ok],
+        )
     reasoner = build_reasoner(settings)
     proposal_engine, proposal_store = build_proposal_engine(settings, store, reasoner)
     engine = DiscoveryEngine(
@@ -98,8 +107,10 @@ def build_server(settings: Settings | None = None) -> FastMCP:
     register_discovery_tools(mcp, engine)
     register_linking_tools(mcp, store, settings, hardware_store=hardware_store)
     register_hardware_tools(mcp, store, hardware_store)
-    register_proposal_tools(mcp, proposal_engine, proposal_store, engine, store)
-    register_secrets_tools(mcp, settings)
+    register_proposal_tools(
+        mcp, proposal_engine, proposal_store, engine, store, read_only=read_only
+    )
+    register_secrets_tools(mcp, settings, read_only=read_only)
 
     @mcp.tool()
     def health() -> dict[str, str]:
@@ -109,6 +120,20 @@ def build_server(settings: Settings | None = None) -> FastMCP:
             "service": "homelab-registry-mcp",
             "version": __version__,
             "timestamp": datetime.now(UTC).isoformat(),
+        }
+
+    @mcp.tool()
+    def system_health_check() -> dict[str, Any]:
+        """Diagnose control-plane provisioning: Git repo, ansible.cfg, and SSH key.
+
+        Re-evaluates the checks live, but the read-only mode they gate is fixed
+        at server startup — restart the server after fixing an issue to leave
+        read-only mode.
+        """
+        current = check_health(settings)
+        return {
+            "mode": "read-only" if read_only else "read-write",
+            **current.to_dict(),
         }
 
     return mcp
