@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.7.3...v0.8.0) (2026-07-09)
+
+
+### Features
+
+* add curl-bash installer for the control-plane node (Phase 1) ([b25ea56](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/b25ea56da92e899d1688d70b2583f6a29df3638a))
+
+
+### Bug Fixes
+
+* address Copilot review on install pipeline ([8fec9cf](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/8fec9cf7ac7f02e133f8fa1d98c7bd7661c2154c))
+
 ## [0.7.3](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.7.2...v0.7.3) (2026-07-01)
 
 
