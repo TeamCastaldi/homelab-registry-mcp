@@ -12,7 +12,7 @@
 #   → start MCP → run oobe_status
 #
 # Usage:
-#   bash scripts/bootstrap.sh [--dry-run]
+#   bash scripts/bootstrap.sh [--dry-run] [--skip-network] [--network-only]
 #
 # What it does:
 #   1. Collect target static IP (prompted, default 10.0.0.200)
@@ -22,7 +22,12 @@
 #   5. Validate installs
 #   6. Apply static IP to eth0 via nmcli  ← drops SSH session
 #
-# After reconnecting (ssh chester@10.0.0.200):
+# --skip-network runs steps 1-5 only (used by install.sh, which needs Docker
+# etc. installed before it brings the MCP server up — the network swap has
+# to happen last so the SSH session doesn't drop before that).
+# --network-only runs step 6 only, against an already-bootstrapped node.
+#
+# After reconnecting (ssh $TARGET_USER@10.0.0.200):
 #   - Start the MCP server
 #   - Run oobe_status to begin OOBE steps 1-15 (ADR-001 §5.1)
 #
@@ -30,9 +35,13 @@
 
 set -euo pipefail
 
-VERSION="4.2.0"
+VERSION="4.3.0"
 TIMESTAMP=$(date +%Y%m%dT%H%M%S)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# The user to reconnect/SSH as and to configure in the Ansible inventory.
+# Falls back through sudo's caller to $USER — never hardcode an account name.
+TARGET_USER="${SUDO_USER:-$USER}"
 
 # --- FIXED CONFIGURATION ---
 
@@ -61,18 +70,29 @@ require_root_or_sudo() {
 # --- ARGUMENT PARSING ---
 
 DRY_RUN=false
+SKIP_NETWORK=false
+NETWORK_ONLY=false
 for arg in "$@"; do
     case "$arg" in
         --dry-run) DRY_RUN=true ;;
+        --skip-network) SKIP_NETWORK=true ;;
+        --network-only) NETWORK_ONLY=true ;;
         --help|-h)
-            echo "Usage: bash scripts/bootstrap.sh [--dry-run]"
+            echo "Usage: bash scripts/bootstrap.sh [--dry-run] [--skip-network] [--network-only]"
             echo ""
-            echo "  --dry-run   Show what would be done without making changes"
+            echo "  --dry-run        Show what would be done without making changes"
+            echo "  --skip-network   Run hostname/packages/SSH-key/validation/fingerprint only;"
+            echo "                   stop before applying the static IP (Phase 6)"
+            echo "  --network-only   Apply the static IP (Phase 6) only, skipping everything else"
             exit 0
             ;;
         *) die "Unknown option: $arg" ;;
     esac
 done
+
+if [ "$SKIP_NETWORK" == "true" ] && [ "$NETWORK_ONLY" == "true" ]; then
+    die "--skip-network and --network-only are mutually exclusive"
+fi
 
 # --- ENTRY POINT ---
 
@@ -89,15 +109,25 @@ require_root_or_sudo
 
 # --- COLLECT STATIC IP UPFRONT ---
 
-echo "This script will:"
-echo "  - Set hostname to \"${HOSTNAME}\""
-echo "  - Install Docker, Ansible, uv, git-crypt, gh"
-echo "  - Generate an ED25519 SSH key (if none exists)"
-echo "  - Apply a static IP to ${STATIC_IFACE}  ← last step, drops this SSH session"
-echo ""
-echo "You are currently connected via: $(ip route get 8.8.8.8 2>/dev/null | awk '{print $7; exit}' || echo 'unknown')"
-echo ""
+if [ "$SKIP_NETWORK" == "true" ]; then
+    echo "This script will (--skip-network: static IP application deferred):"
+    echo "  - Set hostname to \"${HOSTNAME}\""
+    echo "  - Install Docker, Ansible, uv, git-crypt, gh"
+    echo "  - Generate an ED25519 SSH key (if none exists)"
+    echo ""
+else
+    echo "This script will:"
+    echo "  - Set hostname to \"${HOSTNAME}\""
+    echo "  - Install Docker, Ansible, uv, git-crypt, gh"
+    echo "  - Generate an ED25519 SSH key (if none exists)"
+    echo "  - Apply a static IP to ${STATIC_IFACE}  ← last step, drops this SSH session"
+    echo ""
+    echo "You are currently connected via: $(ip route get 8.8.8.8 2>/dev/null | awk '{print $7; exit}' || echo 'unknown')"
+    echo ""
+fi
 
+# The IP is always collected (facts/inventory in Phase 5 need it whether or not
+# it's applied here) — --skip-network only defers *applying* it to Phase 6.
 read -rp "Enter static IP for ${STATIC_IFACE} [${DEFAULT_IP}]: " TARGET_IP
 TARGET_IP="${TARGET_IP:-${DEFAULT_IP}}"
 
@@ -118,20 +148,24 @@ echo ""
 if [ "$DRY_RUN" == "true" ]; then
     echo "[DRY-RUN] Would perform the following — no changes made:"
     echo ""
-    echo "  1. Set hostname to: ${HOSTNAME}"
-    echo "  2. Install packages:"
-    echo "       docker-ce, docker-ce-cli, containerd.io, docker-compose-plugin"
-    echo "       ansible, ansible-lint"
-    echo "       uv  (via astral.sh installer)"
-    echo "       git-crypt"
-    echo "       gh  (GitHub CLI)"
-    echo "  3. Generate ED25519 SSH key (if ~/.ssh/id_ed25519 does not exist)"
-    echo "  4. Validate all installs"
-    echo "  5. Apply static IP ${TARGET_IP}/24 to ${STATIC_IFACE} via nmcli"
-    echo "       Gateway: ${GATEWAY}"
-    echo "       DNS:     ${DNS_PRIMARY}, ${DNS_SECONDARY}"
-    echo "       This will drop your current SSH session."
-    echo "       Reconnect: ssh chester@${TARGET_IP}"
+    if [ "$NETWORK_ONLY" != "true" ]; then
+        echo "  1. Set hostname to: ${HOSTNAME}"
+        echo "  2. Install packages:"
+        echo "       docker-ce, docker-ce-cli, containerd.io, docker-compose-plugin"
+        echo "       ansible, ansible-lint"
+        echo "       uv  (via astral.sh installer)"
+        echo "       git-crypt"
+        echo "       gh  (GitHub CLI)"
+        echo "  3. Generate ED25519 SSH key (if ~/.ssh/id_ed25519 does not exist)"
+        echo "  4. Validate all installs"
+    fi
+    if [ "$SKIP_NETWORK" != "true" ]; then
+        echo "  5. Apply static IP ${TARGET_IP}/24 to ${STATIC_IFACE} via nmcli"
+        echo "       Gateway: ${GATEWAY}"
+        echo "       DNS:     ${DNS_PRIMARY}, ${DNS_SECONDARY}"
+        echo "       This will drop your current SSH session."
+        echo "       Reconnect: ssh ${TARGET_USER}@${TARGET_IP}"
+    fi
     echo ""
     echo "Re-run without --dry-run to execute."
     exit 0
@@ -139,6 +173,8 @@ fi
 
 read -rp "Proceed? [y/N]: " confirm
 [[ "$confirm" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 0; }
+
+if [ "$NETWORK_ONLY" != "true" ]; then
 
 # =============================================================================
 # PHASE 1: HOSTNAME
@@ -271,7 +307,7 @@ else
     action "Generating ED25519 key pair..."
     mkdir -p "$HOME/.ssh"
     chmod 700 "$HOME/.ssh"
-    ssh-keygen -t ed25519 -f "$SSH_KEY" -N "" -C "chester@${HOSTNAME}-$(date +%Y%m%d)"
+    ssh-keygen -t ed25519 -f "$SSH_KEY" -N "" -C "${TARGET_USER}@${HOSTNAME}-$(date +%Y%m%d)"
     info "SSH key generated: ${SSH_KEY}"
 fi
 
@@ -382,13 +418,17 @@ all:
   hosts:
     ${HOSTNAME}:
       ansible_host: ${TARGET_IP}
-      ansible_user: chester
+      ansible_user: ${TARGET_USER}
       role: control-plane
 YAML
     info "Inventory stub written: ${INVENTORY_FILE}"
 else
     info "Inventory stub already contains ${HOSTNAME} — skipped"
 fi
+
+fi # NETWORK_ONLY
+
+if [ "$SKIP_NETWORK" != "true" ]; then
 
 # =============================================================================
 # PHASE 6: STATIC IP  ← LAST — DROPS SSH SESSION
@@ -397,7 +437,7 @@ fi
 header "[PHASE 6] Static IP (eth0)"
 echo ""
 warn "This is the final step. It will apply the static IP and drop your SSH session."
-warn "Reconnect after: ssh chester@${TARGET_IP}"
+warn "Reconnect after: ssh ${TARGET_USER}@${TARGET_IP}"
 echo ""
 read -rp "  Apply static IP ${TARGET_IP}/24 to ${STATIC_IFACE} now? [y/N]: " apply_ip
 
@@ -414,7 +454,7 @@ if [[ "$apply_ip" =~ ^[Yy]$ ]]; then
     echo "  DNS:        ${DNS_PRIMARY}, ${DNS_SECONDARY}"
     echo ""
     echo "  After reconnecting:"
-    echo "    ssh chester@${TARGET_IP}"
+    echo "    ssh ${TARGET_USER}@${TARGET_IP}"
     echo ""
     echo "  OOBE handoff (ADR-001 §5.1):"
     echo "    Start the MCP server, then run: oobe_status"
@@ -461,3 +501,5 @@ else
     echo "    The OOBE will guide you through steps 1-15."
     echo ""
 fi
+
+fi # SKIP_NETWORK

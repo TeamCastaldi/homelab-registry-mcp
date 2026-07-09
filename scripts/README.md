@@ -6,10 +6,19 @@ scripts are tools for the operator/developer.
 
 ## What's here
 
+- **`install.sh`** — the recommended one-shot entry point for a fresh control-plane
+  node: clones the repo, runs `bootstrap.sh --skip-network`, prompts for the
+  Traefik/Authentik/Git secrets and an optional DSPy opt-in, writes `.env`, brings
+  the MCP server up with `docker compose up -d`, and only then applies the static
+  IP (`bootstrap.sh --network-only`) so the server is already running when the SSH
+  session drops. Designed to be run via
+  `curl -fsSL <raw-url>/scripts/install.sh | bash`; every prompt can be pre-seeded
+  with an environment variable of the same name for non-interactive use.
 - **`bootstrap.sh`** — prepares a fresh Raspberry Pi (Debian Trixie) as the
   homelab control-plane node: installs Docker, Ansible, `uv`, `git-crypt`, and the
   GitHub CLI, sets the hostname, generates an SSH key, and applies a static IP.
-  Run once after imaging — `bash scripts/bootstrap.sh [--dry-run]`.
+  Run directly for a bare provisioning pass, or let `install.sh` drive it —
+  `bash scripts/bootstrap.sh [--dry-run] [--skip-network] [--network-only]`.
 - **`setup-homelab-repo.sh`** — one-time bootstrap of the private homelab Git repo
   (Phase C): creates the repo, initialises `git-crypt`, configures `.gitattributes`
   to encrypt `**/.env`, scaffolds `nodes/`, and exports the key. Backs the
