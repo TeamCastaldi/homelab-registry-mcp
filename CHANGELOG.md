@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.9.0...v0.10.0) (2026-07-09)
+
+
+### Features
+
+* add conversational GitOps loop for open proposal PRs (Phase 3) ([df452a8](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/df452a87b1adb0566562b795add07cac2d7c2d6a))
+
+
+### Bug Fixes
+
+* address Copilot review on the conversational GitOps loop ([2cc0ca6](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/2cc0ca6cf2f63866e75fcb9cad63d02035959e47))
+
 ## [0.9.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.8.0...v0.9.0) (2026-07-09)
 
 
