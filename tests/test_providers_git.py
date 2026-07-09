@@ -74,7 +74,11 @@ class FakeGitea:
             return httpx.Response(200, json={"state": "closed"})
         if "/issues/" in path and path.endswith("/comments") and method == "GET":
             number = int(path.split("/issues/", 1)[1].split("/comments")[0])
-            return httpx.Response(200, json=self.comments.get(number, []))
+            all_comments = self.comments.get(number, [])
+            page = int(request.url.params.get("page", "1"))
+            limit = int(request.url.params.get("limit", "100"))
+            start = (page - 1) * limit
+            return httpx.Response(200, json=all_comments[start : start + limit])
         return httpx.Response(500, json={"message": f"unhandled {method} {path}"})
 
 
@@ -158,6 +162,14 @@ async def test_list_pr_comments_empty_when_none_posted():
     fake = FakeGitea()
     comments = await _provider(fake).list_pr_comments(REPO, 41)
     assert comments == []
+
+
+async def test_list_pr_comments_paginates_past_first_page():
+    many = [{"id": i, "user": {"login": "nathan"}, "body": f"comment {i}"} for i in range(1, 151)]
+    fake = FakeGitea(comments={41: many})
+    comments = await _provider(fake).list_pr_comments(REPO, 41)
+    assert len(comments) == 150
+    assert [c["id"] for c in comments] == list(range(1, 151))
 
 
 # --- factory --------------------------------------------------------------
@@ -256,7 +268,11 @@ class FakeGitHub:
             return httpx.Response(200, json={"state": "closed"})
         if "/issues/" in path and path.endswith("/comments") and method == "GET":
             number = int(path.split("/issues/", 1)[1].split("/comments")[0])
-            return httpx.Response(200, json=self.comments.get(number, []))
+            all_comments = self.comments.get(number, [])
+            page = int(request.url.params.get("page", "1"))
+            limit = int(request.url.params.get("limit", "100"))
+            start = (page - 1) * limit
+            return httpx.Response(200, json=all_comments[start : start + limit])
         return httpx.Response(500, json={"message": f"unhandled {method} {path}"})
 
 
@@ -378,3 +394,11 @@ async def test_github_list_pr_comments_empty_when_none_posted():
     fake = FakeGitHub()
     comments = await _gh(fake).list_pr_comments(REPO, 41)
     assert comments == []
+
+
+async def test_github_list_pr_comments_paginates_past_first_page():
+    many = [{"id": i, "user": {"login": "nathan"}, "body": f"comment {i}"} for i in range(1, 151)]
+    fake = FakeGitHub(comments={41: many})
+    comments = await _gh(fake).list_pr_comments(REPO, 41)
+    assert len(comments) == 150
+    assert [c["id"] for c in comments] == list(range(1, 151))

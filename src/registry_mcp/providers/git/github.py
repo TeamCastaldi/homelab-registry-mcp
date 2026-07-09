@@ -160,9 +160,23 @@ class GitHubGitProvider:
         self._raise_for(response, "close_pr")
 
     async def list_pr_comments(self, repo: str, number: int) -> list[dict]:
-        """List comments on a PR. PRs are issues in the GitHub API, so this
-        reads the issue comments endpoint — it does not include inline review
-        comments on specific diff lines."""
-        response = await self._request("GET", f"repos/{repo}/issues/{number}/comments")
-        self._raise_for(response, "list_pr_comments")
-        return response.json()
+        """List all comments on a PR, paginating until exhausted. PRs are issues
+        in the GitHub API, so this reads the issue comments endpoint — it does
+        not include inline review comments on specific diff lines."""
+        comments: list[dict] = []
+        page = 1
+        while True:
+            response = await self._request(
+                "GET",
+                f"repos/{repo}/issues/{number}/comments",
+                params={"per_page": 100, "page": page},
+            )
+            self._raise_for(response, "list_pr_comments")
+            batch = response.json()
+            if not batch:
+                break
+            comments.extend(batch)
+            if len(batch) < 100:
+                break
+            page += 1
+        return comments

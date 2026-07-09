@@ -100,6 +100,12 @@ class Settings(BaseSettings):
     # Never runs when the startup health check failed (read-only mode).
     proposal_comment_poll_enabled: bool = Field(default=False)
     proposal_comment_poll_interval_seconds: int = Field(default=300)
+    # Fail-closed allowlist: comma-separated GitHub/Gitea usernames whose PR
+    # comments are trusted to trigger an autonomous commit. Empty (the default)
+    # means no comment is trusted, even with polling enabled — a PR is visible
+    # to anyone with repo access, and an unauthenticated commenter must never be
+    # able to steer a committed change.
+    proposal_comment_allowed_users: str = Field(default="")
 
     # Normalization (opt-in; engine deferred to a later Phase 8 increment).
     normalization_enabled: bool = Field(default=False)

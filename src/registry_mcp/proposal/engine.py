@@ -307,16 +307,39 @@ class ProposalEngine:
         for comment in new_comments:
             proposal = await self.apply_review_feedback(proposal, comment)
 
+    def _is_authorized_commenter(self, comment: dict) -> bool:
+        """Fail-closed allowlist check: a PR is visible to anyone with repo
+        read access, so an unrecognized commenter must never trigger a commit.
+        Empty `PROPOSAL_COMMENT_ALLOWED_USERS` means nobody is trusted."""
+        allowed = {
+            u.strip() for u in self._settings.proposal_comment_allowed_users.split(",") if u.strip()
+        }
+        if not allowed:
+            return False
+        login = str((comment.get("user") or {}).get("login", ""))
+        return login in allowed
+
     async def apply_review_feedback(self, proposal: Proposal, comment: dict) -> Proposal:
         """Revise the proposal's file per one PR comment and push a new commit.
 
-        Always advances `last_comment_id` so the comment is never reprocessed,
-        whether or not the revision was applied. A rejected revision (low
-        confidence, invalid YAML, or reasoning layer unavailable) notifies for
-        manual review and leaves the branch untouched — same no-fallback rule
-        as the initial patch.
+        Advances `last_comment_id` so the comment is never reprocessed in every
+        case except one: `_assert_feature_branch` raising on a corrupted
+        `proposal.branch` is an invariant violation, not a normal rejection, so
+        it propagates before `last_comment_id` is recorded and the poll will
+        keep retrying (and logging) until the underlying data is fixed.
+
+        An untrusted commenter (see `_is_authorized_commenter`) or a rejected
+        revision (low confidence, invalid YAML, or reasoning layer unavailable)
+        both advance `last_comment_id` and leave the branch untouched — same
+        no-fallback rule as the initial patch.
         """
         comment_id = int(comment.get("id", 0))
+        if not self._is_authorized_commenter(comment):
+            author = str((comment.get("user") or {}).get("login", "") or "unknown")
+            _log.warning("comment_ignored_untrusted_author", proposal_id=proposal.id, author=author)
+            proposal.last_comment_id = comment_id
+            return self._proposals.save(proposal)
+
         body = str(comment.get("body", "") or "")
         repo = self._settings.git_repo
         base = self._settings.git_base_branch

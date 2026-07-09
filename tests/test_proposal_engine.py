@@ -262,7 +262,8 @@ async def test_apply_review_feedback_pushes_commit_and_updates_proposal(store):
     service = _conflicted(store)
     notifier = FakeNotifier()
     git = FakeGit()
-    engine, proposals = _engine(store, git=git, notifier=notifier)
+    settings = _settings(proposal_comment_allowed_users="nathan")
+    engine, proposals = _engine(store, settings=settings, git=git, notifier=notifier)
     created = await engine.create_for_service(service.id)
     proposal = proposals.get(created["id"])
 
@@ -276,12 +277,48 @@ async def test_apply_review_feedback_pushes_commit_and_updates_proposal(store):
     assert any("revised per feedback" in s["title"] for s in notifier.sent)
 
 
+async def test_apply_review_feedback_ignores_untrusted_commenter_by_default(store):
+    """PROPOSAL_COMMENT_ALLOWED_USERS is empty by default — fail closed."""
+    service = _conflicted(store)
+    notifier = FakeNotifier()
+    git = FakeGit()
+    engine, proposals = _engine(store, git=git, notifier=notifier)
+    created = await engine.create_for_service(service.id)
+    proposal = proposals.get(created["id"])
+    commits_before = len(git.commits)
+
+    comment = {"id": 501, "user": {"login": "nathan"}, "body": "please add a restart policy"}
+    updated = await engine.apply_review_feedback(proposal, comment)
+
+    assert updated.last_comment_id == 501  # never reprocessed
+    assert len(git.commits) == commits_before  # nothing pushed — untrusted author
+
+
+async def test_apply_review_feedback_ignores_commenter_outside_allowlist(store):
+    service = _conflicted(store)
+    git = FakeGit()
+    settings = _settings(proposal_comment_allowed_users="someone-else")
+    engine, proposals = _engine(store, settings=settings, git=git)
+    created = await engine.create_for_service(service.id)
+    proposal = proposals.get(created["id"])
+    commits_before = len(git.commits)
+
+    comment = {"id": 501, "user": {"login": "nathan"}, "body": "please add a restart policy"}
+    updated = await engine.apply_review_feedback(proposal, comment)
+
+    assert updated.last_comment_id == 501
+    assert len(git.commits) == commits_before
+
+
 async def test_apply_review_feedback_rejects_low_confidence_without_committing(store):
     service = _conflicted(store)
     notifier = FakeNotifier()
     git = FakeGit()
     reasoner = FakeReasoner(revision_result={**VALID_REVISION, "confidence": 0.2})
-    engine, proposals = _engine(store, git=git, notifier=notifier, reasoner=reasoner)
+    settings = _settings(proposal_comment_allowed_users="nathan")
+    engine, proposals = _engine(
+        store, settings=settings, git=git, notifier=notifier, reasoner=reasoner
+    )
     created = await engine.create_for_service(service.id)
     proposal = proposals.get(created["id"])
     commits_before = len(git.commits)
@@ -297,7 +334,8 @@ async def test_apply_review_feedback_rejects_low_confidence_without_committing(s
 async def test_apply_review_feedback_refuses_to_commit_to_base_branch(store):
     service = _conflicted(store)
     git = FakeGit()
-    engine, proposals = _engine(store, git=git)
+    settings = _settings(proposal_comment_allowed_users="nathan")
+    engine, proposals = _engine(store, settings=settings, git=git)
     created = await engine.create_for_service(service.id)
     proposal = proposals.get(created["id"])
     proposal.branch = engine._settings.git_base_branch  # simulate corrupted state
@@ -316,7 +354,8 @@ async def test_apply_review_feedback_refuses_to_commit_to_base_branch(store):
 async def test_poll_pr_comments_processes_new_comments_once(store):
     service = _conflicted(store)
     git = FakeGit()
-    engine, proposals = _engine(store, git=git)
+    settings = _settings(proposal_comment_allowed_users="nathan")
+    engine, proposals = _engine(store, settings=settings, git=git)
     created = await engine.create_for_service(service.id)
 
     git.comments[created["pr_number"]] = [
@@ -346,3 +385,37 @@ def test_store_find_open_scopes_by_service_and_type(store):
     proposals.create(Proposal(service_id="svc-1", finding_type=FindingType.auth_mode_conflict))
     assert proposals.find_open("svc-1", FindingType.auth_mode_conflict) is not None
     assert proposals.find_open("svc-2", FindingType.auth_mode_conflict) is None
+
+
+def test_store_migrates_proposal_table_missing_last_comment_id():
+    """A registry.db predating last_comment_id must keep working without a
+    fresh DB — ProposalStore.__init__ adds the column on an old schema."""
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.pool import StaticPool
+
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    with engine.connect() as conn:
+        # Old schema: every current column except last_comment_id.
+        conn.execute(
+            text(
+                "CREATE TABLE proposal ("
+                "id VARCHAR PRIMARY KEY, service_id VARCHAR, finding_type VARCHAR, "
+                "pr_url VARCHAR, pr_number INTEGER, branch VARCHAR, file_path VARCHAR, "
+                "diff VARCHAR, status VARCHAR, rejection_reason VARCHAR, "
+                "confidence FLOAT, actor VARCHAR, created_at DATETIME, resolved_at DATETIME"
+                ")"
+            )
+        )
+        conn.commit()
+        existing = {row[1] for row in conn.execute(text("PRAGMA table_info(proposal)"))}
+        assert "last_comment_id" not in existing
+
+    proposals = ProposalStore(engine)
+    with engine.connect() as conn:
+        existing = {row[1] for row in conn.execute(text("PRAGMA table_info(proposal)"))}
+        assert "last_comment_id" in existing
+
+    created = proposals.create(Proposal(service_id="svc-1", finding_type="auth_mode_conflict"))
+    assert created.last_comment_id is None
