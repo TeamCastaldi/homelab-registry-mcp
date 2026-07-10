@@ -39,6 +39,9 @@ scripts are tools for the operator/developer.
 - Application code (that goes in `src/registry_mcp/`)
 - Test files (those go in `tests/`)
 - CI/CD pipeline definitions (those go in `.github/workflows/`)
+- The deploy automation itself — the `docker-stack-deploy` Ansible role and
+  playbook live in `ansible/`, invoked by the reusable
+  `.github/workflows/deploy.yml` (Phase 4, see `CLAUDE.md`)
 
 ## Conventions
 

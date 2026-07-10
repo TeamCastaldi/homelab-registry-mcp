@@ -1,0 +1,6 @@
+---
+# docker-stack-deploy keeps the hyphenated name from ADR-001/updated-phases.md
+# ("the docker-stack-deploy role") rather than ansible-lint's underscore
+# convention — that's a naming-style rule, not a correctness one.
+skip_list:
+  - role-name

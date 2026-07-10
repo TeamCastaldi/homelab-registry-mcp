@@ -35,6 +35,7 @@ htmlcov/
 .vscode/
 *.swp
 
-# Ansible runtime
+# Ansible runtime (bootstrap.sh logs/facts; the docker-stack-deploy role and
+# deploy playbook under ansible/roles and ansible/playbooks are tracked)
 .ansible/
-ansible/
+ansible/archive/
