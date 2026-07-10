@@ -1,8 +1,8 @@
-# ADR-004: Upstream Version Detection and Update Proposals
+# ARD-004: Upstream Version Detection and Update Proposals
 
 **Status:** Proposed  
-**Date:** 2026-06-09  
-**Deciders:** Nathan Castaldi  
+**Date:** 2026  
+**Deciders:** the maintainer  
 
 ---
 

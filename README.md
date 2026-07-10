@@ -38,6 +38,11 @@ query and act on.
 - Manages encrypted secrets in the homelab Git repo via `git-crypt`: read, add,
   rotate, and list keys in `.env` files without the operator touching the command
   line.
+- Closes the loop after a human merges a PR: a reusable GitHub Actions workflow
+  and Ansible role (shipped here — your private homelab repo only holds config)
+  redeploy the affected compose stack automatically.
+- Sends a templated HTML email — PR summary, diff, Approve/Request Changes
+  links — the moment a proposal PR opens, so you don't have to poll GitHub.
 
 ## How to run
 
@@ -53,7 +58,7 @@ only then applies a static IP — so the server is already running by the time
 the SSH session drops.
 
 ```bash
-VERSION=main  # or a tagged release, e.g. v0.7.3
+VERSION=main  # or the latest tagged release, e.g. v0.11.0
 curl -fsSL "https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/${VERSION}/scripts/install.sh" | bash
 ```
 
@@ -79,13 +84,13 @@ the image is pulled from GHCR and no source checkout is required.
 Download just the two files you need — no full repo clone required:
 
 ```bash
-VERSION=v0.6.2  # or "main" to track the latest build
+VERSION=main  # or the latest tagged release, e.g. v0.11.0
 mkdir homelab-registry-mcp && cd homelab-registry-mcp
 curl -fsSL "https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/${VERSION}/docker-compose.yml" -o docker-compose.yml
 curl -fsSL "https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/${VERSION}/.env.example" -o .env.example
 cp .env.example .env
 # Set at least TRAEFIK_API_URL, AUTHENTIK_API_URL, AUTHENTIK_TOKEN, DOCKER_BASE_URL.
-# To pin the container image to the same release, add REGISTRY_MCP_VERSION=v0.6.1 to .env.
+# To pin the container image to the same release, add REGISTRY_MCP_VERSION=<same tag> to .env.
 ```
 
 `.env.example` documents every option. The write path and the reasoning layer
@@ -121,7 +126,7 @@ In Claude Desktop, add an MCP server with the same URL under Settings.
 - [docs/ARDs/ARD-003-OOBE-Decisions.md](docs/ARDs/ARD-003-OOBE-Decisions.md) — out-of-box experience decisions
 - [docs/ARDs/ARD-004-Upstream-Version-Detection-and-Update-Proposals.md](docs/ARDs/ARD-004-Upstream-Version-Detection-and-Update-Proposals.md) — upstream version detection and update proposal design
 - [docs/SOPs/SOP-001-Deploy-New-Service.md](docs/SOPs/SOP-001-Deploy-New-Service.md) — runbook for deploying a new service to an onboarded node
-- [docs/plans/phase-d.md](docs/plans/phase-d.md) — migration plan: Heimdall → Watchtower deployment with Traefik static backend
+- [docs/plans/phase-d.md](docs/plans/phase-d.md) — migration plan: workload node → dedicated control-plane node deployment with Traefik static backend
 - [CONTRIBUTING.md](CONTRIBUTING.md) — branch naming, commit format, and the local checks to run before a PR
 - [SECURITY.md](SECURITY.md) — security posture, supported versions, and how to report a vulnerability
 - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — expected conduct in project spaces

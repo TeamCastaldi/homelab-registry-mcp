@@ -1,8 +1,8 @@
 # SOP: Deploy a New Service to an Onboarded Node
 
-**Owner:** Nathan Castaldi  
+**Owner:** the maintainer  
 **Frequency:** As needed  
-**Last Updated:** 2026-06-09  
+**Last Updated:** 2026  
 **Status:** Interim — supersedes when Ansible bootstrap role (Phase E) is complete
 
 ---

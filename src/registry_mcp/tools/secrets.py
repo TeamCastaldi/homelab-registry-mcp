@@ -230,7 +230,7 @@ def register_secrets_tools(mcp: FastMCP, settings: Settings, read_only: bool = F
     async def secrets_encrypt(path: str) -> dict[str, Any]:
         """Add a file to .gitattributes so git-crypt encrypts it.
 
-        `path` must be relative to the homelab repo root (e.g. 'nodes/heimdall/app/.env').
+        `path` must be relative to the homelab repo root (e.g. 'nodes/workload-01/app/.env').
         The file is encrypted on the next git push. Existing unencrypted history is not
         rewritten — only future commits are encrypted.
         """

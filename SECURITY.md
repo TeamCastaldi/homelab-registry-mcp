@@ -8,7 +8,7 @@ fixes target the latest release line; older tags are not back-patched.
 
 | Version | Supported |
 |---------|-----------|
-| Latest `0.6.x` release | ✅ |
+| Latest tagged release | ✅ |
 | Older tags | ❌ |
 
 ## Reporting a vulnerability

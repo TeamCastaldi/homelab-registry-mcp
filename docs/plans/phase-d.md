@@ -2,25 +2,25 @@
 
 ## Context
 
-Phase D moves registry-mcp from Heimdall to Watchtower (the dedicated control plane Pi at `<watchtower-ip>`). Traefik stays on Heimdall and routes `registry-mcp.<your-domain>` to Watchtower via a static backend — no Docker label magic, just an IP:port pointer. Komodo is left running and untouched.
+Phase D moves registry-mcp from the workload node to the dedicated control-plane node (`<control-plane-ip>`). Traefik stays on the workload node and routes `registry-mcp.<your-domain>` to the control-plane node via a static backend — no Docker label magic, just an IP:port pointer. The prior orchestration tool is left running and untouched.
 
 Known infrastructure:
-- **Watchtower**: Pi at `<watchtower-ip>`, registry-mcp will run here
-- **Heimdall**: Traefik v3.6.5 on `proxy-net`, dynamic config at `/mnt/appdata/komodo/repos/heimdall/homelab/nodes/heimdall/core/traefik/dynamic/` (Komodo-managed git repo, mounted `:ro` into Traefik)
+- **Control-plane node**: Pi at `<control-plane-ip>`, registry-mcp will run here
+- **Workload node**: Traefik on `proxy-net`, dynamic config at `/mnt/appdata/<orchestrator>/repos/<workload-node>/homelab/nodes/<workload-node>/core/traefik/dynamic/` (managed by the prior orchestration tool's git repo, mounted `:ro` into Traefik)
 - **TLS**: Cloudflare DNS challenge (`certResolver: cloudflare`)
 - **Domain**: `<your-domain>`
-- **Old registry-mcp**: was on Heimdall, already shut down — no data migration needed (starting fresh)
+- **Old registry-mcp**: was on the workload node, already shut down — no data migration needed (starting fresh)
 
 ---
 
-## Part 1 — docker-compose.yml (commit to repo, pull on Watchtower)
+## Part 1 — docker-compose.yml (commit to repo, pull on the control-plane node)
 
-Two changes needed for Watchtower deployment:
+Two changes needed for control-plane deployment:
 
 **Port binding**: Change `127.0.0.1:8765:8765` → `0.0.0.0:8765:8765`
-Traefik on Heimdall reaches Watchtower over LAN. Localhost-only binding blocks it.
+Traefik on the workload node reaches the control-plane node over LAN. Localhost-only binding blocks it.
 
-**Remove Traefik Docker labels and network**: The existing labels assume Traefik is on the same Docker network as registry-mcp. On Watchtower, Traefik is on a different host entirely — routing is via static backend, not Docker label discovery. The `traefik` network serves no purpose on Watchtower and would need to be manually created before `docker compose up` would succeed.
+**Remove Traefik Docker labels and network**: The existing labels assume Traefik is on the same Docker network as registry-mcp. On the control-plane node, Traefik is on a different host entirely — routing is via static backend, not Docker label discovery. The `traefik` network serves no purpose here and would need to be manually created before `docker compose up` would succeed.
 
 Replace the labels and network blocks with a comment explaining the routing model.
 
@@ -28,15 +28,15 @@ Replace the labels and network blocks with a comment explaining the routing mode
 
 ---
 
-## Part 2 — Traefik static backend on Heimdall (manual step)
+## Part 2 — Traefik static backend on the workload node (manual step)
 
 Create a new dynamic config file in the directory Traefik already watches:
 
-**Path on Heimdall**: `/mnt/appdata/komodo/repos/heimdall/homelab/nodes/heimdall/core/traefik/dynamic/registry-mcp.yml`
+**Path on the workload node**: `/mnt/appdata/<orchestrator>/repos/<workload-node>/homelab/nodes/<workload-node>/core/traefik/dynamic/registry-mcp.yml`
 
 ```yaml
 # registry-mcp.yml
-# Routes registry-mcp.<your-domain> → Watchtower (control plane Pi)
+# Routes registry-mcp.<your-domain> → the control-plane node
 # No auth middleware — MCP clients cannot follow Authentik redirect flows.
 # LAN-only by design; do not add ForwardAuth until a token/mTLS strategy lands.
 http:
@@ -53,48 +53,48 @@ http:
     registry-mcp-svc:
       loadBalancer:
         servers:
-          - url: "http://<watchtower-ip>:8765"
+          - url: "http://<control-plane-ip>:8765"
 ```
 
 Traefik watches `/dynamic` with a file provider — the new file is picked up immediately, no restart needed.
 
-**Also commit this file** to whatever git remote backs `/mnt/appdata/komodo/repos/heimdall/homelab` so Komodo syncs don't wipe it. Check the remote with:
+**Also commit this file** to whatever git remote backs the workload node's homelab checkout so a sync from the prior orchestration tool doesn't wipe it. Check the remote with:
 ```bash
-git -C /mnt/appdata/komodo/repos/heimdall/homelab remote -v
+git -C /mnt/appdata/<orchestrator>/repos/<workload-node>/homelab remote -v
 ```
 
 ---
 
-## Part 3 — Seed the new homelab repo structure (on Watchtower)
+## Part 3 — Seed the new homelab repo structure (on the control-plane node)
 
 The new `<your-org>/homelab` repo at `/opt/homelab` needs the same path structure so Phase E (Ansible) has a home. Create the skeleton now:
 
 ```bash
-mkdir -p /opt/homelab/nodes/heimdall/core/traefik/dynamic
-cp <the registry-mcp.yml we just wrote> /opt/homelab/nodes/heimdall/core/traefik/dynamic/registry-mcp.yml
-cd /opt/homelab && git add . && git commit -m "chore: seed nodes/heimdall traefik dynamic config" && git push
+mkdir -p /opt/homelab/nodes/<workload-node>/core/traefik/dynamic
+cp <the registry-mcp.yml we just wrote> /opt/homelab/nodes/<workload-node>/core/traefik/dynamic/registry-mcp.yml
+cd /opt/homelab && git add . && git commit -m "chore: seed nodes/<workload-node> traefik dynamic config" && git push
 ```
 
 This makes the new homelab repo the eventual source of truth for Traefik dynamic config, which Ansible (Phase E) will deploy.
 
 ---
 
-## Part 4 — Deploy on Watchtower
+## Part 4 — Deploy on the control-plane node
 
 ```bash
 cd ~/homelab-registry-mcp
 git pull                          # get the docker-compose.yml changes
 docker compose pull               # pull latest image from ghcr.io
 docker compose up -d              # start the container
-docker compose logs -f registry-mcp   # watch for "scheduler_started"
+docker compose logs -f homelab-registry-mcp   # watch for "scheduler_started"
 ```
 
 ---
 
 ## Part 5 — DNS
 
-`registry-mcp.<your-domain>` needs a DNS entry pointing to Heimdall (Traefik's host), not Watchtower directly. Check whether this is:
-- **Local DNS** (AdGuard/Pi-hole on the LAN) — add an A record for `registry-mcp.<your-domain>` → Heimdall's LAN IP
+`registry-mcp.<your-domain>` needs a DNS entry pointing to the workload node (Traefik's host), not the control-plane node directly. Check whether this is:
+- **Local DNS** (AdGuard/Pi-hole on the LAN) — add an A record for `registry-mcp.<your-domain>` → the workload node's LAN IP
 - **Cloudflare public DNS** — add an A record there (but ADR says LAN-only, so local DNS is preferred)
 
 Determine which DNS is authoritative for LAN devices before proceeding.
@@ -103,10 +103,10 @@ Determine which DNS is authoritative for LAN devices before proceeding.
 
 ## Verification
 
-1. From Heimdall: `curl -v http://<watchtower-ip>:8765/` — confirms Watchtower port is reachable
+1. From the workload node: `curl -v http://<control-plane-ip>:8765/` — confirms the control-plane node's port is reachable
 2. From any LAN device: `curl -v https://registry-mcp.<your-domain>/` — confirms Traefik routing + TLS
 3. Traefik dashboard at `https://proxy.<your-domain>/dashboard/` — confirm `registry-mcp` router appears
-4. `docker compose logs registry-mcp` on Watchtower — confirm `scheduler_started` and no errors
+4. `docker compose logs homelab-registry-mcp` on the control-plane node — confirm `scheduler_started` and no errors
 5. Call `secrets_status` via an MCP client — confirm it returns repo state
 
 ---
@@ -116,8 +116,8 @@ Determine which DNS is authoritative for LAN devices before proceeding.
 | File | Change |
 |---|---|
 | `docker-compose.yml` | Port → `0.0.0.0:8765`, remove Traefik labels + network |
-| Heimdall: `.../dynamic/registry-mcp.yml` | New — Traefik static backend (manual step on Heimdall) |
-| `/opt/homelab/nodes/heimdall/core/traefik/dynamic/registry-mcp.yml` | New — same file seeded into new homelab repo |
+| Workload node: `.../dynamic/registry-mcp.yml` | New — Traefik static backend (manual step on the workload node) |
+| `/opt/homelab/nodes/<workload-node>/core/traefik/dynamic/registry-mcp.yml` | New — same file seeded into new homelab repo |
 
 ---
 
@@ -144,12 +144,12 @@ User decisions captured before planning:
 
 ---
 
-## Part 1 — One-time repo setup (shell script, run once on Watchtower)
+## Part 1 — One-time repo setup (shell script, run once on the control-plane node)
 
-This is NOT an MCP tool. It is a shell script (`scripts/setup-homelab-repo.sh`) that runs once on Watchtower to bootstrap the homelab repo. The OOBE (Phase G) will eventually replace this with `oobe_create_repo` + `oobe_encrypt_secrets` tool calls.
+This is NOT an MCP tool. It is a shell script (`scripts/setup-homelab-repo.sh`) that runs once on the control-plane node to bootstrap the homelab repo. The OOBE (Phase G) will eventually replace this with `oobe_create_repo` + `oobe_encrypt_secrets` tool calls.
 
 The script does:
-1. Creates a private GitHub repo `TeamCastaldi/homelab` via `gh repo create`
+1. Creates a private GitHub repo (e.g. `<your-org>/homelab`) via `gh repo create`
 2. Clones it to `SECRETS_REPO_PATH` (default `/mnt/appdata/homelab`)
 3. Runs `git-crypt init` in the clone
 4. Writes `.gitattributes` with `**/.env filter=git-crypt diff=git-crypt`
@@ -233,7 +233,7 @@ If path suffix is `.env` or content matches `KEY=VALUE` majority pattern → ret
   ```json
   {
     "locked": true,
-    "encrypted_files": ["nodes/heimdall/app/.env"],
+    "encrypted_files": ["nodes/workload-01/app/.env"],
     "unencrypted_files": [".gitattributes", "README.md"]
   }
   ```
@@ -318,7 +318,7 @@ Test cases:
 2. Run `uv run pytest -q` — full suite (148 + new) still green
 3. Run `uv run ruff check . && uv run ruff format --check .` — clean
 4. Manually: set `SECRETS_ENABLED=true`, `SECRETS_REPO_PATH`, and key vars in `.env`; start server; call `secrets_status` via MCP client; confirm it returns locked/unlocked state correctly
-5. Run `scripts/setup-homelab-repo.sh` on Watchtower to create the homelab repo and confirm key is exported to `SECRETS_KEY_PATH`
+5. Run `scripts/setup-homelab-repo.sh` on the control-plane node to create the homelab repo and confirm key is exported to `SECRETS_KEY_PATH`
 
 ---
 
