@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.12.2](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.12.1...v0.12.2) (2026-07-10)
+
+
+### Bug Fixes
+
+* address Copilot review on bootstrap.sh distro fix ([49e05f9](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/49e05f9d71bed8c2f19236cd9da96a6b6461a135))
+* bootstrap.sh supports Ubuntu control-plane nodes, not just Debian/Pi ([678c85f](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/678c85f78d4f8658c21f412874de736cd90e7777))
+* make bootstrap.sh work on Ubuntu control-plane nodes, not just Debian/Pi ([0b87bad](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/0b87bad904d0b1300a56a78e1432d560574e3ec5))
+
 ## [0.12.1](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.12.0...v0.12.1) (2026-07-10)
 
 
