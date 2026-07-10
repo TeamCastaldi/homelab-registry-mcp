@@ -59,7 +59,7 @@ the SSH session drops.
 
 ```bash
 VERSION=main  # or the latest tagged release, e.g. v0.11.0
-curl -fsSL "https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/${VERSION}/scripts/install.sh" | bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/${VERSION}/scripts/install.sh)"
 ```
 
 Every prompt can be pre-seeded with an environment variable of the same name
