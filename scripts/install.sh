@@ -156,7 +156,7 @@ header "[STEP 3] Configuration"
 echo "These populate .env — press Enter to leave any optional value blank/default."
 echo ""
 
-prompt TRAEFIK_API_URL "Traefik API URL (e.g. http://10.0.0.10:8080, blank to disable Traefik discovery)"
+prompt TRAEFIK_API_URL "Traefik API URL (e.g. http://192.168.1.10:8080, blank to disable Traefik discovery)"
 
 prompt AUTHENTIK_API_URL "Authentik API URL (e.g. https://sso.example.com/api/v3, blank to skip)"
 if [ -n "${AUTHENTIK_API_URL:-}" ]; then

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # setup-homelab-repo.sh — one-time bootstrap for the private homelab repo
 #
-# Run this once on the control plane node (Watchtower) to:
+# Run this once on the control plane node to:
 #   1. Create a private GitHub repo on your personal account
 #   2. Clone it to SECRETS_REPO_PATH (default $HOME/homelab)
 #   3. Initialise git-crypt

@@ -11,10 +11,10 @@ services:
       MCP_PORT: 8765
       DOCKER_BASE_URL: unix:///var/run/docker.sock
     ports:
-      # Bind on all interfaces so Traefik on Heimdall can reach this container
-      # over the LAN. Routing is via a static backend in Traefik's dynamic config
-      # (nodes/heimdall/core/traefik/dynamic/registry-mcp.yml) — no Docker label
-      # discovery is used on Watchtower.
+      # Bind on all interfaces so Traefik on the workload node can reach this
+      # container over the LAN. Routing is via a static backend in Traefik's
+      # dynamic config (see docs/plans/phase-d.md) — no Docker label discovery
+      # is used on the control-plane node.
       - "0.0.0.0:8765:8765"
     volumes:
       - registry-data:/data

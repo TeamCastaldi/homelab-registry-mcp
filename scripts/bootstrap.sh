@@ -15,8 +15,8 @@
 #   bash scripts/bootstrap.sh [--dry-run] [--skip-network] [--network-only]
 #
 # What it does:
-#   1. Collect target static IP (prompted, default 10.0.0.200)
-#   2. Set hostname to "watchtower"
+#   1. Collect target static IP (prompted, default 192.168.1.200)
+#   2. Set hostname to "homelab-control-plane"
 #   3. Install Docker, Ansible + ansible-lint, uv, git-crypt, gh CLI
 #   4. Generate ED25519 SSH key (skips if one already exists)
 #   5. Validate installs
@@ -27,7 +27,7 @@
 # to happen last so the SSH session doesn't drop before that).
 # --network-only runs step 6 only, against an already-bootstrapped node.
 #
-# After reconnecting (ssh $TARGET_USER@10.0.0.200):
+# After reconnecting (ssh $TARGET_USER@192.168.1.200):
 #   - Start the MCP server
 #   - Run oobe_status to begin OOBE steps 1-15 (ADR-001 §5.1)
 #
@@ -44,13 +44,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_USER="${SUDO_USER:-$USER}"
 
 # --- FIXED CONFIGURATION ---
+# Reference defaults for a typical home network — not requirements. The
+# static IP is prompted for below; edit this block directly if your
+# gateway/DNS/hostname preferences differ.
 
-HOSTNAME="watchtower"
+HOSTNAME="homelab-control-plane"
 STATIC_IFACE="eth0"
-GATEWAY="10.0.0.2"
-DNS_PRIMARY="10.0.0.2"
+GATEWAY="192.168.1.1"
+DNS_PRIMARY="192.168.1.1"
 DNS_SECONDARY="8.8.8.8"
-DEFAULT_IP="10.0.0.200"
+DEFAULT_IP="192.168.1.200"
 NM_CON_NAME="static-eth0"
 
 # --- HELPERS ---

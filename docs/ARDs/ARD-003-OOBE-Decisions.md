@@ -1,9 +1,9 @@
 # ADR-003: Out-of-Box Experience (OOBE) Design
 
 **Status:** In Progress  
-**Date:** 2026-06-08  
-**Deciders:** Nathan Castaldi  
-**Location:** `docs/adr/ADR-003-oobe.md`
+**Date:** 2026  
+**Deciders:** the maintainer  
+**Location:** `docs/ARDs/ARD-003-OOBE-Decisions.md`
 
 ---
 
@@ -33,7 +33,7 @@ idempotent.
 ## Decision
 
 The OOBE is implemented as a guided CLI flow that runs on the control plane node
-(Watchtower or equivalent) during initial setup. It collects operator inputs,
+during initial setup. It collects operator inputs,
 writes them to the registry config, and invokes Ansible roles to configure
 infrastructure.
 
@@ -47,15 +47,15 @@ can be extended incrementally without breaking existing setups.
 ### v0.1 — Minimum viable setup (current)
 
 These are the inputs validated during the first real-world OOBE proving run
-(2026-06-08, Panoptichron deployment of ConvertX).
+(2026, `workload-01` deployment of ConvertX).
 
 | Input | Description | Example |
 |---|---|---|
 | `GITHUB_USER` | GitHub username (personal account) | `<your-github-username>` |
 | `HOMELAB_REPO` | Name of the private homelab config repo | `homelab` |
-| `RUNNER_LABEL` | Label assigned to the self-hosted Actions runner | `watchtower` |
+| `RUNNER_LABEL` | Label assigned to the self-hosted Actions runner | `control-plane` |
 | `PROXY_NETWORK` | Name of the Docker proxy network on each host | `proxy-net` |
-| `GIT_USER_NAME` | Git commit author name | `Nathan Castaldi` |
+| `GIT_USER_NAME` | Git commit author name | `<your-name>` |
 | `GIT_USER_EMAIL` | Git commit author email | `<operator-email>` |
 
 **Notes:**
@@ -211,12 +211,12 @@ only touch `.github/`, `docs/`, or other non-node paths do not trigger a deploy.
 
 The `detect-changes` job compares `HEAD~1` to `HEAD` and extracts unique
 `{node}/{stack}` pairs from changed file paths. Only stacks with actual file
-changes get deployed. A push touching `nodes/panoptichron/convertx/compose.yaml`
-deploys only ConvertX on Panoptichron — nothing else.
+changes get deployed. A push touching `nodes/workload-01/convertx/compose.yaml`
+deploys only ConvertX on `workload-01` — nothing else.
 
 ### Deploy job
 
-Runs on the `watchtower` runner (targeted by label). For each changed stack:
+Runs on the `control-plane` runner (targeted by label). For each changed stack:
 
 1. Resolves the node name to a host IP via a hardcoded `case` statement
 2. Writes the `RUNNER_SSH_PRIVATE_KEY` secret to a temp file
@@ -236,9 +236,9 @@ Actions variables or registry config during OOBE implementation:
 
 | Node | IP |
 |---|---|
-| `panoptichron` | `<ip-address>` |
-| `heimdall` | `<ip-address>` |
-| `waldorf` | `<ip-address>` |
+| `workload-01` | `<ip-address>` |
+| `workload-02` | `<ip-address>` |
+| `workload-03` | `<ip-address>` |
 
 ### Actions version policy
 
@@ -325,8 +325,8 @@ here to prevent future operators from hitting the same problems.
 
 | Version | Date | Changes |
 |---|---|---|
-| v0.1 | 2026-06-08 | Initial design. First proving run: ConvertX deployed to Panoptichron from GitHub homelab repo with git-crypt encrypted secrets. Runner setup deferred. |
-| v0.2 | 2026-06-08 | Runner installed on Watchtower (ARM64, systemd, label: `watchtower`). Runner → node SSH keypair established. Deploy workflow committed to homelab repo. First automated deploy succeeded: ConvertX on Panoptichron in 18 seconds. Full CD pipeline proven end-to-end. |
+| v0.1 | 2026 | Initial design. First proving run: ConvertX deployed to `workload-01` from GitHub homelab repo with git-crypt encrypted secrets. Runner setup deferred. |
+| v0.2 | 2026 | Runner installed on the control plane node (ARM64, systemd, label: `control-plane`). Runner → node SSH keypair established. Deploy workflow committed to homelab repo. First automated deploy succeeded: ConvertX on `workload-01` in 18 seconds. Full CD pipeline proven end-to-end. |
 
 ---
 
@@ -339,8 +339,8 @@ here to prevent future operators from hitting the same problems.
 | Multi-node git config | `user.name` / `user.email` must be set on every node — bake into Ansible bootstrap role |
 | Bitwarden SSH agent | Future improvement for workstation; not applicable to headless nodes |
 | PROXY_NETWORK in compose template | Pattern defined; not yet enforced by OOBE validation |
-| Traefik on Panoptichron | Deferred; port 3000 exposed directly in the interim |
+| Traefik on `workload-01` | Deferred; port 3000 exposed directly in the interim |
 | Node → IP mapping | Hardcoded in deploy workflow; move to GitHub Actions variables or registry config when OOBE CLI is implemented |
 | MCP `ansible` apply mode | Wiring the MCP write path to the proven GitHub Actions deploy pattern — next phase |
 | Repo clone path convention | Standardized to `~/homelab` on all nodes. Do not use org-namespaced paths. |
-| Komodo migration | Prod services (Heimdall 26, Waldorf 6) still managed by Komodo. Migrate incrementally once first Heimdall service is proven via new pattern. |
+| Komodo migration | A couple dozen production services across other nodes are still managed by Komodo. Migrate incrementally once the first service per node is proven via the new pattern. |

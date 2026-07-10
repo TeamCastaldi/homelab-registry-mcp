@@ -51,13 +51,15 @@ Conventional Commits format is **expected**, not optional.
 
 ### 3. Open a PR
 
-CI runs `ruff check`, `ruff format --check`, and `pytest -q` on every push, and it
-must pass. Run the same checks locally before opening a PR:
+CI runs `ruff check`, `ruff format --check`, `pytest -q`, and `ansible-lint`
+(against `ansible/`) on every push, and it must pass. Run the same checks
+locally before opening a PR:
 
 ```bash
 uv run ruff check .
 uv run ruff format --check .
 uv run pytest -q
+ANSIBLE_ROLES_PATH=ansible/roles ansible-lint ansible/roles ansible/playbooks
 ```
 
 Fill in the PR template.
