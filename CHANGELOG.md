@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.11.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.10.0...v0.11.0) (2026-07-10)
+
+
+### Features
+
+* add Phase 4 GitOps CD deploy pipeline (docker-stack-deploy + reusable workflow) ([f27d016](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/f27d01610a447be2bd2e3dd424197a68a25f116e))
+
+
+### Bug Fixes
+
+* address Copilot review on install-instructions docs ([d4917eb](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/d4917eba241c030b7e5f28d73b900fc92fce28ed))
+
+
+### Documentation
+
+* document the install.sh one-shot control-plane install ([db7c330](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/db7c3302f6562c589ce26bdb5d87d2953b335380))
+* document the scripts/install.sh one-shot control-plane install ([d300ce7](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/d300ce76a0391ebfb204e9bb67bb64aca094f86c))
+* update phased implementation plan with completion status and new phases ([8c76f24](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/8c76f24493c4913f843faaec32c71d637900328b))
+
 ## [0.10.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.9.0...v0.10.0) (2026-07-09)
 
 
