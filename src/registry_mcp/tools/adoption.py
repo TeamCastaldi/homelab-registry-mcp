@@ -18,7 +18,6 @@ write goes through a local clone rather than the remote Git hosting API.
 from __future__ import annotations
 
 import secrets as pysecrets
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -62,10 +61,16 @@ def _secret_kv(secret: DetectedSecret | dict) -> tuple[str, str]:
     return secret.key, secret.live_value
 
 
-def _unavailable(settings: Settings, git: GitProvider | None) -> str | None:
-    """Return an error message if adoption's prerequisites aren't met."""
+def _adoption_disabled(settings: Settings) -> str | None:
     if not settings.adoption_enabled:
         return "Adoption is disabled. Set ADOPTION_ENABLED=true to enable."
+    return None
+
+
+def _unavailable(settings: Settings, git: GitProvider | None) -> str | None:
+    """Return an error message if adoption's prerequisites aren't met."""
+    if err := _adoption_disabled(settings):
+        return err
     if git is None or not settings.git_repo:
         return "Git write path not configured (set GIT_BASE_URL, GIT_TOKEN, GIT_REPO)."
     if not settings.secrets_repo_path:
@@ -270,8 +275,6 @@ def register_adoption_tools(
             return err
         if err := _unavailable(settings, git):
             return {"error": err}
-        if secret_strategy not in _SECRET_STRATEGIES:
-            return {"error": f"secret_strategy must be one of {sorted(_SECRET_STRATEGIES)}"}
 
         draft = adoption_store.get_pending(draft_id)
         if draft is None:
@@ -285,12 +288,19 @@ def register_adoption_tools(
         if service is None:
             return {"error": f"no service found for {draft.service_id!r}"}
 
+        # Only enforced when the draft actually has secrets to hand a
+        # keep/rotate decision on — an invalid value is otherwise moot.
+        if draft.detected_secrets and secret_strategy not in _SECRET_STRATEGIES:
+            return {"error": f"secret_strategy must be one of {sorted(_SECRET_STRATEGIES)}"}
+
         env_data = {}
         for secret in draft.detected_secrets:
             key, live_value = _secret_kv(secret)
             env_data[key] = live_value if secret_strategy == "keep" else pysecrets.token_urlsafe(32)
 
-        branch = f"adopt/{service.name}-{datetime.now().strftime('%Y-%m-%d')}"
+        # Keyed by draft id (not a date) so two adoptions of the same service —
+        # same day, or a retry after cancelling — never collide on one branch.
+        branch = f"adopt/{service.name}-{draft.id[:8]}"
         base = settings.git_base_branch
         repo = settings.git_repo
         assert repo is not None  # guarded by _unavailable() above
@@ -373,6 +383,10 @@ def register_adoption_tools(
     @mcp.tool()
     def proposal_adopt_service_cancel(draft_id: str) -> dict:
         """Discard a pending adoption draft without committing anything."""
+        if err := _read_only_error():
+            return err
+        if err := _adoption_disabled(settings):
+            return {"error": err}
         draft = adoption_store.get(draft_id)
         if draft is None:
             return {"error": f"no draft found for {draft_id!r}"}

@@ -119,6 +119,21 @@ class TestAdoptionGenerator:
         assert "abcdefghijklmnopqrstuvwxyz0123456789" not in result.sanitized_compose
         assert "TOKEN: <replace-with-credential>" in result.sanitized_compose
 
+    def test_credentials_quoted_in_reasoning_are_scrubbed(self):
+        """A credential the model echoes in its explanation must not leak out
+        through `reasoning` — it's embedded verbatim into the PR body and the
+        tool's response, a channel the sanitized-compose scrub never touches."""
+        leaky = {
+            **VALID,
+            "reasoning": (
+                "TOKEN: abcdefghijklmnopqrstuvwxyz0123456789 looked like a real credential"
+            ),
+        }
+        result = _call(_gen(leaky))
+        assert result.ok is True
+        assert "abcdefghijklmnopqrstuvwxyz0123456789" not in result.reasoning
+        assert "TOKEN: <replace-with-credential>" in result.reasoning
+
 
 # ---------------------------------------------------------------------------
 # SSH helpers
@@ -601,6 +616,22 @@ class TestProposalAdoptServiceFinalize:
         result = await tools["proposal_adopt_service_finalize"](drafted["draft_id"], "bogus")
         assert "error" in result
 
+    async def test_finalize_invalid_secret_strategy_ignored_when_no_secrets(
+        self, store, hardware_store
+    ):
+        """An invalid `secret_strategy` is moot when the draft has nothing to
+        apply it to — it must not block opening the PR."""
+        git = FakeGit()
+        generator = AdoptionGenerator(
+            FakeReasoner({**VALID, "detected_secret_keys": []}), threshold=0.8
+        )
+        tools, _, _ = _setup(store, hardware_store, git=git, generator=generator)
+        service, drafted = await self._drafted(store, hardware_store, tools, detected_secrets=False)
+
+        result = await tools["proposal_adopt_service_finalize"](drafted["draft_id"], "bogus")
+
+        assert result["status"] == "open"
+
     async def test_finalize_unknown_draft_returns_error(self, store, hardware_store):
         tools, _, _ = _setup(store, hardware_store)
         result = await tools["proposal_adopt_service_finalize"]("nope")
@@ -640,6 +671,18 @@ class TestProposalAdoptServiceCancelAndGet:
         tools, _, _ = _setup(store, hardware_store)
         result = tools["proposal_adopt_service_cancel"]("nope")
         assert "error" in result
+
+    async def test_cancel_respects_read_only_mode(self, store, hardware_store):
+        tools, _, _ = _setup(store, hardware_store, read_only=True)
+        result = tools["proposal_adopt_service_cancel"]("whatever")
+        assert "error" in result
+        assert "read-only" in result["error"]
+
+    async def test_cancel_respects_adoption_disabled(self, store, hardware_store):
+        tools, _, _ = _setup(store, hardware_store, settings=_settings(adoption_enabled=False))
+        result = tools["proposal_adopt_service_cancel"]("whatever")
+        assert "error" in result
+        assert "ADOPTION_ENABLED" in result["error"]
 
     async def test_get_masks_live_secret_values(self, store, hardware_store):
         tools, adoption_store, _ = _setup(store, hardware_store)

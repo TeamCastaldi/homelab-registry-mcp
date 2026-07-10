@@ -67,6 +67,15 @@ class AdoptionGenerator:
         if scrubbed:
             _log.warning("adoption_scrubbed_residual_credentials")
 
+        # The reasoning text is echoed verbatim into the PR body and the tool's
+        # response — scrub it too, or a credential the model quotes while
+        # explaining its detection would leak out through a channel the
+        # sanitized-compose scrub above never touches.
+        reasoning = raw.get("reasoning", "") or ""
+        reasoning, reasoning_scrubbed = _scrub_credentials(reasoning)
+        if reasoning_scrubbed:
+            _log.warning("adoption_scrubbed_residual_credentials_in_reasoning")
+
         confidence = float(raw.get("confidence", 0.0))
         if confidence < self._threshold:
             reason = f"confidence {confidence:.2f} below threshold {self._threshold:.2f}"
@@ -95,5 +104,5 @@ class AdoptionGenerator:
             confidence=confidence,
             sanitized_compose=sanitized,
             detected_secret_keys=list(raw.get("detected_secret_keys", []) or []),
-            reasoning=raw.get("reasoning", "") or "",
+            reasoning=reasoning,
         )

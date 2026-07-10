@@ -77,6 +77,10 @@ def build_server(settings: Settings | None = None) -> FastMCP:
     reasoner = build_reasoner(settings)
     proposal_engine, proposal_store, git_provider = build_proposal_engine(settings, store, reasoner)
     adoption_store = AdoptionDraftStore(store.engine)
+    # Pending drafts hold captured live secret values in the (non-git-crypt)
+    # registry SQLite until the operator answers — sweep anything left over
+    # from a previous run past its TTL on every startup.
+    adoption_store.purge_expired()
     adoption_generator = AdoptionGenerator(
         reasoner, threshold=settings.proposal_confidence_threshold
     )
@@ -179,7 +183,7 @@ def main() -> None:
     async def _streamable_with_scheduler() -> None:
         _store = RegistryStore(settings.registry_db_path)
         _reasoner = build_reasoner(settings)
-        _proposal_engine, _ = build_proposal_engine(settings, _store, _reasoner)
+        _proposal_engine, _, _ = build_proposal_engine(settings, _store, _reasoner)
         _engine = DiscoveryEngine(
             _store,
             build_sources(settings),
