@@ -14,8 +14,8 @@ scripts are tools for the operator/developer.
   session drops. Designed to be run via
   `curl -fsSL <raw-url>/scripts/install.sh | bash`; every prompt can be pre-seeded
   with an environment variable of the same name for non-interactive use.
-- **`bootstrap.sh`** — prepares a fresh control-plane node as the homelab control
-  plane: installs Docker, Ansible, `uv`, `git-crypt`, and the GitHub CLI, sets the
+- **`bootstrap.sh`** — prepares a fresh node for the homelab control plane:
+  installs Docker, Ansible, `uv`, `git-crypt`, and the GitHub CLI, sets the
   hostname, generates an SSH key, and applies a static IP. Supports Debian and
   Ubuntu (ADR-001 §3.1) on any hardware — Raspberry Pi or an x86_64/ARM64 VM —
   detecting the OS, Docker apt repo, network interface, and hardware type at

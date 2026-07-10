@@ -139,7 +139,8 @@ esac
 # Interface names vary a lot across hardware/hypervisors (eth0 on Raspberry Pi
 # OS, enp0s3/ens18/etc. on most VMs) — detect it instead of assuming eth0.
 # Falls back to the FIXED CONFIGURATION default above if detection fails.
-DETECTED_IFACE="$(ip route show default 2>/dev/null | awk '/^default/ {print $5; exit}' || true)"
+DETECTED_IFACE="$(ip route show default 2>/dev/null | \
+    awk '/^default/ { for (i=1; i<=NF; i++) if ($i == "dev") { print $(i+1); exit } }' || true)"
 STATIC_IFACE="${DETECTED_IFACE:-$STATIC_IFACE}"
 NM_CON_NAME="static-${STATIC_IFACE}"
 
