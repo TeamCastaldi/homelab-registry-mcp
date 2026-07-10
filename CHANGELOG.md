@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.12.0...v0.12.1) (2026-07-10)
+
+
+### Bug Fixes
+
+* address Copilot review on Phase 6 doc scrub ([f413b19](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/f413b19e6f1440708c48c587bb0584e3eacf1ad5))
+
 ## [0.12.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.11.0...v0.12.0) (2026-07-10)
 
 
