@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.12.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.11.0...v0.12.0) (2026-07-10)
+
+
+### Features
+
+* add SMTP notification provider for proactive proposal emails ([0866a5d](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/0866a5d1cd2dda90898b15fa3044e5a06bd1480c))
+
+
+### Bug Fixes
+
+* address Copilot review on SMTP notification provider ([e1eb6eb](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/e1eb6ebc3f6562111a613afe3bbb991fc0bb4e73))
+
 ## [0.11.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.10.0...v0.11.0) (2026-07-10)
 
 
