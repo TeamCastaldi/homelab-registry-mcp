@@ -86,7 +86,7 @@ cd ~/homelab-registry-mcp
 git pull                          # get the docker-compose.yml changes
 docker compose pull               # pull latest image from ghcr.io
 docker compose up -d              # start the container
-docker compose logs -f registry-mcp   # watch for "scheduler_started"
+docker compose logs -f homelab-registry-mcp   # watch for "scheduler_started"
 ```
 
 ---
@@ -106,7 +106,7 @@ Determine which DNS is authoritative for LAN devices before proceeding.
 1. From the workload node: `curl -v http://<control-plane-ip>:8765/` — confirms the control-plane node's port is reachable
 2. From any LAN device: `curl -v https://registry-mcp.<your-domain>/` — confirms Traefik routing + TLS
 3. Traefik dashboard at `https://proxy.<your-domain>/dashboard/` — confirm `registry-mcp` router appears
-4. `docker compose logs registry-mcp` on the control-plane node — confirm `scheduler_started` and no errors
+4. `docker compose logs homelab-registry-mcp` on the control-plane node — confirm `scheduler_started` and no errors
 5. Call `secrets_status` via an MCP client — confirm it returns repo state
 
 ---

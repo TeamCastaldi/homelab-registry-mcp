@@ -1,4 +1,4 @@
-# ADR-004: Upstream Version Detection and Update Proposals
+# ARD-004: Upstream Version Detection and Update Proposals
 
 **Status:** Proposed  
 **Date:** 2026  
