@@ -11,6 +11,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from mcp.server.fastmcp import FastMCP
 
 from registry_mcp import __version__
+from registry_mcp.adoption import AdoptionDraftStore
 from registry_mcp.config import Settings, get_settings
 from registry_mcp.discovery.engine import DiscoveryEngine, build_sources
 from registry_mcp.discovery.scheduler import build_scheduler
@@ -20,11 +21,12 @@ from registry_mcp.health import check_health
 from registry_mcp.integrations.authentik import register_authentik_tools
 from registry_mcp.integrations.traefik import register_traefik_tools
 from registry_mcp.logging import configure_logging, get_logger
-from registry_mcp.proposal import PatchGenerator, ProposalEngine, ProposalStore
-from registry_mcp.providers.git import build_git_provider
+from registry_mcp.proposal import AdoptionGenerator, PatchGenerator, ProposalEngine, ProposalStore
+from registry_mcp.providers.git import GitProvider, build_git_provider
 from registry_mcp.providers.notification import build_notification_provider
 from registry_mcp.registry import RegistryStore
 from registry_mcp.tools import (
+    register_adoption_tools,
     register_discovery_tools,
     register_event_tools,
     register_hardware_tools,
@@ -37,7 +39,7 @@ from registry_mcp.tools import (
 
 def build_proposal_engine(
     settings: Settings, store: RegistryStore, reasoner: Reasoner
-) -> tuple[ProposalEngine, ProposalStore]:
+) -> tuple[ProposalEngine, ProposalStore, GitProvider | None]:
     """Assemble the proposal engine and its store from configuration."""
     proposals = ProposalStore(store.engine)
     git = build_git_provider(settings)
@@ -55,7 +57,7 @@ def build_proposal_engine(
         notifier=build_notification_provider(settings),
         git=git,
     )
-    return engine, proposals
+    return engine, proposals, git
 
 
 def build_server(settings: Settings | None = None) -> FastMCP:
@@ -73,7 +75,11 @@ def build_server(settings: Settings | None = None) -> FastMCP:
             failed_checks=[c.name for c in health.checks if not c.ok],
         )
     reasoner = build_reasoner(settings)
-    proposal_engine, proposal_store = build_proposal_engine(settings, store, reasoner)
+    proposal_engine, proposal_store, git_provider = build_proposal_engine(settings, store, reasoner)
+    adoption_store = AdoptionDraftStore(store.engine)
+    adoption_generator = AdoptionGenerator(
+        reasoner, threshold=settings.proposal_confidence_threshold
+    )
     engine = DiscoveryEngine(
         store,
         build_sources(settings),
@@ -112,6 +118,18 @@ def build_server(settings: Settings | None = None) -> FastMCP:
         mcp, proposal_engine, proposal_store, engine, store, read_only=read_only
     )
     register_secrets_tools(mcp, settings, read_only=read_only)
+    register_adoption_tools(
+        mcp,
+        settings,
+        store,
+        hardware_store,
+        adoption_store,
+        adoption_generator,
+        git_provider,
+        proposal_store,
+        build_notification_provider(settings),
+        read_only=read_only,
+    )
 
     @mcp.tool()
     def health() -> dict[str, str]:

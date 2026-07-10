@@ -4,6 +4,7 @@ import pytest
 from pydantic_settings import SettingsConfigDict
 
 from registry_mcp.config import Settings
+from registry_mcp.hardware import HardwareStore
 from registry_mcp.registry import RegistryStore
 from registry_mcp.server import build_server
 
@@ -41,6 +42,11 @@ def settings(tmp_path):
 @pytest.fixture
 def store(settings):
     return RegistryStore(settings.registry_db_path)
+
+
+@pytest.fixture
+def hardware_store(store):
+    return HardwareStore(store.engine)
 
 
 @pytest.fixture

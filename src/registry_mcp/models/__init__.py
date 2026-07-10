@@ -1,5 +1,10 @@
 """Registry data models."""
 
+from registry_mcp.models.adoption import (
+    AdoptionDraft,
+    AdoptionDraftStatus,
+    DetectedSecret,
+)
 from registry_mcp.models.event import (
     FIELD_CREATED,
     FIELD_DELETED,
@@ -33,9 +38,12 @@ from registry_mcp.models.service import (
 __all__ = [
     "FIELD_CREATED",
     "FIELD_DELETED",
+    "AdoptionDraft",
+    "AdoptionDraftStatus",
     "AuthMode",
     "Category",
     "ChangeEvent",
+    "DetectedSecret",
     "DiscoveryEvent",
     "DiscoveryStatus",
     "DiskType",

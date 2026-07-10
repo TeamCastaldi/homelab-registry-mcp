@@ -15,6 +15,7 @@ from registry_mcp.logging import get_logger
 from registry_mcp.models import (
     FIELD_CREATED,
     FIELD_DELETED,
+    AdoptionDraft,
     AuthMode,
     Category,
     ChangeEvent,
@@ -31,7 +32,7 @@ if TYPE_CHECKING:
     from registry_mcp.discovery.base import DiscoveredService
 
 # Reference the table models so every table is registered before create_all.
-_ = (ServiceSource, DiscoveryEvent)
+_ = (ServiceSource, DiscoveryEvent, AdoptionDraft)
 
 _log = get_logger("registry.events")
 
@@ -255,6 +256,17 @@ class RegistryStore:
                 statement = statement.where(DiscoveryEvent.source == source)
             statement = statement.order_by(col(DiscoveryEvent.started_at).desc()).limit(limit)
             return list(session.exec(statement).all())
+
+    def get_source(self, service_id: str, source: SourceType) -> ServiceSource | None:
+        """Look up one source's provenance row for a service (e.g. the Docker
+        container id/name/labels captured on the last discovery pass)."""
+        with Session(self.engine) as session:
+            return session.exec(
+                select(ServiceSource).where(
+                    ServiceSource.service_id == service_id,
+                    ServiceSource.source == source,
+                )
+            ).first()
 
     def list_stale_services(self) -> list[Service]:
         with Session(self.engine) as session:

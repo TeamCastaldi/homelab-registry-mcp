@@ -2,157 +2,32 @@
 
 from __future__ import annotations
 
-import asyncio
-import base64
-import re
-import tempfile
-from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
 from registry_mcp.config import Settings
+from registry_mcp.gitcrypt import check_path as _check_path
+from registry_mcp.gitcrypt import detect_format as _detect_format
+from registry_mcp.gitcrypt import ensure_unlocked as _ensure_unlocked
+from registry_mcp.gitcrypt import is_dotenv_content as _is_dotenv_content  # noqa: F401
+from registry_mcp.gitcrypt import is_locked as _is_locked
+from registry_mcp.gitcrypt import key_bytes as _key_bytes
+from registry_mcp.gitcrypt import parse_dotenv as _parse_dotenv
+from registry_mcp.gitcrypt import repo_path as _repo
+from registry_mcp.gitcrypt import run as _run
+from registry_mcp.gitcrypt import serialize_dotenv as _serialize_dotenv
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
-
-
-def _key_bytes(settings: Settings) -> bytes:
-    """Load the git-crypt symmetric key from configured source.
-
-    SECRETS_KEY_PATH (file) takes priority over SECRETS_GIT_CRYPT_KEY (base64 env).
-    Raises RuntimeError if neither is set.
-    """
-    if settings.secrets_key_path:
-        p = Path(settings.secrets_key_path)
-        if p.exists():
-            return p.read_bytes()
-        raise RuntimeError(f"SECRETS_KEY_PATH is set but file not found: {p}")
-    if settings.secrets_git_crypt_key:
-        return base64.b64decode(settings.secrets_git_crypt_key)
-    raise RuntimeError(
-        "No git-crypt key configured. Set SECRETS_KEY_PATH or SECRETS_GIT_CRYPT_KEY."
-    )
-
-
-def _repo(settings: Settings) -> Path:
-    """Return the homelab repo path. Raises RuntimeError if not set or missing."""
-    if not settings.secrets_repo_path:
-        raise RuntimeError("SECRETS_REPO_PATH is not configured.")
-    p = Path(settings.secrets_repo_path)
-    if not p.exists():
-        raise RuntimeError(f"SECRETS_REPO_PATH does not exist: {p}")
-    return p
-
-
-async def _run(cmd: list[str], cwd: Path) -> tuple[int, str, str]:
-    """Run a subprocess, return (returncode, stdout, stderr)."""
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        cwd=str(cwd),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await proc.communicate()
-    return proc.returncode or 0, stdout.decode(), stderr.decode()
-
-
-def _is_locked(repo: Path) -> bool:
-    """Return True if the git-crypt repo is currently locked.
-
-    Reads the first bytes of the first encrypted file. Locked files start with
-    the git-crypt magic header \x00GITCRYPT\x00.
-    """
-    gitattributes = repo / ".gitattributes"
-    if not gitattributes.exists():
-        return False  # git-crypt not initialised — nothing to lock
-
-    # Find any file marked filter=git-crypt in .gitattributes
-    for line in gitattributes.read_text().splitlines():
-        line = line.strip()
-        if "filter=git-crypt" not in line:
-            continue
-        # line is like: nodes/**/.env filter=git-crypt diff=git-crypt
-        pattern = line.split()[0]
-        # Try to find a matching file
-        for candidate in repo.rglob("*"):
-            if candidate.is_file() and _matches_gitattributes_pattern(
-                candidate.relative_to(repo), pattern
-            ):
-                try:
-                    header = candidate.read_bytes()[:10]
-                    return header.startswith(b"\x00GITCRYPT")
-                except OSError:
-                    continue
-    return False
-
-
-def _matches_gitattributes_pattern(rel_path: Path, pattern: str) -> bool:
-    """Very lightweight glob match for .gitattributes patterns."""
-    import fnmatch
-
-    posix = rel_path.as_posix()
-    # Handle patterns like **/.env, nodes/**/.env, .env
-    if "**" in pattern:
-        # Match any depth
-        parts = pattern.split("**/")
-        suffix = parts[-1]
-        return fnmatch.fnmatch(posix, f"*{suffix}") or fnmatch.fnmatch(posix, suffix)
-    return fnmatch.fnmatch(posix, pattern)
-
-
-async def _ensure_unlocked(repo: Path, key_bytes: bytes) -> None:
-    """Unlock the repo if currently locked. No-op if already unlocked."""
-    if not _is_locked(repo):
-        return
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".key") as tf:
-        tf.write(key_bytes)
-        tf.flush()
-        key_path = tf.name
-
-    try:
-        rc, _, stderr = await _run(["git-crypt", "unlock", key_path], cwd=repo)
-        if rc != 0:
-            raise RuntimeError(f"git-crypt unlock failed: {stderr.strip()}")
-    finally:
-        Path(key_path).unlink(missing_ok=True)
-
-
-def _parse_dotenv(content: str) -> dict[str, str]:
-    """Parse KEY=value lines from a .env file. Skips comments and blanks."""
-    result: dict[str, str] = {}
-    for line in content.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "=" in line:
-            key, _, value = line.partition("=")
-            result[key.strip()] = value.strip()
-    return result
-
-
-def _serialize_dotenv(data: dict[str, str]) -> str:
-    """Write dict back as KEY=value lines."""
-    return "".join(f"{k}={v}\n" for k, v in data.items())
-
-
-def _is_dotenv_content(content: str) -> bool:
-    """Heuristic: majority of non-blank, non-comment lines look like KEY=VALUE."""
-    lines = [
-        ln.strip() for ln in content.splitlines() if ln.strip() and not ln.strip().startswith("#")
-    ]
-    if not lines:
-        return False
-    kv_lines = sum(1 for ln in lines if re.match(r"^[A-Z_][A-Z0-9_]*=", ln))
-    return kv_lines / len(lines) >= 0.6
-
-
-def _detect_format(path: Path, content: str) -> dict[str, str] | str:
-    """Return parsed dict for .env files, raw string for everything else."""
-    if path.suffix == ".env" or _is_dotenv_content(content):
-        return _parse_dotenv(content)
-    return content
+#
+# The git-crypt/dotenv primitives above live in `registry_mcp.gitcrypt` so the
+# brownfield adoption flow (Phase 7) can reuse the exact same encryption and
+# path-safety logic rather than a second, possibly-diverging copy. They are
+# re-imported under their historical private names here so the rest of this
+# module — and the existing tests, which patch e.g.
+# `registry_mcp.tools.secrets._run` — are unaffected.
 
 
 def _guard(settings: Settings) -> dict[str, Any] | None:
@@ -160,23 +35,6 @@ def _guard(settings: Settings) -> dict[str, Any] | None:
     if not settings.secrets_enabled:
         return {"error": "Secrets tools are disabled. Set SECRETS_ENABLED=true to enable."}
     return None
-
-
-def _check_path(repo: Path, path: str) -> Path:
-    """Return the resolved target path inside repo, or raise ValueError.
-
-    Blocks absolute paths (pathlib discards the base when joined with an
-    absolute right-hand side), dotdot traversal, and symlink escapes.
-    """
-    p = Path(path)
-    if p.is_absolute():
-        raise ValueError("Absolute paths are not allowed.")
-    if ".." in p.parts:
-        raise ValueError("Path traversal is not allowed.")
-    target = (repo / path).resolve()
-    if not target.is_relative_to(repo.resolve()):
-        raise ValueError("Path must be within the repository.")
-    return target
 
 
 # ---------------------------------------------------------------------------

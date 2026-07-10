@@ -147,6 +147,49 @@ class ApplyReviewFeedback(dspy.Signature):
     reasoning: str = dspy.OutputField(desc="Why this revision addresses the feedback")
 
 
+class DetectHardcodedSecrets(dspy.Signature):
+    """Given the raw content of a legacy, hand-written `docker-compose.yml` and
+    the environment variables actually running inside its live container,
+    produce a sanitized version of the compose file safe to commit to a public
+    or shared Git repo.
+
+    Replace every environment value that is a real credential (API token,
+    password, private key, session secret, etc.) with a `${VAR_NAME}`
+    interpolation reading from a sibling `.env` file, and list each one you
+    replaced. Preserve every other line, comment, formatting choice, and
+    non-secret value verbatim — this is adoption into GitOps management, not a
+    rewrite. Ordinary configuration (ports, image tags, volume paths, feature
+    flags) is not a secret and must not be touched.
+
+    Output the COMPLETE sanitized file content, never a diff. If you are not
+    confident you have correctly identified which values are secrets, say so
+    with a low confidence score rather than guessing — a missed secret leaks
+    into Git history, and a false positive breaks the service's config.
+
+    IMPORTANT: Never invent, guess, or fabricate a replacement credential
+    value yourself. Your only job here is to identify and interpolate; the
+    actual secret values (kept or freshly rotated) are supplied by the
+    operator after this step, outside your context."""
+
+    compose_content: str = dspy.InputField(desc="Raw docker-compose.yml content, verbatim")
+    container_env: dict = dspy.InputField(
+        desc="Environment variables actually running in the live container "
+        "(name -> value), from `docker inspect`"
+    )
+    container_labels: dict = dspy.InputField(desc="Docker labels on the live container")
+
+    sanitized_compose: str = dspy.OutputField(
+        desc="Complete compose file with secret values replaced by ${VAR_NAME} "
+        "interpolations; every other line preserved verbatim"
+    )
+    detected_secret_keys: list[str] = dspy.OutputField(
+        desc="Names of the environment variables identified as real secrets "
+        "and interpolated out of the compose file"
+    )
+    confidence: float = dspy.OutputField(desc="0.0 to 1.0 confidence in the sanitization")
+    reasoning: str = dspy.OutputField(desc="Why these values were flagged as secrets")
+
+
 class SummarizeAccessAudit(dspy.Signature):
     """Summarize Authentik access events for one application into a structured,
     pre-reasoned report, so the client receives a synthesis rather than raw

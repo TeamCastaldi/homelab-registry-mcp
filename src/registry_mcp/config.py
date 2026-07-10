@@ -122,6 +122,16 @@ class Settings(BaseSettings):
     normalization_enabled: bool = Field(default=False)
     normalization_schedule: str = Field(default="weekly")
 
+    # Brownfield adoption (Phase 7) — opt-in. Reuses SSH_KEY_PATH (the same key
+    # Ansible uses to reach workload nodes) to inspect a live container and its
+    # original compose file; reuses GIT_*/SECRETS_* for the resulting PR.
+    adoption_enabled: bool = Field(default=False)
+    ssh_default_user: str = Field(default="root")
+    # How long a drafted adoption may sit awaiting the operator's keep/rotate
+    # decision before it expires. The draft holds captured live secret values
+    # in the registry SQLite (not git-crypt encrypted) until then.
+    adoption_draft_ttl_minutes: int = Field(default=60)
+
     # Secrets / git-crypt (Phase C) — all opt-in; off by default.
     # secrets_key_path takes priority over secrets_git_crypt_key.
     secrets_enabled: bool = Field(default=True)
