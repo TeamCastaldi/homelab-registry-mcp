@@ -10,5 +10,7 @@ _log = get_logger("providers.notification")
 class NullNotificationProvider:
     """Discards notifications (still logs them at debug for traceability)."""
 
-    async def send(self, title: str, body: str, url: str | None = None) -> None:
+    async def send(
+        self, title: str, body: str, url: str | None = None, diff: str | None = None
+    ) -> None:
         _log.debug("notification_suppressed", title=title, url=url)

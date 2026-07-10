@@ -28,7 +28,10 @@ class NtfyNotificationProvider:
         self._timeout = timeout
         self._transport = transport
 
-    async def send(self, title: str, body: str, url: str | None = None) -> None:
+    async def send(
+        self, title: str, body: str, url: str | None = None, diff: str | None = None
+    ) -> None:
+        # A push notification is not the place for a full diff — omitted here.
         headers = {"Title": title}
         if url:
             # Tapping the notification opens the PR.
