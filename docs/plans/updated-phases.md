@@ -26,7 +26,7 @@
   * Update `src/registry_mcp/server.py` to run a continuous asynchronous background task that polls for new PR comments.
   * Integrate the DSPy reasoning engine to read human PR feedback, check out the respective branch, apply the requested code fixes, and push a new commit to the open PR.
 
-## Phase 4: Automated Deployment Pipeline (GitOps CD)
+## Phase 4: Automated Deployment Pipeline (GitOps CD) (COMPLETED)
 
 * **Goal:** Close the loop. When a human approves and merges an AI-generated PR, the homelab should automatically deploy the changes without manual terminal intervention.
 * **Tasks:**
@@ -34,7 +34,7 @@
   * Write the Ansible `docker-stack-deploy` role (as referenced in ADR-001 Phase E).
   * Ensure the GitHub Actions runner on the Raspberry Pi correctly catches the webhooks and executes the Ansible playbook against the workload nodes.
 
-## Phase 5: Proactive Email Notifications
+## Phase 5: Proactive Email Notifications (COMPLETED)
 
 * **Goal:** Alert the human operator immediately when the AI has generated a proposal (PR) that requires review, minimizing the need to constantly check GitHub.
 * **Tasks:**
@@ -42,7 +42,7 @@
   * Generate a templated HTML email containing a summary of the PR, the diff, and direct links to "Approve" or "Request Changes" on GitHub.
   * Wire the notification provider into the existing `ProposalEngine` so it fires successfully when the AI opens a PR.
 
-## Phase 6: Public Release Readiness
+## Phase 6: Public Release Readiness (COMPLETED)
 
 * **Goal:** Polish the repository for public consumption, ensuring safety, usability, and clean documentation for external homelab operators.
 * **Tasks:**
@@ -50,3 +50,14 @@
   * Finalize `.env.example` with clear placeholder values for all new Phase 1-5 additions (e.g., LLM keys, SMTP credentials).
   * Update `README.md` to perfectly reflect the curl-bash `install.sh` experience and the Pi/Ansible topology. 
   * Validate that the `LICENSE`, `SECURITY.md`, and `CONTRIBUTING.md` files are accurate and present.
+
+## Phase 7: Brownfield Adoption & Secret Interception
+
+* **Goal:** Allow the AI to safely reverse-engineer live, pre-existing services and bring them under GitOps management without leaking hardcoded secrets.
+* **Tasks:**
+  * Implement the `proposal_adopt_service` tool in `src/registry_mcp/tools/adoption.py`.
+  * The tool must inspect the live Docker container via SSH/Docker API and cross-reference it with the original `docker-compose.yml` (found via Docker labels).
+  * **Secure by Default Logic:** The DSPy reasoner must be instructed to identify any hardcoded secrets in the legacy compose files, strip them out, and replace them with variable interpolations.
+  * **Human-in-the-Loop (HITL):** The adoption tool must pause and yield back to the AI chat interface *before* opening the PR if secrets are found, asking the operator whether to keep the existing secrets or generate new ones.
+  * Integrate the `git-crypt` commands to ensure the newly generated `.env` file is fully encrypted on the feature branch before the PR is pushed to GitHub.
+  
