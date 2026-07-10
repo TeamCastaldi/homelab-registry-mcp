@@ -3,13 +3,15 @@
 # ==============================================================================
 # HOMELAB CONTROL PLANE BOOTSTRAP
 # ==============================================================================
-# Prepares a fresh Raspberry Pi (Debian Trixie) as the homelab control plane.
-# Run once after imaging. Leaves the node OOBE-ready for the MCP server.
+# Prepares a fresh control-plane node — Raspberry Pi or any x86_64/ARM64 host
+# running Debian or Ubuntu (ADR-001 §3.1) — for homelab-registry-mcp. Run
+# once after imaging/installing the OS. Leaves the node OOBE-ready for the
+# MCP server.
 #
 # Workflow:
-#   Flash SD → Boot → SSH in via wifi DHCP IP → run this script
-#   → all packages installed → static IP applied to eth0 → reconnect
-#   → start MCP → run oobe_status
+#   Flash SD (Pi) or install the OS (VM) → boot → SSH in via DHCP IP → run
+#   this script → all packages installed → static IP applied to the detected
+#   interface → reconnect → start MCP → run oobe_status
 #
 # Usage:
 #   bash scripts/bootstrap.sh [--dry-run] [--skip-network] [--network-only]
@@ -20,7 +22,7 @@
 #   3. Install Docker, Ansible + ansible-lint, uv, git-crypt, gh CLI
 #   4. Generate ED25519 SSH key (skips if one already exists)
 #   5. Validate installs
-#   6. Apply static IP to eth0 via nmcli  ← drops SSH session
+#   6. Apply static IP to the detected interface via nmcli  ← drops SSH session
 #
 # --skip-network runs steps 1-5 only (used by install.sh, which needs Docker
 # etc. installed before it brings the MCP server up — the network swap has
@@ -54,7 +56,6 @@ GATEWAY="192.168.1.1"
 DNS_PRIMARY="192.168.1.1"
 DNS_SECONDARY="8.8.8.8"
 DEFAULT_IP="192.168.1.200"
-NM_CON_NAME="static-eth0"
 
 # --- HELPERS ---
 
@@ -109,6 +110,47 @@ echo "================================================"
 echo ""
 
 require_root_or_sudo
+
+# --- DETECT OS / DOCKER REPO / INTERFACE / HARDWARE ---
+# Supports Debian and Ubuntu (ADR-001 §3.1) on any hardware — Pi or x86_64/
+# ARM64 VM. Detected dynamically so a new Debian/Ubuntu release works without
+# a script change; anything else fails clearly rather than guessing.
+
+# shellcheck source=/dev/null
+. /etc/os-release
+case "$ID" in
+    debian)
+        DOCKER_REPO_OS="debian"
+        # Docker has not published a repo for Debian releases newer than
+        # bookworm (e.g. trixie) as of this writing — bookworm is ABI-compatible
+        # and is the documented workaround. Update this if Docker ships one.
+        DOCKER_REPO_CODENAME="bookworm"
+        ;;
+    ubuntu)
+        DOCKER_REPO_OS="ubuntu"
+        DOCKER_REPO_CODENAME="$VERSION_CODENAME"
+        ;;
+    *)
+        die "Unsupported OS: ${PRETTY_NAME:-$ID}. This script supports Debian and Ubuntu only (ADR-001 §3.1)."
+        ;;
+esac
+
+# Default network interface: whatever currently carries the default route.
+# Interface names vary a lot across hardware/hypervisors (eth0 on Raspberry Pi
+# OS, enp0s3/ens18/etc. on most VMs) — detect it instead of assuming eth0.
+# Falls back to the FIXED CONFIGURATION default above if detection fails.
+DETECTED_IFACE="$(ip route show default 2>/dev/null | \
+    awk '/^default/ { for (i=1; i<=NF; i++) if ($i == "dev") { print $(i+1); exit } }' || true)"
+STATIC_IFACE="${DETECTED_IFACE:-$STATIC_IFACE}"
+NM_CON_NAME="static-${STATIC_IFACE}"
+
+# Hardware label for the fingerprint YAML — Raspberry Pi's device-tree model
+# file is the reliable signal; anything else is reported by architecture.
+if [ -f /proc/device-tree/model ] && grep -qi "raspberry pi" /proc/device-tree/model 2>/dev/null; then
+    HARDWARE_LABEL="raspberry-pi"
+else
+    HARDWARE_LABEL="$(uname -m)"
+fi
 
 # --- COLLECT STATIC IP UPFRONT ---
 
@@ -218,15 +260,15 @@ sudo apt-get install -y -qq ca-certificates curl gnupg lsb-release
 if command -v docker &>/dev/null; then
     info "Docker already installed: $(docker --version)"
 else
-    action "Installing Docker (using Bookworm repo — Trixie workaround)..."
+    action "Installing Docker (repo: ${DOCKER_REPO_OS}/${DOCKER_REPO_CODENAME})..."
 
     sudo rm -f /etc/apt/sources.list.d/docker.list
     sudo mkdir -p /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/debian/gpg | \
+    curl -fsSL "https://download.docker.com/linux/${DOCKER_REPO_OS}/gpg" | \
         sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg --yes
 
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
-https://download.docker.com/linux/debian bookworm stable" | \
+https://download.docker.com/linux/${DOCKER_REPO_OS} ${DOCKER_REPO_CODENAME} stable" | \
         sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
     sudo apt-get update -qq
@@ -391,8 +433,8 @@ cat > "$FACTS_FILE" << YAML
 
 hostname: ${HOSTNAME}
 role: control-plane
-hardware: raspberry-pi
-os: $(grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '"')
+hardware: ${HARDWARE_LABEL}
+os: ${PRETTY_NAME}
 arch: $(uname -m)
 target_ip: ${TARGET_IP}
 gateway: ${GATEWAY}
