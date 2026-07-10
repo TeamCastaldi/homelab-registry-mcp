@@ -14,10 +14,13 @@ scripts are tools for the operator/developer.
   session drops. Designed to be run via
   `curl -fsSL <raw-url>/scripts/install.sh | bash`; every prompt can be pre-seeded
   with an environment variable of the same name for non-interactive use.
-- **`bootstrap.sh`** — prepares a fresh Raspberry Pi (Debian Trixie) as the
-  homelab control-plane node: installs Docker, Ansible, `uv`, `git-crypt`, and the
-  GitHub CLI, sets the hostname, generates an SSH key, and applies a static IP.
-  Run directly for a bare provisioning pass, or let `install.sh` drive it —
+- **`bootstrap.sh`** — prepares a fresh control-plane node as the homelab control
+  plane: installs Docker, Ansible, `uv`, `git-crypt`, and the GitHub CLI, sets the
+  hostname, generates an SSH key, and applies a static IP. Supports Debian and
+  Ubuntu (ADR-001 §3.1) on any hardware — Raspberry Pi or an x86_64/ARM64 VM —
+  detecting the OS, Docker apt repo, network interface, and hardware type at
+  runtime rather than assuming a Pi. Run directly for a bare provisioning pass,
+  or let `install.sh` drive it —
   `bash scripts/bootstrap.sh [--dry-run] [--skip-network] [--network-only]`.
 - **`setup-homelab-repo.sh`** — one-time bootstrap of the private homelab Git repo
   (Phase C): creates the repo, initialises `git-crypt`, configures `.gitattributes`
@@ -49,7 +52,8 @@ scripts are tools for the operator/developer.
   script does, when to use it, and any required environment variables (both
   existing scripts follow this).
 - Never hardcode secrets — read them from environment variables or `.env`.
-- Note any platform assumptions at the top. `bootstrap.sh` targets the
-  Debian / Raspberry Pi control plane specifically; `setup-homelab-repo.sh` is
+- Note any platform assumptions at the top. `bootstrap.sh` targets Debian or
+  Ubuntu control-plane nodes (Pi or VM, ADR-001 §3.1) and detects OS/interface/
+  hardware rather than hardcoding them; `setup-homelab-repo.sh` is
   cross-platform (macOS, Linux, Windows via WSL) and is meant to run from a
-  developer laptop as well as the Pi.
+  developer laptop as well as the control-plane node.
