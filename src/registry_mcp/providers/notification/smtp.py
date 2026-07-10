@@ -50,10 +50,10 @@ class SmtpNotificationProvider:
     async def send(
         self, title: str, body: str, url: str | None = None, diff: str | None = None
     ) -> None:
-        message = self._build_message(title, body, url, diff)
         try:
+            message = self._build_message(title, body, url, diff)
             await asyncio.to_thread(self._send_sync, message)
-        except (smtplib.SMTPException, OSError) as exc:
+        except Exception as exc:  # a missed notification must not abort a proposal
             _log.warning("notification_failed", title=title, error=str(exc))
 
     def _build_message(
@@ -91,17 +91,18 @@ class SmtpNotificationProvider:
             # GitHub/Gitea have no separate deep link for "click to approve"
             # vs "click to request changes" — both actions live in the same
             # Review dialog on the PR page, so both buttons open it.
-            safe_url = html.escape(url, quote=True)
+            safe_url = html.escape(url.rstrip("/"), quote=True)
             button = (
                 "display:inline-block; margin:0.5em 0.5em 0.5em 0; padding:0.6em 1.2em; "
                 "border-radius:6px; text-decoration:none; color:#fff;"
             )
             parts.append(
-                f"<p>"
-                f"<a href='{safe_url}' style='{button} background:#2da44e;'>Approve &amp; Merge</a>"
-                f"<a href='{safe_url}' style='{button} background:#cf222e;'>Request Changes</a>"
-                f"<a href='{safe_url}/files' style='{button} background:#0969da;'>View Diff</a>"
-                f"</p>"
+                f'<p><a href="{safe_url}" style="{button} background:#2da44e;">'
+                f"Approve &amp; Merge</a>"
+                f'<a href="{safe_url}" style="{button} background:#cf222e;">'
+                f"Request Changes</a>"
+                f'<a href="{safe_url}/files" style="{button} background:#0969da;">'
+                f"View Diff</a></p>"
             )
         parts.append("</body></html>")
         return "".join(parts)
