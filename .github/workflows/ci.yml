@@ -34,3 +34,23 @@ jobs:
 
       - name: Test
         run: uv run pytest -q
+
+  ansible-lint:
+    name: Ansible lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ansible-lint
+        run: pip install --quiet ansible ansible-lint
+
+      - name: Lint docker-stack-deploy role and playbooks
+        env:
+          ANSIBLE_ROLES_PATH: ansible/roles
+        run: ansible-lint ansible/roles ansible/playbooks

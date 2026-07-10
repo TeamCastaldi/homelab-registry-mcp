@@ -1,0 +1,10 @@
+---
+# docker-stack-deploy — defaults
+#
+# docker_stack_deploy_repo_url and docker_stack_deploy_repo_path are
+# intentionally unset here — they identify the *operator's* private homelab
+# repo and its clone location on the workload node, so they belong in that
+# operator's own inventory/group_vars, never in this public role.
+
+docker_stack_deploy_repo_branch: main
+docker_stack_deploy_become: false

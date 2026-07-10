@@ -1,0 +1,97 @@
+name: Deploy homelab stack
+
+# Reusable workflow (ADR-001 §4.3, updated-phases.md Phase 4). An operator's
+# private homelab repo calls this from its own push-triggered workflow so
+# the deploy *logic* stays here while the operator's repo only holds
+# config (compose files, inventory, ansible.cfg). See CLAUDE.md for the
+# caller-workflow snippet an operator pastes into their own repo.
+#
+# Runs on whatever self-hosted runner is registered to the *calling* repo
+# (each operator registers their own control-plane runner there per
+# ADR-001 §5.1 step 11) — reusable-workflow jobs execute in the calling
+# repo's runner context.
+
+on:
+  workflow_call:
+    inputs:
+      registry-mcp-ref:
+        description: "Git ref of homelab-registry-mcp to pull the docker-stack-deploy role from"
+        required: false
+        type: string
+        default: main
+      inventory-path:
+        description: "Path (in the calling repo) to the Ansible inventory file"
+        required: false
+        type: string
+        default: ansible/inventory.yml
+      ansible-cfg-path:
+        description: "Path (in the calling repo) to ansible.cfg — connection/user settings only, roles_path is overridden"
+        required: false
+        type: string
+        default: ansible.cfg
+
+jobs:
+  detect-changes:
+    runs-on: self-hosted
+    outputs:
+      targets: ${{ steps.targets.outputs.targets }}
+    steps:
+      - name: Checkout homelab config
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find changed nodes/<node>/<service>/compose.yaml files
+        id: targets
+        run: |
+          set -euo pipefail
+
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.event.after }}"
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            RANGE="HEAD~1..HEAD"
+          else
+            RANGE="${BEFORE}..${AFTER}"
+          fi
+
+          changed=$(git diff --name-only "$RANGE" -- 'nodes/**/compose.yaml' || true)
+
+          if [ -z "$changed" ]; then
+            echo "targets=[]" >> "$GITHUB_OUTPUT"
+          else
+            targets=$(echo "$changed" | awk -F/ '{printf "{\"node\":\"%s\",\"service\":\"%s\"}\n", $2, $3}' | jq -s -c .)
+            echo "targets=${targets}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Report detected targets
+        run: echo "Deploy targets:${{ steps.targets.outputs.targets }}"
+
+  deploy:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.targets != '[]'
+    runs-on: self-hosted
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJson(needs.detect-changes.outputs.targets) }}
+    steps:
+      - name: Checkout homelab config
+        uses: actions/checkout@v4
+
+      - name: Checkout homelab-registry-mcp (docker-stack-deploy role)
+        uses: actions/checkout@v4
+        with:
+          repository: TeamCastaldi/homelab-registry-mcp
+          ref: ${{ inputs.registry-mcp-ref }}
+          path: .registry-mcp
+
+      - name: Deploy ${{ matrix.target.service }} on ${{ matrix.target.node }}
+        env:
+          ANSIBLE_ROLES_PATH: ${{ github.workspace }}/.registry-mcp/ansible/roles
+          ANSIBLE_CONFIG: ${{ inputs.ansible-cfg-path }}
+        run: |
+          ansible-playbook \
+            -i "${{ inputs.inventory-path }}" \
+            "${{ github.workspace }}/.registry-mcp/ansible/playbooks/deploy.yml" \
+            -e target_node="${{ matrix.target.node }}" \
+            -e target_service="${{ matrix.target.service }}"

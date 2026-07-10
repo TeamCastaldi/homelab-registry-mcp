@@ -15,7 +15,7 @@ uv run ruff check .                     # lint
 uv run ruff format .                    # format (line-length: 100)
 ```
 
-CI runs `ruff check`, `ruff format --check`, and `pytest -q` on every push.
+CI runs `ruff check`, `ruff format --check`, `pytest -q`, and `ansible-lint` (against `ansible/`) on every push.
 
 ## Project Structure
 
@@ -234,6 +234,33 @@ GHCR. Pin the release by setting `REGISTRY_MCP_VERSION=v0.6.1` in `.env`.
 
 Pre-reqs: Traefik on external `traefik` Docker network, DNS for `registry-mcp.<your-domain>`. Docker socket is mounted read-only.
 
+### Automated Deployment Pipeline (Phase 4 — GitOps CD)
+
+The action lives here; the config lives in each operator's private homelab
+repo. `homelab-registry-mcp` ships `ansible/roles/docker-stack-deploy` (git
+pull + `docker compose pull && up -d` for one `nodes/<node>/<service>/`
+directory) and a reusable `.github/workflows/deploy.yml` (`on: workflow_call`).
+An operator's private repo never carries the deploy logic — only its own
+inventory, `ansible.cfg`, `nodes/` compose files, and a thin caller workflow:
+
+```yaml
+# <your-homelab-repo>/.github/workflows/deploy.yml
+name: Deploy
+on:
+  push:
+    branches: [main]
+jobs:
+  deploy:
+    uses: TeamCastaldi/homelab-registry-mcp/.github/workflows/deploy.yml@main
+```
+
+The reusable workflow diffs the push for changed `nodes/**/compose.yaml`
+paths, checks out `homelab-registry-mcp` alongside the caller's checkout to
+get the role, and runs `ansible-playbook` against the *caller's* inventory —
+using the self-hosted runner already registered to the caller's repo (ADR-001
+§5.1 step 11). See `ansible/README.md` and
+`ansible/roles/docker-stack-deploy/README.md` for the full variable contract.
+
 ## Current Status
 
 - **Phase 7 complete**: cross-source linking (Authentik ↔ Traefik ↔ Docker), `service_get_full_context()`, and the DSPy reasoning layer (`ResolveServiceIdentity`, `InferServiceMetadata`, `SummarizeAccessAudit`) — off by default via `DSPY_ENABLED`
@@ -242,7 +269,7 @@ Pre-reqs: Traefik on external `traefik` Docker network, DNS for `registry-mcp.<y
 - **Phase 9a complete**: hardware node registry — `HardwareNode` model + `HardwareStore` + 11 MCP tools registered in `server.py`; manual registration only (live discovery is Phase 9b)
 - **Phase C complete**: git-crypt secrets integration — 6 `secrets_*` MCP tools, `scripts/setup-homelab-repo.sh` bootstrap, `git-crypt` in Dockerfile. Path validation hardened against arbitrary file read/write via absolute paths (`_check_path` in `tools/secrets.py`); `setup-homelab-repo.sh` and `.env.example` work cross-platform (macOS/Linux/WSL), defaulting to `$HOME`-relative paths instead of `/opt/homelab`
 - **Phase D complete**: migrated from Heimdall to Watchtower (Pi at `10.0.0.200`); Traefik static backend routes `registry-mcp.castaldifamily.com` → Watchtower; GitHub Actions self-hosted runner operational; first automated CD deploy proven (ConvertX on Panoptichron in 18s); `docker-compose.yml` binds `0.0.0.0:8765`
-- **`docs/plans/updated-phases.md` Phases 1-3 complete** (separate numbering from the phases above): `scripts/install.sh` one-shot installer for a fresh control-plane node (Phase 1); `health.py` startup checks (Git repo/`ansible.cfg`/SSH key) + always-on `system_health_check` tool + read-only degradation of the GitOps write tools when unhealthy (Phase 2); conversational GitOps loop — `poll_pr_comments`/`apply_review_feedback` push a DSPy-generated revision commit in response to a trusted PR comment, gated by a fail-closed `PROPOSAL_COMMENT_ALLOWED_USERS` allowlist and the same confidence/YAML gates as initial patch generation (Phase 3)
+- **`docs/plans/updated-phases.md` Phases 1-4 complete** (separate numbering from the phases above): `scripts/install.sh` one-shot installer for a fresh control-plane node (Phase 1); `health.py` startup checks (Git repo/`ansible.cfg`/SSH key) + always-on `system_health_check` tool + read-only degradation of the GitOps write tools when unhealthy (Phase 2); conversational GitOps loop — `poll_pr_comments`/`apply_review_feedback` push a DSPy-generated revision commit in response to a trusted PR comment, gated by a fail-closed `PROPOSAL_COMMENT_ALLOWED_USERS` allowlist and the same confidence/YAML gates as initial patch generation (Phase 3); `ansible/roles/docker-stack-deploy` + reusable `.github/workflows/deploy.yml` — the deploy *action* ships here, each operator's private homelab repo supplies only the *config* and a thin caller workflow (Phase 4)
 - **ADR-004 proposed**: upstream version detection — `HomelabrepoDiscoverySource`, `UpstreamRegistrySource`, `ResolveLatestTag` DSPy module, `IMAGE_UPDATE` proposal type — not yet implemented
 - **OOBE CLI** (ADR-003): fully documented but not yet implemented; currently a manual process
 - **Deferred**: network probe discovery (`DISCOVERY_NETWORK_ENABLED=false`), real auth (Bearer/mTLS), Phase 9b live Ansible fact-gather, multi-node Ansible bootstrap (Phase E)

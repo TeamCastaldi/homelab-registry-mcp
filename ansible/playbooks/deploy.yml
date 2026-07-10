@@ -1,0 +1,12 @@
+---
+# Deploys one compose stack to one workload node via docker-stack-deploy.
+# Expects target_node to name a host or group in the caller's inventory,
+# and target_service to name the nodes/<target_node>/<target_service>/
+# directory. See ansible/roles/docker-stack-deploy/README.md for the full
+# variable contract.
+
+- name: Deploy homelab compose stack
+  hosts: "{{ target_node | default('all') }}"
+  gather_facts: false
+  roles:
+    - role: docker-stack-deploy

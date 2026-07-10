@@ -1,0 +1,61 @@
+---
+# docker-stack-deploy
+#
+# Deploys one compose stack on one workload node: pulls the operator's
+# homelab repo clone up to date on the target, then `docker compose pull`
+# + `up -d` for the single service directory that changed.
+#
+# Required vars (passed by the caller, e.g. `-e target_node=... -e
+# target_service=...`, or set in inventory/group_vars):
+#   target_node                       — name of the nodes/<node>/ directory
+#   target_service                    — name of the <service>/ directory
+#   docker_stack_deploy_repo_url      — git remote of the operator's homelab repo
+#   docker_stack_deploy_repo_path     — clone path on the workload node
+
+- name: Assert required variables are set
+  ansible.builtin.assert:
+    that:
+      - target_node is defined
+      - target_service is defined
+      - docker_stack_deploy_repo_url is defined
+      - docker_stack_deploy_repo_path is defined
+    fail_msg: >-
+      docker-stack-deploy requires target_node, target_service,
+      docker_stack_deploy_repo_url, and docker_stack_deploy_repo_path.
+
+- name: Pull latest homelab repo on {{ inventory_hostname }}
+  ansible.builtin.git:
+    repo: "{{ docker_stack_deploy_repo_url }}"
+    dest: "{{ docker_stack_deploy_repo_path }}"
+    version: "{{ docker_stack_deploy_repo_branch }}"
+    update: true
+  become: "{{ docker_stack_deploy_become }}"
+
+- name: Resolve compose file path for {{ target_service }}
+  ansible.builtin.set_fact:
+    docker_stack_deploy_compose_file: >-
+      {{ docker_stack_deploy_repo_path }}/nodes/{{ target_node }}/{{ target_service }}/compose.yaml
+
+- name: Verify compose file exists
+  ansible.builtin.stat:
+    path: "{{ docker_stack_deploy_compose_file }}"
+  register: docker_stack_deploy_compose_stat
+
+- name: Fail if compose file is missing
+  ansible.builtin.fail:
+    msg: "No compose.yaml at {{ docker_stack_deploy_compose_file }} — check target_node/target_service"
+  when: not docker_stack_deploy_compose_stat.stat.exists
+
+- name: Pull latest images for {{ target_service }}
+  ansible.builtin.command:
+    cmd: docker compose -f {{ docker_stack_deploy_compose_file }} pull
+    chdir: "{{ docker_stack_deploy_compose_file | dirname }}"
+  changed_when: true
+  become: "{{ docker_stack_deploy_become }}"
+
+- name: "Recreate stack with new images: {{ target_service }}"
+  ansible.builtin.command:
+    cmd: docker compose -f {{ docker_stack_deploy_compose_file }} up -d
+    chdir: "{{ docker_stack_deploy_compose_file | dirname }}"
+  changed_when: true
+  become: "{{ docker_stack_deploy_become }}"
