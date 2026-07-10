@@ -47,7 +47,7 @@ src/registry_mcp/
 │   └── store.py           # Proposal CRUD (shares the registry SQLite engine)
 ├── providers/             # pluggable write-path backends (behind protocols)
 │   ├── git/               # GitProvider protocol + Gitea/GitHub impls + factory
-│   └── notification/      # NotificationProvider protocol + Ntfy/Null + factory
+│   └── notification/      # NotificationProvider protocol + Ntfy/Smtp/Null + factory
 ├── integrations/
 │   ├── traefik/           # httpx client + 7 MCP tools + resource + prompt
 │   └── authentik/         # httpx client + 8 MCP tools + resource + prompt
@@ -120,9 +120,12 @@ at all, and `PROPOSAL_AUTO_CREATE=true` for unattended creation.
 - Flow per finding: read current file from Git → DSPy patch → gate → branch →
   commit → open PR (labelled) → notify → persist `Proposal`. `PROPOSAL_DRY_RUN=true`
   stops before any Git write and returns the patch for review.
-- The engine consumes `GitProvider`/`NotificationProvider` protocols (Gitea/GitHub + Ntfy/Null
+- The engine consumes `GitProvider`/`NotificationProvider` protocols (Gitea/GitHub + Ntfy/Smtp/Null
   shipped); the discovery engine's `on_pass_complete` hook runs the verification sweep
   (and auto-create when enabled) after each pass — wrapped so it never breaks discovery.
+- `NotificationProvider.send()` takes an optional `diff` — Smtp renders it into a templated
+  HTML email (PR summary + truncated diff + Approve/Request Changes/View Diff buttons); Ntfy/Null
+  ignore it (a full diff has no place in a mobile push).
 
 **A source only runs when its upstream env var is set** (e.g., no Traefik discovery if `TRAEFIK_API_URL` is unset).
 
@@ -155,8 +158,10 @@ at all, and `PROPOSAL_AUTO_CREATE=true` for unattended creation.
 | `GIT_PROVIDER` | `gitea` | `gitea` (also Forgejo) or `github` (GitHub.com by default; for GHES set `GIT_BASE_URL` to its API root, e.g. `https://ghe.example.com/api/v3`); `gitlab` reserved (not yet implemented) |
 | `GIT_BASE_URL` / `GIT_TOKEN` / `GIT_REPO` | unset | Enables the write path; repo is `owner/name`. All three required |
 | `GIT_BASE_BRANCH` | `main` | Branch PRs target |
-| `NOTIFICATION_PROVIDER` | `none` | `ntfy` or `none` |
+| `NOTIFICATION_PROVIDER` | `none` | `ntfy`, `smtp`, or `none` |
 | `NOTIFICATION_URL` / `NOTIFICATION_TOPIC` / `NOTIFICATION_TOKEN` | unset / `homelab-registry` / unset | Ntfy push config |
+| `NOTIFICATION_SMTP_HOST` / `_PORT` / `_USERNAME` / `_PASSWORD` / `_USE_TLS` | unset / `587` / unset / unset / `true` | SMTP relay config (Phase 5). Validated against SMTP2GO. All of host/from/to required or the factory falls back to the null provider |
+| `NOTIFICATION_FROM_EMAIL` / `NOTIFICATION_TO_EMAIL` | unset / unset | Sender/recipient for the templated HTML proposal email |
 | `APPLY_MODE` | `manual` | `manual` or `ansible` — shapes PR description only |
 | `PROPOSAL_AUTO_CREATE` | `false` | Open PRs automatically on discovery passes |
 | `PROPOSAL_DRY_RUN` | `false` | Generate + log patches without opening PRs |
@@ -264,12 +269,12 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
 ## Current Status
 
 - **Phase 7 complete**: cross-source linking (Authentik ↔ Traefik ↔ Docker), `service_get_full_context()`, and the DSPy reasoning layer (`ResolveServiceIdentity`, `InferServiceMetadata`, `SummarizeAccessAudit`) — off by default via `DSPY_ENABLED`
-- **Phase 8 in progress**: security write path landed — `GenerateRemediationPatch`, Gitea + Ntfy/Null providers, `Proposal` model/store, proposal engine (create + verification sweep), and the `proposal_*` tools. Off by default (`GIT_*` unset, `PROPOSAL_AUTO_CREATE=false`); see ADR-002.
+- **Phase 8 in progress**: security write path landed — `GenerateRemediationPatch`, Gitea + Ntfy/Smtp/Null providers, `Proposal` model/store, proposal engine (create + verification sweep), and the `proposal_*` tools. Off by default (`GIT_*` unset, `PROPOSAL_AUTO_CREATE=false`); see ADR-002.
 - **Phase 8 remaining**: normalization path (`NormalizeConfigFile`, yamllint, `proposal_normalize`); flipping `PROPOSAL_DRY_RUN=false` against the homelab repo (a deliberate human step); runbooks, cold-restore testing, Ansible provisioning. (GitHub provider landed — `GitHubGitProvider` alongside Gitea, selected via `GIT_PROVIDER=github`.)
 - **Phase 9a complete**: hardware node registry — `HardwareNode` model + `HardwareStore` + 11 MCP tools registered in `server.py`; manual registration only (live discovery is Phase 9b)
 - **Phase C complete**: git-crypt secrets integration — 6 `secrets_*` MCP tools, `scripts/setup-homelab-repo.sh` bootstrap, `git-crypt` in Dockerfile. Path validation hardened against arbitrary file read/write via absolute paths (`_check_path` in `tools/secrets.py`); `setup-homelab-repo.sh` and `.env.example` work cross-platform (macOS/Linux/WSL), defaulting to `$HOME`-relative paths instead of `/opt/homelab`
 - **Phase D complete**: migrated from Heimdall to Watchtower (Pi at `10.0.0.200`); Traefik static backend routes `registry-mcp.castaldifamily.com` → Watchtower; GitHub Actions self-hosted runner operational; first automated CD deploy proven (ConvertX on Panoptichron in 18s); `docker-compose.yml` binds `0.0.0.0:8765`
-- **`docs/plans/updated-phases.md` Phases 1-4 complete** (separate numbering from the phases above): `scripts/install.sh` one-shot installer for a fresh control-plane node (Phase 1); `health.py` startup checks (Git repo/`ansible.cfg`/SSH key) + always-on `system_health_check` tool + read-only degradation of the GitOps write tools when unhealthy (Phase 2); conversational GitOps loop — `poll_pr_comments`/`apply_review_feedback` push a DSPy-generated revision commit in response to a trusted PR comment, gated by a fail-closed `PROPOSAL_COMMENT_ALLOWED_USERS` allowlist and the same confidence/YAML gates as initial patch generation (Phase 3); `ansible/roles/docker-stack-deploy` + reusable `.github/workflows/deploy.yml` — the deploy *action* ships here, each operator's private homelab repo supplies only the *config* and a thin caller workflow (Phase 4)
+- **`docs/plans/updated-phases.md` Phases 1-5 complete** (separate numbering from the phases above): `scripts/install.sh` one-shot installer for a fresh control-plane node (Phase 1); `health.py` startup checks (Git repo/`ansible.cfg`/SSH key) + always-on `system_health_check` tool + read-only degradation of the GitOps write tools when unhealthy (Phase 2); conversational GitOps loop — `poll_pr_comments`/`apply_review_feedback` push a DSPy-generated revision commit in response to a trusted PR comment, gated by a fail-closed `PROPOSAL_COMMENT_ALLOWED_USERS` allowlist and the same confidence/YAML gates as initial patch generation (Phase 3); `ansible/roles/docker-stack-deploy` + reusable `.github/workflows/deploy.yml` — the deploy *action* ships here, each operator's private homelab repo supplies only the *config* and a thin caller workflow (Phase 4); `SmtpNotificationProvider` — templated HTML proposal email (PR summary, diff, Approve/Request Changes/View Diff buttons) via stdlib `smtplib`, validated against SMTP2GO, `NOTIFICATION_PROVIDER=smtp` (Phase 5)
 - **ADR-004 proposed**: upstream version detection — `HomelabrepoDiscoverySource`, `UpstreamRegistrySource`, `ResolveLatestTag` DSPy module, `IMAGE_UPDATE` proposal type — not yet implemented
 - **OOBE CLI** (ADR-003): fully documented but not yet implemented; currently a manual process
 - **Deferred**: network probe discovery (`DISCOVERY_NETWORK_ENABLED=false`), real auth (Bearer/mTLS), Phase 9b live Ansible fact-gather, multi-node Ansible bootstrap (Phase E)

@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Transport = Literal["stdio", "sse", "streamable-http"]
 GitProviderName = Literal["gitea", "github", "gitlab"]
-NotificationProviderName = Literal["ntfy", "none"]
+NotificationProviderName = Literal["ntfy", "smtp", "none"]
 ApplyModeName = Literal["manual", "webhook", "ansible"]
 
 
@@ -80,6 +80,17 @@ class Settings(BaseSettings):
     notification_url: str | None = Field(default=None)
     notification_topic: str = Field(default="homelab-registry")
     notification_token: str | None = Field(default=None)
+
+    # SMTP notification provider (Phase 5) — templated HTML email per proposal
+    # event. Validated in production against SMTP2GO; any standard SMTP relay
+    # with STARTTLS works.
+    notification_smtp_host: str | None = Field(default=None)
+    notification_smtp_port: int = Field(default=587)
+    notification_smtp_username: str | None = Field(default=None)
+    notification_smtp_password: str | None = Field(default=None)
+    notification_smtp_use_tls: bool = Field(default=True)
+    notification_from_email: str | None = Field(default=None)
+    notification_to_email: str | None = Field(default=None)
 
     # Apply mechanism: how the change lands after a human merges the PR. The
     # server never applies it — this only shapes the PR description.

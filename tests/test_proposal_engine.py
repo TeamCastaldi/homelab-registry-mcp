@@ -76,8 +76,8 @@ class FakeNotifier:
     def __init__(self):
         self.sent = []
 
-    async def send(self, title, body, url=None):
-        self.sent.append({"title": title, "body": body, "url": url})
+    async def send(self, title, body, url=None, diff=None):
+        self.sent.append({"title": title, "body": body, "url": url, "diff": diff})
 
 
 def _settings(**overrides):
@@ -142,6 +142,7 @@ async def test_create_opens_pr_and_records_proposal(store):
     assert "Ansible" in git.opened[0]["body"]
     assert len(proposals.list_open()) == 1
     assert notifier.sent[0]["url"] == result["pr_url"]
+    assert notifier.sent[0]["diff"] == VALID_PATCH["patch"]
 
 
 async def test_create_dry_run_opens_no_pr(store):

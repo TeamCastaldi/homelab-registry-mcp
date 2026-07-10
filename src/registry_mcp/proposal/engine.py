@@ -215,6 +215,7 @@ class ProposalEngine:
             f"[PR] {service.name}: remediation PR opened",
             f"{result.pr_title}\n{result.reasoning}".strip(),
             url=opened.url,
+            diff=result.patch,
         )
         return proposal.model_dump(mode="json")
 
@@ -398,8 +399,10 @@ class ProposalEngine:
         updated = self._proposals.set_status(proposal_id, ProposalStatus.cancelled)
         return (updated or proposal).model_dump(mode="json")
 
-    async def _notify(self, title: str, body: str, url: str | None = None) -> None:
+    async def _notify(
+        self, title: str, body: str, url: str | None = None, diff: str | None = None
+    ) -> None:
         try:
-            await self._notifier.send(title, body, url)
+            await self._notifier.send(title, body, url, diff=diff)
         except Exception as exc:  # notification must never abort a proposal
             _log.warning("notify_failed", title=title, error=str(exc))
