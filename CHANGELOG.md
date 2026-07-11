@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.14.1](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.14.0...v0.14.1) (2026-07-11)
+
+
+### Bug Fixes
+
+* address Copilot review on pre_update_compatibility_check wording ([ac335de](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/ac335dea7108f4bb3dec997abf8199b4cca5ec65))
+* set explicit GHA cache scope so tag-triggered builds share it ([c3eb51c](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/c3eb51cb4c71aee8e74ab7fd5781b5dcc8b8923d))
+
+
+### Performance Improvements
+
+* **ci:** add GitHub Actions layer cache to Docker build ([d7ccfd4](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/d7ccfd4a3b65989c4898c6ad646c88ce80d94101), [52d59f6](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/52d59f6be9869013c211757737142c4d08bc9a5d))
+
 ## [0.14.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.13.0...v0.14.0) (2026-07-11)
 
 
