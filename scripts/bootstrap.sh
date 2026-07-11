@@ -158,8 +158,11 @@ DETECTED_GATEWAY="$(ip route show default 2>/dev/null | \
     awk '/^default/ { print $3; exit }' || true)"
 DETECTED_PREFIX="$(ip -o -f inet addr show dev "$STATIC_IFACE" 2>/dev/null | \
     awk '{print $4}' | cut -d/ -f2 | head -n1 || true)"
-DETECTED_DNS="$(awk '/^nameserver/ { print $2 }' /etc/resolv.conf 2>/dev/null | \
-    paste -sd',' - || true)"
+# IPv4 only: an IPv6 nameserver here (common with systemd-resolved) would
+# sail past this as a detected default, then fail valid_ip_format the moment
+# the operator just presses Enter to accept it.
+DETECTED_DNS="$(awk '/^nameserver/ && $2 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ { print $2 }' \
+    /etc/resolv.conf 2>/dev/null | paste -sd',' - || true)"
 
 # --- VALIDATION HELPERS ---
 
@@ -490,10 +493,16 @@ FACTS_DIR="${SCRIPT_DIR}/../ansible/archive/outputs"
 FACTS_FILE="${FACTS_DIR}/hardware-facts-${HOSTNAME}-${TIMESTAMP}.yml"
 mkdir -p "$FACTS_DIR"
 
+# Joined (not trailing-newline-terminated) so it drops into the heredoc as
+# its own line(s) without producing a blank line before the next key.
 DNS_YAML_LIST=""
 IFS=',' read -ra _dns_facts <<< "$TARGET_DNS"
 for _dns_entry in "${_dns_facts[@]}"; do
-    DNS_YAML_LIST="${DNS_YAML_LIST}  - ${_dns_entry}"$'\n'
+    if [ -n "$DNS_YAML_LIST" ]; then
+        DNS_YAML_LIST="${DNS_YAML_LIST}"$'\n'"  - ${_dns_entry}"
+    else
+        DNS_YAML_LIST="  - ${_dns_entry}"
+    fi
 done
 
 cat > "$FACTS_FILE" << YAML
@@ -510,7 +519,8 @@ target_ip: ${TARGET_IP}
 prefix: ${TARGET_PREFIX}
 gateway: ${TARGET_GATEWAY}
 dns:
-${DNS_YAML_LIST}interface: ${STATIC_IFACE}
+${DNS_YAML_LIST}
+interface: ${STATIC_IFACE}
 ssh_key: ${SSH_KEY}.pub
 bootstrapped_at: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 bootstrap_version: ${VERSION}
