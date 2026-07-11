@@ -49,8 +49,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # fresh process with no memory of the other, so without this file the
 # second invocation would re-prompt from the hardcoded defaults instead of
 # what was just answered. Written after validation below; read as the
-# prompt defaults here; removed once Phase 6 applies (or skips) the config
-# so a later, unrelated bootstrap run doesn't inherit stale answers.
+# prompt defaults here; removed once Phase 6 actually applies the config
+# via nmcli, so a later, unrelated bootstrap run doesn't inherit stale
+# answers. Left in place if the operator declines to apply in Phase 6, so
+# a subsequent --network-only run still remembers the answer.
 NETWORK_STATE_FILE="${SCRIPT_DIR}/../ansible/archive/outputs/.bootstrap-network-state"
 
 # The user to reconnect/SSH as and to configure in the Ansible inventory.
@@ -179,8 +181,16 @@ DETECTED_DNS="$(awk '/^nameserver/ && $2 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ { 
 # lets --network-only reuse what was already typed for --skip-network,
 # instead of prompting from 192.168.1.200 again.
 if [ -f "$NETWORK_STATE_FILE" ]; then
-    # shellcheck source=/dev/null
-    . "$NETWORK_STATE_FILE"
+    # Parsed as plain key=value data, not sourced — the file lives in a
+    # writable path, and sourcing it would execute its contents as shell.
+    while IFS='=' read -r _state_key _state_value; do
+        case "$_state_key" in
+            SAVED_TARGET_IP) SAVED_TARGET_IP="$_state_value" ;;
+            SAVED_TARGET_PREFIX) SAVED_TARGET_PREFIX="$_state_value" ;;
+            SAVED_TARGET_GATEWAY) SAVED_TARGET_GATEWAY="$_state_value" ;;
+            SAVED_TARGET_DNS) SAVED_TARGET_DNS="$_state_value" ;;
+        esac
+    done < "$NETWORK_STATE_FILE"
     DETECTED_GATEWAY="${SAVED_TARGET_GATEWAY:-$DETECTED_GATEWAY}"
     DETECTED_PREFIX="${SAVED_TARGET_PREFIX:-$DETECTED_PREFIX}"
     DETECTED_DNS="${SAVED_TARGET_DNS:-$DETECTED_DNS}"
