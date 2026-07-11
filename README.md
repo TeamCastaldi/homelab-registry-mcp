@@ -46,6 +46,10 @@ query and act on.
 
 ## How to run
 
+See [docs/SETUP.md](docs/SETUP.md) for the full step-by-step setup guide,
+including exactly what each install command does and what software it
+installs. Quick version:
+
 ### Option A: fresh control-plane node (recommended)
 
 For a brand-new Raspberry Pi (or other Debian/Ubuntu host) that will run
@@ -119,6 +123,9 @@ In Claude Desktop, add an MCP server with the same URL under Settings.
 
 ## Documentation
 
+- [docs/SETUP.md](docs/SETUP.md) — dedicated setup guide: which install path
+  to pick, exactly what each command does, what software gets installed, and
+  troubleshooting.
 - [CLAUDE.md](CLAUDE.md) — project structure, architecture, all environment
   variables, key conventions, and current phase status. Start here.
 - [docs/ARDs/ADR-001-Homelab-Control-Plane.md](docs/ARDs/ADR-001-Homelab-Control-Plane.md) — architecture, design decisions, and phased roadmap
