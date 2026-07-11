@@ -23,11 +23,13 @@ CI runs `ruff check`, `ruff format --check`, `pytest -q`, and `ansible-lint` (ag
 src/registry_mcp/
 ├── server.py              # FastMCP wiring — register all tools here
 ├── config.py              # pydantic Settings (env vars → typed config)
+├── gitcrypt.py            # shared git-crypt primitives (secrets tools + adoption's .env write)
 ├── models/
 │   ├── service.py         # Service, ServiceSource (SQLModel tables)
 │   ├── event.py           # ChangeEvent, DiscoveryEvent (audit log)
 │   ├── hardware.py        # HardwareNode, HardwareChangeEvent, NodeRole, NodeStatus
-│   └── proposal.py        # Proposal, FindingType, ProposalStatus (Phase 8)
+│   ├── proposal.py        # Proposal, FindingType, ProposalStatus (Phase 8)
+│   └── adoption.py        # AdoptionDraft, DetectedSecret (Phase 7 brownfield adoption)
 ├── registry/
 │   ├── store.py           # SQLite CRUD + event recording
 │   └── reconcile.py       # Match discovered candidates → registry entries
@@ -37,14 +39,18 @@ src/registry_mcp/
 │   ├── scheduler.py       # APScheduler wiring
 │   ├── traefik.py / docker.py / authentik.py  # source implementations
 ├── dspy/                  # reasoning layer (Phase 7) — DSPy enrichment, confidence-gated
-│   ├── signatures.py      # ResolveServiceIdentity, InferServiceMetadata, SummarizeAccessAudit, GenerateRemediationPatch
+│   ├── signatures.py      # ResolveServiceIdentity, InferServiceMetadata, SummarizeAccessAudit, GenerateRemediationPatch, DetectHardcodedSecrets
 │   └── reasoner.py        # Reasoner: lazy LM config, gates, graceful degradation
 ├── hardware/              # hardware node registry (Phase 9a)
 │   └── store.py           # HardwareStore: node CRUD, service linking, capacity summary
 ├── proposal/              # proposal layer (Phase 8) — opens PRs, never merges/writes FS
 │   ├── generator.py       # calls DSPy GenerateRemediationPatch + confidence/YAML gates
+│   ├── adoption.py        # AdoptionGenerator: calls DSPy DetectHardcodedSecrets + same gates
 │   ├── engine.py          # create per finding, verification sweep, after_discovery hook
 │   └── store.py           # Proposal CRUD (shares the registry SQLite engine)
+├── adoption/              # brownfield adoption (Phase 7) — see docs/plans/updated-phases.md
+│   ├── ssh.py             # SSH docker-inspect/cat helpers against a HardwareNode
+│   └── store.py           # AdoptionDraftStore: the pause point between draft and finalize
 ├── providers/             # pluggable write-path backends (behind protocols)
 │   ├── git/               # GitProvider protocol + Gitea/GitHub impls + factory
 │   └── notification/      # NotificationProvider protocol + Ntfy/Smtp/Null + factory
@@ -58,7 +64,8 @@ src/registry_mcp/
 │   ├── linking.py         # service_link_authentik + service_get_full_context
 │   ├── hardware.py        # hardware-add-node/get/list/update/delete + link/capacity tools
 │   ├── secrets.py         # secrets_status/encrypt/decrypt/add/rotate/list_keys (Phase C)
-│   └── proposal.py        # proposal_create/list_open/get/cancel/verify (Phase 8)
+│   ├── proposal.py        # proposal_create/list_open/get/cancel/verify (Phase 8)
+│   └── adoption.py        # proposal_adopt_service[_finalize/_cancel/_get] (Phase 7 brownfield)
 ├── logging/events.py      # structlog config with secret redaction
 └── seed.py                # YAML bootstrap logic
 tests/                     # mirrors src/ layout; uses in-memory SQLite
@@ -127,6 +134,30 @@ at all, and `PROPOSAL_AUTO_CREATE=true` for unattended creation.
   HTML email (PR summary + truncated diff + Approve/Request Changes/View Diff buttons); Ntfy/Null
   ignore it (a full diff has no place in a mobile push).
 
+**Brownfield adoption (`docs/plans/updated-phases.md` Phase 7, `adoption/` + `proposal/adoption.py`
++ `tools/adoption.py`):** brings a live, pre-existing Docker service (discovered but never
+GitOps-managed) under management without leaking its hardcoded secrets. Off by default
+(`ADOPTION_ENABLED=false`); requires the same `GIT_*` as the proposal layer plus
+`SECRETS_REPO_PATH` and `SSH_KEY_PATH`.
+- Two-call flow so a human always decides secret handling before anything is committed:
+  `proposal_adopt_service(service_id)` SSHes into the service's linked `HardwareNode`
+  (`hardware-link-service`), reads the live container's env and its original
+  `docker-compose.yml` via `docker inspect`/`cat`, asks `DetectHardcodedSecrets` (DSPy) to
+  produce a sanitized compose with `${VAR}` interpolations, and persists a pending
+  `AdoptionDraft` — no Git write yet. `proposal_adopt_service_finalize(draft_id,
+  secret_strategy)` takes the operator's `"keep"` (reuse the captured live values) or
+  `"rotate"` (fresh `secrets.token_urlsafe` values — **never** generated by the reasoning
+  layer) choice and opens the PR.
+- **The `.env` write never goes through `GitProvider.commit_file()`** — that call is a raw
+  hosting-API content write that bypasses git-crypt's local clean filter entirely, which
+  would land the secret in the repo as plaintext despite `.gitattributes`. Instead
+  `registry_mcp.gitcrypt` (shared with `tools/secrets.py`) checks out the feature branch in
+  the local `SECRETS_REPO_PATH` clone, writes and git-crypt-encrypts the `.env` there, and
+  `git push`es it; only the already-secret-free sanitized compose file goes through the
+  remote Git provider, on that same branch.
+- `AdoptionDraft` rows hold the captured live secret values only long enough for the
+  operator to answer (`ADOPTION_DRAFT_TTL_MINUTES`, default 60) before expiring.
+
 **A source only runs when its upstream env var is set** (e.g., no Traefik discovery if `TRAEFIK_API_URL` is unset).
 
 ## Environment Variables
@@ -180,6 +211,9 @@ at all, and `PROPOSAL_AUTO_CREATE=true` for unattended creation.
 | `SECRETS_GIT_CRYPT_KEY` | unset | Base64-encoded git-crypt key bytes (fallback when no key file) |
 | `ANSIBLE_CFG_PATH` | unset | Absolute path to `ansible.cfg` on this node; one of three startup health checks (Phase 2) — missing it starts the server in read-only mode |
 | `SSH_KEY_PATH` | unset | Absolute path to the control-plane SSH key; same startup health check as `ANSIBLE_CFG_PATH`, same no-expansion caveat |
+| `ADOPTION_ENABLED` | `false` | Enables the `proposal_adopt_service*` brownfield adoption tools |
+| `SSH_DEFAULT_USER` | `root` | User for the ad-hoc SSH connection adoption uses to inspect a live container; reuses `SSH_KEY_PATH` |
+| `ADOPTION_DRAFT_TTL_MINUTES` | `60` | How long a drafted adoption may await the operator's keep/rotate decision before expiring |
 | `EVENT_RETENTION_DAYS` | `90` | Old events purged on startup |
 | `LOG_LEVEL` | `INFO` | |
 
@@ -197,7 +231,8 @@ Copy `.env.example` to `.env` and fill in the upstream URLs before running local
 - **DSPy/`dspy/` subpackage does not shadow the library**: Python 3 absolute imports resolve `import dspy` to the top-level package; the library is imported lazily so a disabled reasoning layer adds no startup cost.
 - **Naming**: kebab-case for MCP tool names, snake_case for Python, PascalCase for classes.
 - **Log secrets are redacted**: any field named `token`, `password`, `secret`, `key`, `authorization`, `api_key` is replaced with `***redacted***` before writing to logs.
-- **All `secrets_*` paths go through `_check_path`**: every user-supplied path is validated by the shared helper in `tools/secrets.py` — reject absolute paths, reject `..` traversal, then `.resolve()` + `is_relative_to(repo)` as a final containment check (also catches symlink escapes). Never join a repo base with a caller-supplied path without it; `Path(base) / "/etc/passwd"` silently discards `base` and returns `/etc/passwd`.
+- **All repo-relative paths go through `gitcrypt.check_path`**: every user- or draft-supplied path (`secrets_*` tools, adoption's `.env` write) is validated by the shared helper in `gitcrypt.py` — reject absolute paths, reject `..` traversal, then `.resolve()` + `is_relative_to(repo)` as a final containment check (also catches symlink escapes). Never join a repo base with a caller-supplied path without it; `Path(base) / "/etc/passwd"` silently discards `base` and returns `/etc/passwd`.
+- **A secret never reaches Git through `GitProvider.commit_file()`**: that call is a raw hosting-API content write and bypasses git-crypt's local clean filter entirely. Anything that must land encrypted (the `.env` files `secrets_*` and adoption write) goes through `gitcrypt.py`'s local-clone subprocess helpers instead — see the brownfield adoption entry above.
 - **Structured logs go to stderr + file** — keeps stdio JSON-RPC transport clean.
 - **No HTTP /health endpoint**: Dockerfile uses a TCP probe on `MCP_PORT`; the streamable-http transport doesn't expose arbitrary HTTP routes.
 - **ForwardAuth in front of MCP clients breaks them** (clients don't follow redirects). Auth strategy is deferred; server is LAN-only for now.
@@ -272,9 +307,10 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
 - **Phase 8 in progress**: security write path landed — `GenerateRemediationPatch`, Gitea + Ntfy/Smtp/Null providers, `Proposal` model/store, proposal engine (create + verification sweep), and the `proposal_*` tools. Off by default (`GIT_*` unset, `PROPOSAL_AUTO_CREATE=false`); see ADR-002.
 - **Phase 8 remaining**: normalization path (`NormalizeConfigFile`, yamllint, `proposal_normalize`); flipping `PROPOSAL_DRY_RUN=false` against the homelab repo (a deliberate human step); runbooks, cold-restore testing, Ansible provisioning. (GitHub provider landed — `GitHubGitProvider` alongside Gitea, selected via `GIT_PROVIDER=github`.)
 - **Phase 9a complete**: hardware node registry — `HardwareNode` model + `HardwareStore` + 11 MCP tools registered in `server.py`; manual registration only (live discovery is Phase 9b)
-- **Phase C complete**: git-crypt secrets integration — 6 `secrets_*` MCP tools, `scripts/setup-homelab-repo.sh` bootstrap, `git-crypt` in Dockerfile. Path validation hardened against arbitrary file read/write via absolute paths (`_check_path` in `tools/secrets.py`); `setup-homelab-repo.sh` and `.env.example` work cross-platform (macOS/Linux/WSL), defaulting to `$HOME`-relative paths instead of `/opt/homelab`
+- **Phase C complete**: git-crypt secrets integration — 6 `secrets_*` MCP tools, `scripts/setup-homelab-repo.sh` bootstrap, `git-crypt` in Dockerfile. Path validation hardened against arbitrary file read/write via absolute paths (`check_path` in `gitcrypt.py`, shared with Phase 7 adoption); `setup-homelab-repo.sh` and `.env.example` work cross-platform (macOS/Linux/WSL), defaulting to `$HOME`-relative paths instead of `/opt/homelab`
 - **Phase D complete**: migrated registry-mcp off the workload node onto the dedicated control-plane node; Traefik static backend routes `registry-mcp.<your-domain>` → the control-plane node; GitHub Actions self-hosted runner operational; first automated CD deploy proven end-to-end; `docker-compose.yml` binds `0.0.0.0:8765`
 - **`docs/plans/updated-phases.md` Phases 1-6 complete** (separate numbering from the phases above, and the final phase in that plan): `scripts/install.sh` one-shot installer for a fresh control-plane node (Phase 1); `health.py` startup checks (Git repo/`ansible.cfg`/SSH key) + always-on `system_health_check` tool + read-only degradation of the GitOps write tools when unhealthy (Phase 2); conversational GitOps loop — `poll_pr_comments`/`apply_review_feedback` push a DSPy-generated revision commit in response to a trusted PR comment, gated by a fail-closed `PROPOSAL_COMMENT_ALLOWED_USERS` allowlist and the same confidence/YAML gates as initial patch generation (Phase 3); `ansible/roles/docker-stack-deploy` + reusable `.github/workflows/deploy.yml` — the deploy *action* ships here, each operator's private homelab repo supplies only the *config* and a thin caller workflow (Phase 4); `SmtpNotificationProvider` — templated HTML proposal email (PR summary, diff, Approve/Request Changes/View Diff buttons) via stdlib `smtplib`, validated against SMTP2GO, `NOTIFICATION_PROVIDER=smtp` (Phase 5); public release scrub — removed an accidentally-committed operator-specific `nodes/` config and genericized real hostnames/IPs/personal identifiers across scripts and docs (Phase 6)
+- **`docs/plans/updated-phases.md` Phase 7 in progress** (brownfield adoption & secret interception): `proposal_adopt_service`/`_finalize`/`_cancel`/`_get` tools, `AdoptionDraft` model/store, `DetectHardcodedSecrets` DSPy signature, and the shared `gitcrypt.py` module (extracted from `tools/secrets.py` so both features encrypt through the same local-clone path rather than the remote Git API, which bypasses git-crypt's filter). Off by default (`ADOPTION_ENABLED=false`).
 - **ARD-004 proposed**: upstream version detection — `HomelabrepoDiscoverySource`, `UpstreamRegistrySource`, `ResolveLatestTag` DSPy module, `IMAGE_UPDATE` proposal type — not yet implemented
 - **OOBE CLI** (ARD-003): fully documented but not yet implemented; currently a manual process
 - **Deferred**: network probe discovery (`DISCOVERY_NETWORK_ENABLED=false`), real auth (Bearer/mTLS), Phase 9b live Ansible fact-gather, multi-node Ansible bootstrap (Phase E)

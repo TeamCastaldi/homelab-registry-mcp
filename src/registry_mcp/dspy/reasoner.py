@@ -88,6 +88,7 @@ class Reasoner:
         self._patch: Any = None
         self._patch_lm: Any = None
         self._revise: Any = None
+        self._detect_secrets: Any = None
 
     # -- lazy setup --------------------------------------------------------
     def _ensure(self) -> None:
@@ -97,6 +98,7 @@ class Reasoner:
 
         from registry_mcp.dspy.signatures import (
             ApplyReviewFeedback,
+            DetectHardcodedSecrets,
             GenerateRemediationPatch,
             InferServiceMetadata,
             ResolveServiceIdentity,
@@ -124,6 +126,9 @@ class Reasoner:
         self._revise = dspy.ChainOfThought(ApplyReviewFeedback)
         # Also emits a whole file; reuse the patch LM's larger token budget.
         self._revise.set_lm(self._patch_lm)
+        self._detect_secrets = dspy.ChainOfThought(DetectHardcodedSecrets)
+        # Also emits a whole file; reuse the patch LM's larger token budget.
+        self._detect_secrets.set_lm(self._patch_lm)
         self._load_compiled()
         self._configured = True
         _log.info("reasoning_configured", model=self._settings.dspy_model)
@@ -141,6 +146,7 @@ class Reasoner:
             (self._summarize, "summarize_access.json"),
             (self._patch, "remediation_patch.json"),
             (self._revise, "apply_review_feedback.json"),
+            (self._detect_secrets, "detect_hardcoded_secrets.json"),
         ):
             full = os.path.join(path, fname)
             if not os.path.exists(full):
@@ -325,6 +331,41 @@ class Reasoner:
         return {
             "revised_file": getattr(pred, "revised_file", "") or "",
             "commit_message": getattr(pred, "commit_message", "") or "",
+            "confidence": _as_float(getattr(pred, "confidence", 0.0)),
+            "reasoning": getattr(pred, "reasoning", "") or "",
+        }
+
+    def detect_hardcoded_secrets(
+        self, *, compose_content: str, container_env: dict, container_labels: dict
+    ) -> dict | None:
+        """Sanitize a legacy compose file for brownfield adoption (Phase 7).
+
+        Returns the raw module outputs (including ``confidence``) so
+        ``AdoptionGenerator`` can enforce its own gate and record a rejection
+        reason; returns None only when the reasoning layer is disabled or the
+        call errors. Same no-fallback rule as ``generate_remediation_patch``:
+        a None or low-confidence result must be rejected, never hand-sanitized.
+        """
+        if not self.enabled:
+            return None
+        self._ensure()
+        try:
+            pred = self._detect_secrets(
+                compose_content=compose_content,
+                container_env=container_env,
+                container_labels=container_labels,
+            )
+        except Exception as exc:
+            _log.warning(
+                "reasoning_failed",
+                op="detect_hardcoded_secrets",
+                error=str(exc),
+                partial_response=_last_completion(self._patch_lm),
+            )
+            return None
+        return {
+            "sanitized_compose": getattr(pred, "sanitized_compose", "") or "",
+            "detected_secret_keys": list(getattr(pred, "detected_secret_keys", []) or []),
             "confidence": _as_float(getattr(pred, "confidence", 0.0)),
             "reasoning": getattr(pred, "reasoning", "") or "",
         }

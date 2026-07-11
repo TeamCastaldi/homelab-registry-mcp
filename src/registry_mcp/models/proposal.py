@@ -22,6 +22,7 @@ class FindingType(StrEnum):
     missing_security_headers = "missing_security_headers"
     exposed_dashboard = "exposed_dashboard"
     normalization = "normalization"
+    legacy_adoption = "legacy_adoption"
 
 
 class ProposalStatus(StrEnum):
