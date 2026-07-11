@@ -419,11 +419,12 @@ fi
 
 # Runs regardless of whether Docker was just installed or already present —
 # a box with Docker pre-installed but the invoking user never added to the
-# group would otherwise never get fixed on rerun.
-if groups "$USER" | grep -qw docker; then
-    info "${USER} already in the docker group"
+# group would otherwise never get fixed on rerun. Uses TARGET_USER (not
+# $USER) since bootstrap.sh is commonly invoked via sudo, where $USER is root.
+if groups "$TARGET_USER" | grep -qw docker; then
+    info "${TARGET_USER} already in the docker group"
 else
-    sudo usermod -aG docker "$USER"
+    sudo usermod -aG docker "$TARGET_USER"
     warn "Docker group added — run 'newgrp docker' or log out/in before using 'docker ps'"
 fi
 

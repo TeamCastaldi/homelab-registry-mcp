@@ -11,9 +11,10 @@ exactly what gets installed and what you'll be prompted for — see
 ## What's here
 
 - **`install.sh`** — the recommended one-shot entry point for a fresh control-plane
-  node: sparse-clones just `docker-compose.yml`, `.env.example`, and `scripts/`
-  (the app runs from the GHCR image, not a source checkout — `src/`, `ansible/`,
-  and the rest are build/CI-time only), runs `bootstrap.sh --skip-network`,
+  node: sparse-clones root-level files (`docker-compose.yml`, `.env.example`, etc.)
+  plus `scripts/`, skipping `src/`, `ansible/`, `tests/`, and other build/CI-time
+  directories (the app runs from the GHCR image, not a source checkout), runs
+  `bootstrap.sh --skip-network`,
   prompts for the Git secrets and an optional DSPy opt-in, writes `.env`, brings
   the MCP server up with `docker compose up -d`, and only then applies the
   static IP (`bootstrap.sh --network-only`) so the server is already running

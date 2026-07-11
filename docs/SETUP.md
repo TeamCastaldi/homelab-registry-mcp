@@ -48,10 +48,11 @@ the hood. In order:
 
 1. **Installs `git`** if it isn't already present (needed to clone the repo).
 2. **Sparse-clones this repository** to `~/homelab-registry-mcp` (or a directory
-   you choose when prompted) — just `docker-compose.yml`, `.env.example`, and
-   `scripts/`, since the app runs from the GHCR image rather than a source
-   checkout. Re-running against an existing checkout pulls latest instead of
-   re-cloning.
+   you choose when prompted) — root-level files (`docker-compose.yml`,
+   `.env.example`, etc.) plus `scripts/`, skipping `src/`, `ansible/`, `tests/`,
+   and other build/CI-time directories, since the app runs from the GHCR image
+   rather than a source checkout. Re-running against an existing checkout pulls
+   latest instead of re-cloning.
 3. **Provisions the OS** by handing off to `bootstrap.sh --skip-network`, which
    installs:
    - **Docker** (`docker-ce`, `docker-ce-cli`, `containerd.io`,

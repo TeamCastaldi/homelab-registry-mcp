@@ -3,13 +3,15 @@
 # ==============================================================================
 # HOMELAB REGISTRY MCP — ONE-SHOT INSTALLER
 # ==============================================================================
-# Curl-bash entry point for a fresh control-plane node. Sparse-clones just
-# docker-compose.yml, .env.example, and scripts/ (the app runs from the GHCR
-# image, not a source checkout), hands off to bootstrap.sh for OS-level
-# provisioning (Docker/Ansible/uv/git-crypt/gh + SSH key), collects the
-# secrets needed for a working .env, brings the MCP server up via Docker
-# Compose, and only then applies the static IP (bootstrap.sh --network-only)
-# — so the server is already running by the time the SSH session drops.
+# Curl-bash entry point for a fresh control-plane node. Sparse-clones
+# root-level files (docker-compose.yml, .env.example, etc.) plus scripts/,
+# skipping src/, ansible/, tests/, and other build/CI-time directories — the
+# app runs from the GHCR image, not a source checkout — then hands off to
+# bootstrap.sh for OS-level provisioning (Docker/Ansible/uv/git-crypt/gh +
+# SSH key), collects the secrets needed for a working .env, brings the MCP
+# server up via Docker Compose, and only then applies the static IP
+# (bootstrap.sh --network-only) — so the server is already running by the
+# time the SSH session drops.
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/main/scripts/install.sh | bash
@@ -26,7 +28,8 @@
 #
 # What it does:
 #   1. Install git if missing
-#   2. Sparse-clone (or update) docker-compose.yml, .env.example, and scripts/
+#   2. Sparse-clone (or update) root-level files + scripts/, skipping src/,
+#      ansible/, tests/, and other build/CI-time directories
 #   3. Run `bootstrap.sh --skip-network` — Docker, Ansible, uv, git-crypt, gh,
 #      SSH key. Deliberately skips the static-IP swap. Every install step
 #      skips cleanly if already present, but still fixes up required state
@@ -152,7 +155,7 @@ else
     # cone-mode sparse-checkout gets root-level files (docker-compose.yml,
     # .env.example, etc.) for free and adds just scripts/ — skipping src/,
     # ansible/, tests/, and the rest, which are build/CI-time only.
-    action "Cloning ${REPO_URL} into ${INSTALL_DIR} (sparse: compose file, .env.example, and scripts/ only)..."
+    action "Cloning ${REPO_URL} into ${INSTALL_DIR} (sparse: root-level files + scripts/, skipping src/, ansible/, tests/, etc.)..."
     git clone --filter=blob:none --sparse "$REPO_URL" "$INSTALL_DIR"
     git -C "$INSTALL_DIR" sparse-checkout set scripts
     info "Cloned to ${INSTALL_DIR}"
