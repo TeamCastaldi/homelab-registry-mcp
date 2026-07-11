@@ -43,6 +43,16 @@ VERSION="4.3.0"
 TIMESTAMP=$(date +%Y%m%dT%H%M%S)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# install.sh invokes this script twice as separate processes — once with
+# --skip-network (where the operator answers the network prompts) and once
+# with --network-only (Phase 6, which actually applies them). Each is a
+# fresh process with no memory of the other, so without this file the
+# second invocation would re-prompt from the hardcoded defaults instead of
+# what was just answered. Written after validation below; read as the
+# prompt defaults here; removed once Phase 6 applies (or skips) the config
+# so a later, unrelated bootstrap run doesn't inherit stale answers.
+NETWORK_STATE_FILE="${SCRIPT_DIR}/../ansible/archive/outputs/.bootstrap-network-state"
+
 # The user to reconnect/SSH as and to configure in the Ansible inventory.
 # Falls back through sudo's caller to $USER — never hardcode an account name.
 TARGET_USER="${SUDO_USER:-$USER}"
@@ -164,6 +174,19 @@ DETECTED_PREFIX="$(ip -o -f inet addr show dev "$STATIC_IFACE" 2>/dev/null | \
 DETECTED_DNS="$(awk '/^nameserver/ && $2 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ { print $2 }' \
     /etc/resolv.conf 2>/dev/null | paste -sd',' - || true)"
 
+# A prior invocation's saved answers (see NETWORK_STATE_FILE above) win over
+# both the live DHCP detection and the hardcoded fallbacks — this is what
+# lets --network-only reuse what was already typed for --skip-network,
+# instead of prompting from 192.168.1.200 again.
+if [ -f "$NETWORK_STATE_FILE" ]; then
+    # shellcheck source=/dev/null
+    . "$NETWORK_STATE_FILE"
+    DETECTED_GATEWAY="${SAVED_TARGET_GATEWAY:-$DETECTED_GATEWAY}"
+    DETECTED_PREFIX="${SAVED_TARGET_PREFIX:-$DETECTED_PREFIX}"
+    DETECTED_DNS="${SAVED_TARGET_DNS:-$DETECTED_DNS}"
+    DEFAULT_IP="${SAVED_TARGET_IP:-$DEFAULT_IP}"
+fi
+
 # --- VALIDATION HELPERS ---
 
 valid_ip_format() {
@@ -247,6 +270,16 @@ done
 if [ "$(network_addr "$TARGET_IP" "$TARGET_PREFIX")" != "$(network_addr "$TARGET_GATEWAY" "$TARGET_PREFIX")" ]; then
     warn "Gateway ${TARGET_GATEWAY} does not appear to be in ${TARGET_IP}/${TARGET_PREFIX}'s subnet — double-check before proceeding."
 fi
+
+# Persist so a subsequent --network-only invocation (install.sh Step 6)
+# reuses these instead of re-prompting from the hardcoded defaults.
+mkdir -p "$(dirname "$NETWORK_STATE_FILE")"
+cat > "$NETWORK_STATE_FILE" << STATE
+SAVED_TARGET_IP=${TARGET_IP}
+SAVED_TARGET_PREFIX=${TARGET_PREFIX}
+SAVED_TARGET_GATEWAY=${TARGET_GATEWAY}
+SAVED_TARGET_DNS=${TARGET_DNS}
+STATE
 
 echo ""
 echo "Configuration:"
@@ -600,6 +633,11 @@ if [[ "$apply_ip" =~ ^[Yy]$ ]]; then
         ipv4.gateway "$TARGET_GATEWAY" \
         ipv4.dns "${TARGET_DNS}" \
         connection.autoconnect yes
+
+    # Config is being applied now — clear the saved answers so a future,
+    # unrelated bootstrap run doesn't inherit them. Done before "up" since
+    # that drops the SSH session and nothing after it is guaranteed to run.
+    rm -f "$NETWORK_STATE_FILE" 2>/dev/null || true
 
     # Bring it up — this will drop the SSH session
     sudo nmcli connection up "$NM_CON_NAME"
