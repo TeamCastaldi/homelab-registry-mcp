@@ -29,6 +29,19 @@ exactly what gets installed and what you'll be prompted for — see
   runtime rather than assuming a Pi. Run directly for a bare provisioning pass,
   or let `install.sh` drive it —
   `bash scripts/bootstrap.sh [--dry-run] [--skip-network] [--network-only]`.
+- **`reset-node.sh`** — factory-resets a control-plane node previously set up by
+  `install.sh`/`bootstrap.sh`, without re-flashing the SD card: stops containers
+  and wipes Docker volumes, deletes the repo checkout (`INSTALL_DIR`, default
+  `~/homelab-registry-mcp`), removes the `/mnt/appdata`/`/mnt/media` stubs (only
+  if empty), removes the generated SSH key, reverts the hostname (default
+  `raspberrypi`), and deletes the static NetworkManager profile in favor of
+  DHCP — the last step, since it drops the SSH session, same as
+  `bootstrap.sh`. `--purge-packages` additionally removes the packages
+  `bootstrap.sh` installed (Docker, Ansible, `git-crypt`, `gh`, `uv`);
+  `--wipe-secrets` additionally deletes the git-crypt secrets repo and its
+  exported key, gated behind its own typed confirmation since that key is the
+  only local copy and losing it makes encrypted secrets unrecoverable. Neither
+  flag is on by default. `bash scripts/reset-node.sh --dry-run` to preview.
 - **`setup-homelab-repo.sh`** — one-time bootstrap of the private homelab Git repo
   (Phase C): creates the repo, initialises `git-crypt`, configures `.gitattributes`
   to encrypt `**/.env`, scaffolds `nodes/`, and exports the key. Backs the
