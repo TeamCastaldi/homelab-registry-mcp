@@ -185,7 +185,13 @@ if [ -n "${GIT_PROVIDER:-}" ]; then
     if [ "$GIT_PROVIDER" == "github" ]; then
         prompt GIT_BASE_URL "Git base URL (blank = public GitHub; GHES: e.g. https://ghe.example.com/api/v3)" "https://api.github.com"
     else
-        prompt GIT_BASE_URL "Git base URL (your Gitea/Forgejo instance, e.g. https://gitea.example.com)"
+        # No default exists for a self-hosted instance, and leaving this
+        # blank would silently disable the write path the operator just
+        # asked for (the provider factory requires git_base_url) — keep
+        # asking until they give a real host.
+        while [ -z "${GIT_BASE_URL:-}" ]; do
+            prompt GIT_BASE_URL "Git base URL (your Gitea/Forgejo instance, e.g. https://gitea.example.com — required)"
+        done
     fi
 fi
 

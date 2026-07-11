@@ -457,8 +457,11 @@ if command -v nmcli &>/dev/null; then
 else
     action "Installing NetworkManager (required for the Phase 6 static IP step)..."
     sudo apt-get install -y -qq network-manager
-    sudo systemctl enable --now NetworkManager >/dev/null 2>&1 || true
-    info "NetworkManager installed"
+    if sudo systemctl enable --now NetworkManager >/dev/null 2>&1; then
+        info "NetworkManager installed and running"
+    else
+        warn "NetworkManager installed but the service could not be enabled/started — check 'systemctl status NetworkManager' before Phase 6"
+    fi
 fi
 
 # --- UTILITY PACKAGES ---
@@ -635,8 +638,13 @@ header "[PHASE 6] Static IP (${STATIC_IFACE})"
 # of the device to NetworkManager).
 command -v nmcli &>/dev/null || die "nmcli not found. Install NetworkManager first: sudo apt-get install -y network-manager && sudo systemctl enable --now NetworkManager — then re-run this script."
 
-_nm_iface_state="$(nmcli -t -f DEVICE,STATE device status 2>/dev/null | awk -F: -v d="$STATIC_IFACE" '$1==d {print $2}')"
-if [ "$_nm_iface_state" == "unmanaged" ]; then
+# `|| true` on the whole pipeline: under set -e/pipefail, a non-zero nmcli
+# (e.g. the service isn't actually running) would otherwise abort via the
+# generic ERR trap instead of the specific die() messages below.
+_nm_iface_state="$(nmcli -t -f DEVICE,STATE device status 2>/dev/null | awk -F: -v d="$STATIC_IFACE" '$1==d {print $2}' || true)"
+if [ -z "$_nm_iface_state" ]; then
+    die "NetworkManager doesn't see a device named ${STATIC_IFACE} — check 'nmcli device status' and that the service is running ('systemctl status NetworkManager'), then re-run this script."
+elif [ "$_nm_iface_state" == "unmanaged" ]; then
     die "NetworkManager is installed but ${STATIC_IFACE} is unmanaged — netplan is likely still rendering it via systemd-networkd. Add 'renderer: NetworkManager' to /etc/netplan/*.yaml, run 'sudo netplan apply', then re-run this script."
 fi
 
