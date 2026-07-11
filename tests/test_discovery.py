@@ -331,6 +331,17 @@ async def test_discovery_connect_traefik_success(connect_server):
     assert "TRAEFIK_API_URL=http://t" in result["env_lines"]
 
 
+async def test_discovery_connect_traefik_rejects_bad_params(connect_server):
+    zero_timeout = await call(
+        connect_server, "discovery_connect_traefik", {"url": "http://t", "timeout_seconds": 0}
+    )
+    assert zero_timeout["ok"] is False
+    zero_retries = await call(
+        connect_server, "discovery_connect_traefik", {"url": "http://t", "retries": 0}
+    )
+    assert zero_retries["ok"] is False
+
+
 async def test_discovery_connect_traefik_unreachable(connect_server, monkeypatch):
     def unreachable_factory(base_url, **kwargs):
         kwargs["transport"] = httpx.MockTransport(lambda _r: httpx.Response(503))
@@ -352,6 +363,21 @@ async def test_discovery_connect_authentik_success(connect_server):
     assert "AUTHENTIK_API_URL=https://a/api/v3" in result["env_lines"]
     # the token itself is never echoed back
     assert "AUTHENTIK_TOKEN=t" not in result["env_lines"]
+
+
+async def test_discovery_connect_authentik_rejects_bad_params(connect_server):
+    zero_timeout = await call(
+        connect_server,
+        "discovery_connect_authentik",
+        {"url": "https://a/api/v3", "token": "t", "timeout_seconds": -1},
+    )
+    assert zero_timeout["ok"] is False
+    zero_retries = await call(
+        connect_server,
+        "discovery_connect_authentik",
+        {"url": "https://a/api/v3", "token": "t", "retries": 0},
+    )
+    assert zero_retries["ok"] is False
 
 
 async def test_discovery_connect_authentik_unreachable(connect_server, monkeypatch):

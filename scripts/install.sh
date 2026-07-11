@@ -196,7 +196,12 @@ else
     # actually disables it, instead of silently keeping the .env.example placeholder.
     # TRAEFIK_API_URL / AUTHENTIK_API_URL / AUTHENTIK_TOKEN are deliberately not
     # collected here (greenfield assumption) -- see discovery_connect_traefik /
-    # discovery_connect_authentik once those services exist.
+    # discovery_connect_authentik once those services exist. Blanked explicitly
+    # since .env.example ships non-empty placeholder URLs for both, which would
+    # otherwise enable discovery against a nonexistent host by default.
+    set_env TRAEFIK_API_URL "" true
+    set_env AUTHENTIK_API_URL "" true
+    set_env AUTHENTIK_TOKEN "" true
     set_env GIT_PROVIDER "${GIT_PROVIDER:-}" true
     set_env GIT_REPO "${GIT_REPO:-}" true
     set_env GIT_TOKEN "${GIT_TOKEN:-}" true

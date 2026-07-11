@@ -19,6 +19,22 @@ _RESTART_HINT = (
 )
 
 
+def _invalid_connection_params(timeout_seconds: float, retries: int) -> str | None:
+    """Reject inputs the client would silently reinterpret or choke on.
+
+    TraefikClient/AuthentikClient clamp retries to max(1, retries), so a
+    non-positive retries here would make the returned .env line lie about
+    what the client actually does. A non-positive timeout isn't clamped at
+    all and fails inside httpx, which would surface as a misleading
+    "unreachable" error instead of a clear input problem.
+    """
+    if timeout_seconds <= 0:
+        return f"timeout_seconds must be positive, got {timeout_seconds}"
+    if retries < 1:
+        return f"retries must be at least 1, got {retries}"
+    return None
+
+
 def register_discovery_tools(mcp: FastMCP, engine: DiscoveryEngine) -> None:
     """Register tools to trigger discovery, inspect its results, and connect new sources."""
 
@@ -62,6 +78,8 @@ def register_discovery_tools(mcp: FastMCP, engine: DiscoveryEngine) -> None:
         live-tests the URL (fetches Traefik's overview); never writes a file,
         since the container has no filesystem access to the host's .env.
         """
+        if error := _invalid_connection_params(timeout_seconds, retries):
+            return {"ok": False, "error": error}
         client = TraefikClient(url, timeout=timeout_seconds, retries=retries)
         try:
             overview = await client.overview()
@@ -88,6 +106,8 @@ def register_discovery_tools(mcp: FastMCP, engine: DiscoveryEngine) -> None:
         once Authentik exists. Only live-tests the credentials (lists
         applications); never writes a file, and never echoes the token back.
         """
+        if error := _invalid_connection_params(timeout_seconds, retries):
+            return {"ok": False, "error": error}
         client = AuthentikClient(url, token, timeout=timeout_seconds, retries=retries)
         try:
             applications = await client.list_applications()
