@@ -3,9 +3,12 @@
 # ==============================================================================
 # HOMELAB REGISTRY MCP — ONE-SHOT INSTALLER
 # ==============================================================================
-# Curl-bash entry point for a fresh control-plane node. Clones the repo, hands
-# off to bootstrap.sh for OS-level provisioning (Docker/Ansible/uv/git-crypt/gh
-# + SSH key), collects the secrets needed for a working .env, brings the MCP
+# Curl-bash entry point for a fresh control-plane node. Sparse-clones
+# root-level files (docker-compose.yml, .env.example, etc.) plus scripts/,
+# skipping src/, ansible/, tests/, and other build/CI-time directories — the
+# app runs from the GHCR image, not a source checkout — then hands off to
+# bootstrap.sh for OS-level provisioning (Docker/Ansible/uv/git-crypt/gh +
+# SSH key), collects the secrets needed for a working .env, brings the MCP
 # server up via Docker Compose, and only then applies the static IP
 # (bootstrap.sh --network-only) — so the server is already running by the
 # time the SSH session drops.
@@ -25,9 +28,12 @@
 #
 # What it does:
 #   1. Install git if missing
-#   2. Clone (or update) the repository
+#   2. Sparse-clone (or update) root-level files + scripts/, skipping src/,
+#      ansible/, tests/, and other build/CI-time directories
 #   3. Run `bootstrap.sh --skip-network` — Docker, Ansible, uv, git-crypt, gh,
-#      SSH key. Deliberately skips the static-IP swap.
+#      SSH key. Deliberately skips the static-IP swap. Every install step
+#      skips cleanly if already present, but still fixes up required state
+#      (Docker group membership, NetworkManager service) even when it does.
 #   4. Prompt for Git/DSPy secrets and opt-in, write .env
 #   5. `docker compose up -d` and confirm the server is running
 #   6. Run `bootstrap.sh --network-only` — applies the static IP last
@@ -142,8 +148,16 @@ if [ -d "${INSTALL_DIR}/.git" ]; then
     info "Existing checkout found at ${INSTALL_DIR} — pulling latest"
     git -C "$INSTALL_DIR" pull --ff-only
 else
-    action "Cloning ${REPO_URL} into ${INSTALL_DIR}..."
-    git clone "$REPO_URL" "$INSTALL_DIR"
+    # The control-plane node only ever needs docker-compose.yml, .env.example,
+    # and scripts/ — the app itself runs from the GHCR image, not a source
+    # checkout (see docker-compose.yml: no build:, no Dockerfile, no bind
+    # mount of anything from this repo). A blobless partial clone with
+    # cone-mode sparse-checkout gets root-level files (docker-compose.yml,
+    # .env.example, etc.) for free and adds just scripts/ — skipping src/,
+    # ansible/, tests/, and the rest, which are build/CI-time only.
+    action "Cloning ${REPO_URL} into ${INSTALL_DIR} (sparse: root-level files + scripts/, skipping src/, ansible/, tests/, etc.)..."
+    git clone --filter=blob:none --sparse "$REPO_URL" "$INSTALL_DIR"
+    git -C "$INSTALL_DIR" sparse-checkout set scripts
     info "Cloned to ${INSTALL_DIR}"
 fi
 

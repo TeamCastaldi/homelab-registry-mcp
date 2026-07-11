@@ -11,11 +11,14 @@ exactly what gets installed and what you'll be prompted for — see
 ## What's here
 
 - **`install.sh`** — the recommended one-shot entry point for a fresh control-plane
-  node: clones the repo, runs `bootstrap.sh --skip-network`, prompts for the
-  Git secrets and an optional DSPy opt-in, writes `.env`, brings the MCP server
-  up with `docker compose up -d`, and only then applies the static IP
-  (`bootstrap.sh --network-only`) so the server is already running when the SSH
-  session drops. Designed to be run via
+  node: sparse-clones root-level files (`docker-compose.yml`, `.env.example`, etc.)
+  plus `scripts/`, skipping `src/`, `ansible/`, `tests/`, and other build/CI-time
+  directories (the app runs from the GHCR image, not a source checkout), runs
+  `bootstrap.sh --skip-network`,
+  prompts for the Git secrets and an optional DSPy opt-in, writes `.env`, brings
+  the MCP server up with `docker compose up -d`, and only then applies the
+  static IP (`bootstrap.sh --network-only`) so the server is already running
+  when the SSH session drops. Designed to be run via
   `curl -fsSL <raw-url>/scripts/install.sh | bash`; every prompt can be pre-seeded
   with an environment variable of the same name for non-interactive use.
   Assumes a greenfield setup — it deliberately doesn't ask about Traefik or
