@@ -195,6 +195,7 @@ if [ -f "$NETWORK_STATE_FILE" ]; then
     DETECTED_PREFIX="${SAVED_TARGET_PREFIX:-$DETECTED_PREFIX}"
     DETECTED_DNS="${SAVED_TARGET_DNS:-$DETECTED_DNS}"
     DEFAULT_IP="${SAVED_TARGET_IP:-$DEFAULT_IP}"
+    info "Reusing network answers saved from the earlier bootstrap run as the defaults below — press Enter through all four to accept them as-is, or type a new value to change one."
 fi
 
 # --- VALIDATION HELPERS ---
@@ -442,6 +443,27 @@ else
     info "gh installed: $(gh --version | head -n1)"
 fi
 
+# --- NETWORKMANAGER ---
+# Phase 6 applies the static IP via nmcli. Raspberry Pi OS (Bookworm+) ships
+# NetworkManager by default, so this was never missing there — but Ubuntu
+# Server defaults to netplan + systemd-networkd with no NetworkManager at
+# all, so nmcli isn't guaranteed on every OS this script supports. Installed
+# here so it's ready before Phase 6 runs, whether in this same invocation or
+# a later --network-only one. This only guarantees the binary + service
+# exist; if netplan is still rendering via systemd-networkd, the interface
+# may remain unmanaged — Phase 6 checks for that explicitly before using it.
+if command -v nmcli &>/dev/null; then
+    info "NetworkManager already installed: $(nmcli --version 2>/dev/null | head -n1 || echo installed)"
+else
+    action "Installing NetworkManager (required for the Phase 6 static IP step)..."
+    sudo apt-get install -y -qq network-manager
+    if sudo systemctl enable --now NetworkManager >/dev/null 2>&1; then
+        info "NetworkManager installed and running"
+    else
+        warn "NetworkManager installed but the service could not be enabled/started — check 'systemctl status NetworkManager' before Phase 6"
+    fi
+fi
+
 # --- UTILITY PACKAGES ---
 
 action "Installing utility packages..."
@@ -608,6 +630,24 @@ if [ "$SKIP_NETWORK" != "true" ]; then
 # =============================================================================
 
 header "[PHASE 6] Static IP (${STATIC_IFACE})"
+
+# Fail clearly here rather than mid-way through nmcli — e.g. this node was
+# bootstrapped by an older script version before NetworkManager install was
+# added above, or Phase 2 ran but netplan is still rendering the interface
+# via systemd-networkd (installing the package alone doesn't hand control
+# of the device to NetworkManager).
+command -v nmcli &>/dev/null || die "nmcli not found. Install NetworkManager first: sudo apt-get install -y network-manager && sudo systemctl enable --now NetworkManager — then re-run this script."
+
+# `|| true` on the whole pipeline: under set -e/pipefail, a non-zero nmcli
+# (e.g. the service isn't actually running) would otherwise abort via the
+# generic ERR trap instead of the specific die() messages below.
+_nm_iface_state="$(nmcli -t -f DEVICE,STATE device status 2>/dev/null | awk -F: -v d="$STATIC_IFACE" '$1==d {print $2}' || true)"
+if [ -z "$_nm_iface_state" ]; then
+    die "NetworkManager doesn't see a device named ${STATIC_IFACE} — check 'nmcli device status' and that the service is running ('systemctl status NetworkManager'), then re-run this script."
+elif [ "$_nm_iface_state" == "unmanaged" ]; then
+    die "NetworkManager is installed but ${STATIC_IFACE} is unmanaged — netplan is likely still rendering it via systemd-networkd. Add 'renderer: NetworkManager' to /etc/netplan/*.yaml, run 'sudo netplan apply', then re-run this script."
+fi
+
 echo ""
 warn "This is the final step. It will apply the static IP and drop your SSH session."
 warn "Reconnect after: ssh ${TARGET_USER}@${TARGET_IP}"
