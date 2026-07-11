@@ -4,6 +4,7 @@ import httpx
 import pytest
 from mcp.server.fastmcp import FastMCP
 
+import registry_mcp.tools.discovery as discovery_tools
 from conftest import IsolatedSettings
 from registry_mcp.discovery.authentik import AuthentikDiscoverySource
 from registry_mcp.discovery.base import DiscoveredService
@@ -291,6 +292,108 @@ async def test_tool_list_stale(discovery_server):
     await call(discovery_server, "discovery_run_now", {"source": "traefik"})  # plex seen
     # nothing stale yet
     assert await call(discovery_server, "discovery_list_stale", {}) == {"items": []}
+
+
+# --- connect-existing-infra tools (brownfield-only, not in initial setup) --
+
+
+@pytest.fixture
+def connect_server(store, monkeypatch):
+    engine = DiscoveryEngine(store, {}, stale_threshold=1)
+
+    real_traefik = discovery_tools.TraefikClient
+    real_authentik = discovery_tools.AuthentikClient
+
+    def traefik_factory(base_url, **kwargs):
+        kwargs["transport"] = _transport({"/api/overview": {"http": {"routers": {"total": 1}}}})
+        kwargs["backoff"] = 0
+        return real_traefik(base_url, **kwargs)
+
+    def authentik_factory(base_url, token, **kwargs):
+        kwargs["transport"] = _transport(
+            {"/api/v3/core/applications/": {"results": [{"slug": "vaultwarden"}]}}
+        )
+        kwargs["backoff"] = 0
+        return real_authentik(base_url, token, **kwargs)
+
+    monkeypatch.setattr(discovery_tools, "TraefikClient", traefik_factory)
+    monkeypatch.setattr(discovery_tools, "AuthentikClient", authentik_factory)
+
+    mcp = FastMCP(name="test")
+    register_discovery_tools(mcp, engine)
+    return mcp
+
+
+async def test_discovery_connect_traefik_success(connect_server):
+    result = await call(connect_server, "discovery_connect_traefik", {"url": "http://t"})
+    assert result["ok"] is True
+    assert result["overview"] == {"http": {"routers": {"total": 1}}}
+    assert "TRAEFIK_API_URL=http://t" in result["env_lines"]
+
+
+async def test_discovery_connect_traefik_rejects_bad_params(connect_server):
+    zero_timeout = await call(
+        connect_server, "discovery_connect_traefik", {"url": "http://t", "timeout_seconds": 0}
+    )
+    assert zero_timeout["ok"] is False
+    zero_retries = await call(
+        connect_server, "discovery_connect_traefik", {"url": "http://t", "retries": 0}
+    )
+    assert zero_retries["ok"] is False
+
+
+async def test_discovery_connect_traefik_unreachable(connect_server, monkeypatch):
+    def unreachable_factory(base_url, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(lambda _r: httpx.Response(503))
+        kwargs["backoff"] = 0
+        return TraefikClient(base_url, **kwargs)
+
+    monkeypatch.setattr(discovery_tools, "TraefikClient", unreachable_factory)
+    result = await call(connect_server, "discovery_connect_traefik", {"url": "http://t"})
+    assert result["ok"] is False
+    assert "error" in result
+
+
+async def test_discovery_connect_authentik_success(connect_server):
+    result = await call(
+        connect_server, "discovery_connect_authentik", {"url": "https://a/api/v3", "token": "t"}
+    )
+    assert result["ok"] is True
+    assert result["application_count"] == 1
+    assert "AUTHENTIK_API_URL=https://a/api/v3" in result["env_lines"]
+    # the token itself is never echoed back
+    assert "AUTHENTIK_TOKEN=t" not in result["env_lines"]
+
+
+async def test_discovery_connect_authentik_rejects_bad_params(connect_server):
+    zero_timeout = await call(
+        connect_server,
+        "discovery_connect_authentik",
+        {"url": "https://a/api/v3", "token": "t", "timeout_seconds": -1},
+    )
+    assert zero_timeout["ok"] is False
+    zero_retries = await call(
+        connect_server,
+        "discovery_connect_authentik",
+        {"url": "https://a/api/v3", "token": "t", "retries": 0},
+    )
+    assert zero_retries["ok"] is False
+
+
+async def test_discovery_connect_authentik_unreachable(connect_server, monkeypatch):
+    real_authentik = AuthentikClient
+
+    def unreachable_factory(base_url, token, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(lambda _r: httpx.Response(503))
+        kwargs["backoff"] = 0
+        return real_authentik(base_url, token, **kwargs)
+
+    monkeypatch.setattr(discovery_tools, "AuthentikClient", unreachable_factory)
+    result = await call(
+        connect_server, "discovery_connect_authentik", {"url": "https://a/api/v3", "token": "t"}
+    )
+    assert result["ok"] is False
+    assert "error" in result
 
 
 # --- wiring ---------------------------------------------------------------

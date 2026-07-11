@@ -16,15 +16,19 @@
 #   bash scripts/install.sh
 #
 # Every prompt can be pre-seeded via an environment variable of the same name
-# (e.g. `INSTALL_DIR=/opt/homelab-registry-mcp TRAEFIK_API_URL=... bash install.sh`)
+# (e.g. `INSTALL_DIR=/opt/homelab-registry-mcp GIT_PROVIDER=github bash install.sh`)
 # for non-interactive/CI use — any variable already set is not re-prompted.
+#
+# Assumes a greenfield setup: no Traefik or Authentik yet, so this installer
+# doesn't ask about them. Connect those once they exist via the
+# discovery_connect_traefik / discovery_connect_authentik MCP tools.
 #
 # What it does:
 #   1. Install git if missing
 #   2. Clone (or update) the repository
 #   3. Run `bootstrap.sh --skip-network` — Docker, Ansible, uv, git-crypt, gh,
 #      SSH key. Deliberately skips the static-IP swap.
-#   4. Prompt for Traefik/Authentik/Git secrets and DSPy opt-in, write .env
+#   4. Prompt for Git/DSPy secrets and opt-in, write .env
 #   5. `docker compose up -d` and confirm the server is running
 #   6. Run `bootstrap.sh --network-only` — applies the static IP last
 # ==============================================================================
@@ -155,13 +159,12 @@ bash scripts/bootstrap.sh --skip-network
 header "[STEP 3] Configuration"
 echo "These populate .env — press Enter to leave any optional value blank/default."
 echo ""
-
-prompt TRAEFIK_API_URL "Traefik API URL (e.g. http://192.168.1.10:8080, blank to disable Traefik discovery)"
-
-prompt AUTHENTIK_API_URL "Authentik API URL (e.g. https://sso.example.com/api/v3, blank to skip)"
-if [ -n "${AUTHENTIK_API_URL:-}" ]; then
-    prompt_secret AUTHENTIK_TOKEN "Authentik read-only service-account token"
-fi
+echo "This installer assumes a greenfield setup: no Traefik or Authentik yet,"
+echo "so it doesn't ask about them here. Once you stand those up, connect them"
+echo "via the discovery_connect_traefik / discovery_connect_authentik MCP tools"
+echo "(ask your AI client to run them) — they validate the connection and hand"
+echo "back the exact .env lines to add, plus a restart to enable discovery."
+echo ""
 
 prompt GIT_PROVIDER "Git provider for the write path (github/gitea, blank to skip)"
 if [ -n "${GIT_PROVIDER:-}" ]; then
@@ -191,9 +194,14 @@ else
     cp .env.example .env
     # allow_empty=true on the optional integrations so leaving a prompt blank
     # actually disables it, instead of silently keeping the .env.example placeholder.
-    set_env TRAEFIK_API_URL "${TRAEFIK_API_URL:-}" true
-    set_env AUTHENTIK_API_URL "${AUTHENTIK_API_URL:-}" true
-    set_env AUTHENTIK_TOKEN "${AUTHENTIK_TOKEN:-}" true
+    # TRAEFIK_API_URL / AUTHENTIK_API_URL / AUTHENTIK_TOKEN are deliberately not
+    # collected here (greenfield assumption) -- see discovery_connect_traefik /
+    # discovery_connect_authentik once those services exist. Blanked explicitly
+    # since .env.example ships non-empty placeholder URLs for both, which would
+    # otherwise enable discovery against a nonexistent host by default.
+    set_env TRAEFIK_API_URL "" true
+    set_env AUTHENTIK_API_URL "" true
+    set_env AUTHENTIK_TOKEN "" true
     set_env GIT_PROVIDER "${GIT_PROVIDER:-}" true
     set_env GIT_REPO "${GIT_REPO:-}" true
     set_env GIT_TOKEN "${GIT_TOKEN:-}" true
