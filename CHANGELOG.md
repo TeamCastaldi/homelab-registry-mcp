@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.14.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.13.0...v0.14.0) (2026-07-11)
+
+
+### Features
+
+* **discovery:** move Traefik/Authentik connection out of initial install ([dc2829c](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/dc2829c5d0f92bc1c8d8783c7eb63a400e4c6f8a))
+
+
+### Bug Fixes
+
+* address Copilot review on discovery-connect PR ([29d0dcd](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/29d0dcdb919bdb7551a92ef55176ab39ba7a6192))
+
 ## [0.13.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.12.2...v0.13.0) (2026-07-11)
 
 
