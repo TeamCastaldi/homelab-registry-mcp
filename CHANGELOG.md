@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.2](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.14.1...v0.14.2) (2026-07-11)
+
+
+### Documentation
+
+* add comprehensive setup guide (docs/SETUP.md) ([342447e](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/342447e10e6e9fefa149df392aefd55bc12c17f1))
+
 ## [0.14.1](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.14.0...v0.14.1) (2026-07-11)
 
 
