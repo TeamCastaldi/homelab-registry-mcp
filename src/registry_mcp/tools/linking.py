@@ -91,3 +91,41 @@ def register_linking_tools(
             node = hardware_store.get_node(service.hardware_node_id)
             context["hardware_node"] = node.model_dump(mode="json") if node else None
         return context
+
+    @mcp.prompt()
+    def pre_update_compatibility_check(name: str) -> str:
+        """Guide a compatibility risk check before manually bumping a service's
+        pinned version, by cross-referencing its current naming/routing state."""
+        return (
+            f"Assess compatibility risk before bumping the pinned version of '{name}'.\n\n"
+            "Steps:\n"
+            f"1. Call `registry_get_service(id_or_name='{name}')` to resolve the service "
+            "and review its curated fields (host, traefik_router, authentik_app_slug, "
+            "notes, tags).\n"
+            "2. Call `service_get_full_context(id=<resolved id>)` to pull its linked "
+            "Traefik router, Authentik application, hardware node, and recent change "
+            "events in one call.\n"
+            "3. If a Traefik router is linked, inspect its rule (e.g. `Host(...)`) and "
+            "flag any hostname that would fail strict DNS-1123 label validation "
+            "(the stricter, Kubernetes-style rule many systems enforce, distinct from "
+            "plain RFC-1123 which is case-insensitive) — underscores, uppercase "
+            "letters, or leading/trailing hyphens are all invalid under it, and are "
+            "exactly the kind of thing newer upstream versions may start enforcing "
+            "strictly where older versions did not.\n"
+            "4. If an Authentik application is linked, call `authentik_list_outposts` "
+            "and `authentik_get_outpost_status` for its outpost, and check the "
+            "application/provider's external host against the same hostname "
+            "validation rule.\n"
+            "5. Review the `recent_events` already returned by `service_get_full_context` "
+            "for prior manual updates or naming-field changes that hint at past "
+            "compatibility issues with this service.\n"
+            "6. Ask for (or scan) the upstream changelog/release notes covering the "
+            "version jump, explicitly looking for: renamed environment variables, "
+            "renamed container/compose service keys, changed default ports, and newly "
+            "enforced hostname or routing validation rules.\n\n"
+            "Then summarize a go/caution/no-go recommendation, calling out any naming "
+            "field on this service that would violate a stricter validation rule. If "
+            "the update proceeds and something is learned, suggest recording it with "
+            "`registry_update_service(id=<id>, notes=...)` so the lesson persists on "
+            "the service record."
+        )

@@ -171,3 +171,15 @@ async def test_full_context_unlinked_service_has_null_sections(context_server):
 async def test_full_context_missing_service(context_server):
     result = await call(context_server, "service_get_full_context", {"id": "ghost"})
     assert "error" in result
+
+
+# --- pre-update compatibility check prompt ---------------------------------
+
+
+async def test_pre_update_compatibility_check_prompt(tmp_path):
+    server = build_server(IsolatedSettings(registry_db_path=str(tmp_path / "r.db")))
+    prompt = await server.get_prompt("pre_update_compatibility_check", {"name": "vault"})
+    text = prompt.messages[0].content.text
+    assert "vault" in text
+    assert "registry_get_service" in text
+    assert "service_get_full_context" in text
