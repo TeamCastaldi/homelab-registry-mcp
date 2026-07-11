@@ -1,6 +1,6 @@
 [project]
 name = "homelab-registry-mcp"
-version = "0.12.2"
+version = "0.13.0"
 description = "MCP server acting as the authoritative catalog of homelab services"
 readme = "README.md"
 requires-python = ">=3.12"

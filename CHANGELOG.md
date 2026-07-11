@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.13.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.12.2...v0.13.0) (2026-07-11)
+
+
+### Features
+
+* implement Phase 7 brownfield adoption and secret interception ([657f5fb](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/657f5fb2a03799813ff2a420ce435c2346e51a29))
+* Phase 7 brownfield adoption and secret interception ([98a5e9e](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/98a5e9e966415a7bb8f0a3b58b068d683c67a2df))
+
+
+### Bug Fixes
+
+* address Copilot review on Phase 7 adoption PR ([62a2598](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/62a259844dfdde49c945abcaad8303b4e516d161))
+
+
+### Documentation
+
+* update implementation plan with completed phases and add new phase for brownfield adoption ([d83b63b](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/d83b63bf5de2f16983c415b67f29f7a7be0e7db2))
+
 ## [0.12.2](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.12.1...v0.12.2) (2026-07-10)
 
 
