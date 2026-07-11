@@ -17,7 +17,9 @@
 #   bash scripts/bootstrap.sh [--dry-run] [--skip-network] [--network-only]
 #
 # What it does:
-#   1. Collect target static IP (prompted, default 192.168.1.200)
+#   1. Collect target static IP/prefix/gateway/DNS (prompted; defaults are
+#      auto-detected from the node's current DHCP lease, so a correct answer
+#      usually just means hitting Enter four times)
 #   2. Set hostname to "homelab-control-plane"
 #   3. Install Docker, Ansible + ansible-lint, uv, git-crypt, gh CLI
 #   4. Generate ED25519 SSH key (skips if one already exists)
@@ -46,9 +48,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_USER="${SUDO_USER:-$USER}"
 
 # --- FIXED CONFIGURATION ---
-# Reference defaults for a typical home network — not requirements. The
-# static IP is prompted for below; edit this block directly if your
-# gateway/DNS/hostname preferences differ.
+# Fallback defaults, only used when the node's current network can't be
+# auto-detected (see DETECT CURRENT NETWORK below). Every value here is
+# prompted for and overridable at runtime.
 
 HOSTNAME="homelab-control-plane"
 STATIC_IFACE="eth0"
@@ -56,6 +58,7 @@ GATEWAY="192.168.1.1"
 DNS_PRIMARY="192.168.1.1"
 DNS_SECONDARY="8.8.8.8"
 DEFAULT_IP="192.168.1.200"
+DEFAULT_PREFIX="24"
 
 # --- HELPERS ---
 
@@ -144,6 +147,44 @@ DETECTED_IFACE="$(ip route show default 2>/dev/null | \
 STATIC_IFACE="${DETECTED_IFACE:-$STATIC_IFACE}"
 NM_CON_NAME="static-${STATIC_IFACE}"
 
+# --- DETECT CURRENT NETWORK (gateway/prefix/DNS) ---
+# The node is still on its DHCP lease at this point, so its current gateway,
+# subnet prefix, and DNS servers are real, live values for this network —
+# far more reliable than a hardcoded /24 + 192.168.1.1 that silently
+# mismatches whatever subnet the operator actually types for TARGET_IP.
+# These become the prompt defaults below; nothing here is applied yet.
+
+DETECTED_GATEWAY="$(ip route show default 2>/dev/null | \
+    awk '/^default/ { print $3; exit }' || true)"
+DETECTED_PREFIX="$(ip -o -f inet addr show dev "$STATIC_IFACE" 2>/dev/null | \
+    awk '{print $4}' | cut -d/ -f2 | head -n1 || true)"
+DETECTED_DNS="$(awk '/^nameserver/ { print $2 }' /etc/resolv.conf 2>/dev/null | \
+    paste -sd',' - || true)"
+
+# --- VALIDATION HELPERS ---
+
+valid_ip_format() {
+    # Dotted-quad shape check only (not full octet-range validation) —
+    # matches the leniency of the pre-existing TARGET_IP check.
+    [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+}
+
+ip_to_int() {
+    local a b c d
+    IFS=. read -r a b c d <<< "$1"
+    echo $(( (a << 24) + (b << 16) + (c << 8) + d ))
+}
+
+network_addr() {
+    local ip="$1" prefix="$2" mask
+    if [ "$prefix" -eq 0 ]; then
+        mask=0
+    else
+        mask=$(( (0xFFFFFFFF << (32 - prefix)) & 0xFFFFFFFF ))
+    fi
+    echo $(( $(ip_to_int "$ip") & mask ))
+}
+
 # Hardware label for the fingerprint YAML — Raspberry Pi's device-tree model
 # file is the reliable signal; anything else is reported by architecture.
 if [ -f /proc/device-tree/model ] && grep -qi "raspberry pi" /proc/device-tree/model 2>/dev/null; then
@@ -171,23 +212,46 @@ else
     echo ""
 fi
 
-# The IP is always collected (facts/inventory in Phase 5 need it whether or not
-# it's applied here) — --skip-network only defers *applying* it to Phase 6.
+# The network config is always collected (facts/inventory in Phase 5 need it
+# whether or not it's applied here) — --skip-network only defers *applying*
+# it to Phase 6. Defaults are the node's live DHCP values where detectable,
+# so a correct answer is usually just pressing Enter through all four
+# prompts — but every value is editable, since the static IP an operator
+# picks may land in a different subnet than the current DHCP lease.
 read -rp "Enter static IP for ${STATIC_IFACE} [${DEFAULT_IP}]: " TARGET_IP
 TARGET_IP="${TARGET_IP:-${DEFAULT_IP}}"
+valid_ip_format "$TARGET_IP" || die "Invalid IP address: $TARGET_IP"
 
-# Validate IP format
-if ! [[ "$TARGET_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    die "Invalid IP address: $TARGET_IP"
+read -rp "Subnet prefix length (CIDR bits) [${DETECTED_PREFIX:-$DEFAULT_PREFIX}]: " TARGET_PREFIX
+TARGET_PREFIX="${TARGET_PREFIX:-${DETECTED_PREFIX:-$DEFAULT_PREFIX}}"
+[[ "$TARGET_PREFIX" =~ ^[0-9]+$ ]] && [ "$TARGET_PREFIX" -ge 1 ] && [ "$TARGET_PREFIX" -le 32 ] || \
+    die "Invalid subnet prefix: $TARGET_PREFIX (expected 1-32)"
+
+read -rp "Gateway [${DETECTED_GATEWAY:-$GATEWAY}]: " TARGET_GATEWAY
+TARGET_GATEWAY="${TARGET_GATEWAY:-${DETECTED_GATEWAY:-$GATEWAY}}"
+valid_ip_format "$TARGET_GATEWAY" || die "Invalid gateway address: $TARGET_GATEWAY"
+
+read -rp "DNS servers, comma-separated [${DETECTED_DNS:-${DNS_PRIMARY},${DNS_SECONDARY}}]: " TARGET_DNS
+TARGET_DNS="${TARGET_DNS:-${DETECTED_DNS:-${DNS_PRIMARY},${DNS_SECONDARY}}}"
+IFS=',' read -ra _dns_check <<< "$TARGET_DNS"
+for _dns_entry in "${_dns_check[@]}"; do
+    valid_ip_format "$_dns_entry" || die "Invalid DNS server address: $_dns_entry"
+done
+
+# Sanity check: the gateway should live in the same subnet as the chosen
+# static IP. This is exactly the kind of mismatch a hardcoded gateway
+# produces silently — catch it here instead.
+if [ "$(network_addr "$TARGET_IP" "$TARGET_PREFIX")" != "$(network_addr "$TARGET_GATEWAY" "$TARGET_PREFIX")" ]; then
+    warn "Gateway ${TARGET_GATEWAY} does not appear to be in ${TARGET_IP}/${TARGET_PREFIX}'s subnet — double-check before proceeding."
 fi
 
 echo ""
 echo "Configuration:"
 echo "  Hostname:      ${HOSTNAME}"
 echo "  Interface:     ${STATIC_IFACE}"
-echo "  Static IP:     ${TARGET_IP}/24"
-echo "  Gateway:       ${GATEWAY}"
-echo "  DNS:           ${DNS_PRIMARY}, ${DNS_SECONDARY}"
+echo "  Static IP:     ${TARGET_IP}/${TARGET_PREFIX}"
+echo "  Gateway:       ${TARGET_GATEWAY}"
+echo "  DNS:           ${TARGET_DNS}"
 echo ""
 
 if [ "$DRY_RUN" == "true" ]; then
@@ -205,9 +269,9 @@ if [ "$DRY_RUN" == "true" ]; then
         echo "  4. Validate all installs"
     fi
     if [ "$SKIP_NETWORK" != "true" ]; then
-        echo "  5. Apply static IP ${TARGET_IP}/24 to ${STATIC_IFACE} via nmcli"
-        echo "       Gateway: ${GATEWAY}"
-        echo "       DNS:     ${DNS_PRIMARY}, ${DNS_SECONDARY}"
+        echo "  5. Apply static IP ${TARGET_IP}/${TARGET_PREFIX} to ${STATIC_IFACE} via nmcli"
+        echo "       Gateway: ${TARGET_GATEWAY}"
+        echo "       DNS:     ${TARGET_DNS}"
         echo "       This will drop your current SSH session."
         echo "       Reconnect: ssh ${TARGET_USER}@${TARGET_IP}"
     fi
@@ -426,6 +490,12 @@ FACTS_DIR="${SCRIPT_DIR}/../ansible/archive/outputs"
 FACTS_FILE="${FACTS_DIR}/hardware-facts-${HOSTNAME}-${TIMESTAMP}.yml"
 mkdir -p "$FACTS_DIR"
 
+DNS_YAML_LIST=""
+IFS=',' read -ra _dns_facts <<< "$TARGET_DNS"
+for _dns_entry in "${_dns_facts[@]}"; do
+    DNS_YAML_LIST="${DNS_YAML_LIST}  - ${_dns_entry}"$'\n'
+done
+
 cat > "$FACTS_FILE" << YAML
 ---
 # Hardware facts — generated by bootstrap.sh v${VERSION}
@@ -437,11 +507,10 @@ hardware: ${HARDWARE_LABEL}
 os: ${PRETTY_NAME}
 arch: $(uname -m)
 target_ip: ${TARGET_IP}
-gateway: ${GATEWAY}
+prefix: ${TARGET_PREFIX}
+gateway: ${TARGET_GATEWAY}
 dns:
-  - ${DNS_PRIMARY}
-  - ${DNS_SECONDARY}
-interface: ${STATIC_IFACE}
+${DNS_YAML_LIST}interface: ${STATIC_IFACE}
 ssh_key: ${SSH_KEY}.pub
 bootstrapped_at: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 bootstrap_version: ${VERSION}
@@ -479,12 +548,12 @@ if [ "$SKIP_NETWORK" != "true" ]; then
 # PHASE 6: STATIC IP  ← LAST — DROPS SSH SESSION
 # =============================================================================
 
-header "[PHASE 6] Static IP (eth0)"
+header "[PHASE 6] Static IP (${STATIC_IFACE})"
 echo ""
 warn "This is the final step. It will apply the static IP and drop your SSH session."
 warn "Reconnect after: ssh ${TARGET_USER}@${TARGET_IP}"
 echo ""
-read -rp "  Apply static IP ${TARGET_IP}/24 to ${STATIC_IFACE} now? [y/N]: " apply_ip
+read -rp "  Apply static IP ${TARGET_IP}/${TARGET_PREFIX} to ${STATIC_IFACE} now? [y/N]: " apply_ip
 
 if [[ "$apply_ip" =~ ^[Yy]$ ]]; then
 
@@ -494,9 +563,9 @@ if [[ "$apply_ip" =~ ^[Yy]$ ]]; then
     echo "======================================="
     echo ""
     echo "  Hostname:   ${HOSTNAME}"
-    echo "  Static IP:  ${TARGET_IP}/24"
-    echo "  Gateway:    ${GATEWAY}"
-    echo "  DNS:        ${DNS_PRIMARY}, ${DNS_SECONDARY}"
+    echo "  Static IP:  ${TARGET_IP}/${TARGET_PREFIX}"
+    echo "  Gateway:    ${TARGET_GATEWAY}"
+    echo "  DNS:        ${TARGET_DNS}"
     echo ""
     echo "  After reconnecting:"
     echo "    ssh ${TARGET_USER}@${TARGET_IP}"
@@ -517,9 +586,9 @@ if [[ "$apply_ip" =~ ^[Yy]$ ]]; then
         con-name "$NM_CON_NAME" \
         ifname "$STATIC_IFACE" \
         ipv4.method manual \
-        ipv4.addresses "${TARGET_IP}/24" \
-        ipv4.gateway "$GATEWAY" \
-        ipv4.dns "${DNS_PRIMARY},${DNS_SECONDARY}" \
+        ipv4.addresses "${TARGET_IP}/${TARGET_PREFIX}" \
+        ipv4.gateway "$TARGET_GATEWAY" \
+        ipv4.dns "${TARGET_DNS}" \
         connection.autoconnect yes
 
     # Bring it up — this will drop the SSH session
@@ -537,8 +606,8 @@ else
     echo "  To apply the static IP later:"
     echo "    sudo nmcli connection add type ethernet con-name ${NM_CON_NAME} \\"
     echo "      ifname ${STATIC_IFACE} ipv4.method manual \\"
-    echo "      ipv4.addresses ${TARGET_IP}/24 ipv4.gateway ${GATEWAY} \\"
-    echo "      ipv4.dns ${DNS_PRIMARY},${DNS_SECONDARY} connection.autoconnect yes"
+    echo "      ipv4.addresses ${TARGET_IP}/${TARGET_PREFIX} ipv4.gateway ${TARGET_GATEWAY} \\"
+    echo "      ipv4.dns ${TARGET_DNS} connection.autoconnect yes"
     echo "    sudo nmcli connection up ${NM_CON_NAME}"
     echo ""
     echo "  OOBE handoff (ADR-001 §5.1):"
