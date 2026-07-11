@@ -7,11 +7,20 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from registry_mcp.discovery.engine import DiscoveryEngine
+from registry_mcp.integrations.authentik.client import AuthentikClient, AuthentikError
+from registry_mcp.integrations.traefik.client import TraefikClient, TraefikError
 from registry_mcp.models import SourceType
+
+_RESTART_HINT = (
+    "Add these to .env on the control-plane node, then `docker compose up -d` "
+    "to restart the server and enable this source -- Settings and the "
+    "discovery scheduler are only read at startup, so nothing here takes "
+    "effect until the restart."
+)
 
 
 def register_discovery_tools(mcp: FastMCP, engine: DiscoveryEngine) -> None:
-    """Register tools to trigger discovery and inspect its results."""
+    """Register tools to trigger discovery, inspect its results, and connect new sources."""
 
     @mcp.tool()
     async def discovery_run_now(source: str | None = None) -> dict[str, Any]:
@@ -41,3 +50,57 @@ def register_discovery_tools(mcp: FastMCP, engine: DiscoveryEngine) -> None:
     def discovery_list_stale() -> dict[str, Any]:
         """List services that have gone stale (not seen for the configured threshold)."""
         return {"items": [s.model_dump(mode="json") for s in engine.list_stale()]}
+
+    @mcp.tool()
+    async def discovery_connect_traefik(
+        url: str, timeout_seconds: float = 10.0, retries: int = 3
+    ) -> dict[str, Any]:
+        """Validate a Traefik API URL for discovery and return the .env lines to enable it.
+
+        Greenfield setups don't have Traefik yet, so this is deliberately not
+        asked at install time -- call this once Traefik actually exists. Only
+        live-tests the URL (fetches Traefik's overview); never writes a file,
+        since the container has no filesystem access to the host's .env.
+        """
+        client = TraefikClient(url, timeout=timeout_seconds, retries=retries)
+        try:
+            overview = await client.overview()
+        except TraefikError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {
+            "ok": True,
+            "overview": overview,
+            "env_lines": [
+                f"TRAEFIK_API_URL={url}",
+                f"TRAEFIK_TIMEOUT_SECONDS={timeout_seconds}",
+                f"TRAEFIK_RETRIES={retries}",
+            ],
+            "next_step": _RESTART_HINT,
+        }
+
+    @mcp.tool()
+    async def discovery_connect_authentik(
+        url: str, token: str, timeout_seconds: float = 10.0, retries: int = 3
+    ) -> dict[str, Any]:
+        """Validate an Authentik API URL/token for discovery and return the .env lines to enable it.
+
+        Same rationale as discovery_connect_traefik: brownfield-only, call
+        once Authentik exists. Only live-tests the credentials (lists
+        applications); never writes a file, and never echoes the token back.
+        """
+        client = AuthentikClient(url, token, timeout=timeout_seconds, retries=retries)
+        try:
+            applications = await client.list_applications()
+        except AuthentikError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {
+            "ok": True,
+            "application_count": len(applications),
+            "env_lines": [
+                f"AUTHENTIK_API_URL={url}",
+                "AUTHENTIK_TOKEN=<the token you just validated with>",
+                f"AUTHENTIK_TIMEOUT_SECONDS={timeout_seconds}",
+                f"AUTHENTIK_RETRIES={retries}",
+            ],
+            "next_step": _RESTART_HINT,
+        }

@@ -8,12 +8,15 @@ scripts are tools for the operator/developer.
 
 - **`install.sh`** — the recommended one-shot entry point for a fresh control-plane
   node: clones the repo, runs `bootstrap.sh --skip-network`, prompts for the
-  Traefik/Authentik/Git secrets and an optional DSPy opt-in, writes `.env`, brings
-  the MCP server up with `docker compose up -d`, and only then applies the static
-  IP (`bootstrap.sh --network-only`) so the server is already running when the SSH
+  Git secrets and an optional DSPy opt-in, writes `.env`, brings the MCP server
+  up with `docker compose up -d`, and only then applies the static IP
+  (`bootstrap.sh --network-only`) so the server is already running when the SSH
   session drops. Designed to be run via
   `curl -fsSL <raw-url>/scripts/install.sh | bash`; every prompt can be pre-seeded
   with an environment variable of the same name for non-interactive use.
+  Assumes a greenfield setup — it deliberately doesn't ask about Traefik or
+  Authentik, since a fresh homelab won't have those yet. Connect them later via
+  the `discovery_connect_traefik` / `discovery_connect_authentik` MCP tools.
 - **`bootstrap.sh`** — prepares a fresh node for the homelab control plane:
   installs Docker, Ansible, `uv`, `git-crypt`, and the GitHub CLI, sets the
   hostname, generates an SSH key, and applies a static IP. Supports Debian and

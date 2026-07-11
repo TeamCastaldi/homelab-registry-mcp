@@ -60,7 +60,7 @@ src/registry_mcp/
 ├── tools/
 │   ├── registry.py        # CRUD: add/get/list/update/delete service
 │   ├── events.py          # query change + discovery logs
-│   ├── discovery.py       # run_now / status / list_stale
+│   ├── discovery.py       # run_now / status / list_stale + connect_traefik / connect_authentik
 │   ├── linking.py         # service_link_authentik + service_get_full_context
 │   ├── hardware.py        # hardware-add-node/get/list/update/delete + link/capacity tools
 │   ├── secrets.py         # secrets_status/encrypt/decrypt/add/rotate/list_keys (Phase C)
@@ -253,10 +253,19 @@ Fixtures live in `tests/conftest.py` (IsolatedSettings, in-memory store).
 
 **Fresh control-plane node**: `curl -fsSL .../scripts/install.sh | bash` — clones
 the repo, provisions the OS (`scripts/bootstrap.sh --skip-network`: Docker,
-Ansible, `uv`, `git-crypt`, `gh`, SSH key), prompts for Traefik/Authentik/Git
-config and a DSPy opt-in, writes `.env`, brings the server up, then applies the
-static IP last (`bootstrap.sh --network-only`) so the server is already running
-when the SSH session drops. See `scripts/README.md`.
+Ansible, `uv`, `git-crypt`, `gh`, SSH key), prompts for Git config and a DSPy
+opt-in, writes `.env`, brings the server up, then applies the static IP last
+(`bootstrap.sh --network-only`) so the server is already running when the SSH
+session drops. See `scripts/README.md`.
+
+Assumes a **greenfield** setup — no Traefik or Authentik yet, so `install.sh`
+doesn't ask about them. Once those exist, connect them via the
+`discovery_connect_traefik` / `discovery_connect_authentik` MCP tools
+(`tools/discovery.py`): each live-tests the URL/credentials and hands back the
+`.env` lines to add plus a restart — they never write a file themselves (the
+container has no filesystem access to the host's `.env`) and never start
+discovery immediately (`Settings` and the scheduler are only read/built at
+server startup).
 
 **Existing Docker host**:
 
