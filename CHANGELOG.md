@@ -11,8 +11,7 @@
 
 ### Performance Improvements
 
-* **ci:** add GitHub Actions layer cache to Docker build ([d7ccfd4](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/d7ccfd4a3b65989c4898c6ad646c88ce80d94101))
-* **ci:** add GitHub Actions layer cache to Docker build ([52d59f6](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/52d59f6be9869013c211757737142c4d08bc9a5d))
+* **ci:** add GitHub Actions layer cache to Docker build ([d7ccfd4](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/d7ccfd4a3b65989c4898c6ad646c88ce80d94101), [52d59f6](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/52d59f6be9869013c211757737142c4d08bc9a5d))
 
 ## [0.14.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.13.0...v0.14.0) (2026-07-11)
 
