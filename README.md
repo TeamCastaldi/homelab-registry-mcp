@@ -46,6 +46,10 @@ query and act on.
 
 ## How to run
 
+See [docs/SETUP.md](docs/SETUP.md) for the full step-by-step setup guide,
+including exactly what each install command does and what software it
+installs. Quick version:
+
 ### Option A: fresh control-plane node (recommended)
 
 For a brand-new Raspberry Pi (or other Debian/Ubuntu host) that will run
@@ -75,8 +79,10 @@ the image is pulled from GHCR and no source checkout is required.
 #### Prerequisites
 
 - A host with Docker and the Compose plugin.
-- Traefik running on an external Docker network named `traefik`, with a
-  `websecure` TLS entrypoint and DNS for `registry-mcp.<your-domain>` pointing at it.
+- Traefik reachable from this host, if you want it fronted by Traefik — the
+  shipped `docker-compose.yml` publishes port 8765 directly and routes via a
+  Traefik static backend, not a shared Docker network. Point a `websecure`
+  TLS entrypoint and DNS for `registry-mcp.<your-domain>` at `<this-host>:8765`.
 - A read-only Authentik service-account token (never an admin token).
 
 #### 1. Get the compose file and configure
@@ -119,6 +125,9 @@ In Claude Desktop, add an MCP server with the same URL under Settings.
 
 ## Documentation
 
+- [docs/SETUP.md](docs/SETUP.md) — dedicated setup guide: which install path
+  to pick, exactly what each command does, what software gets installed, and
+  troubleshooting.
 - [CLAUDE.md](CLAUDE.md) — project structure, architecture, all environment
   variables, key conventions, and current phase status. Start here.
 - [docs/ARDs/ADR-001-Homelab-Control-Plane.md](docs/ARDs/ADR-001-Homelab-Control-Plane.md) — architecture, design decisions, and phased roadmap

@@ -4,6 +4,10 @@ Dev-time and operational utilities that support `homelab-registry-mcp` but are n
 part of the running server. Application code lives in `src/registry_mcp/`; these
 scripts are tools for the operator/developer.
 
+For a step-by-step walkthrough of running `install.sh`/`bootstrap.sh` — including
+exactly what gets installed and what you'll be prompted for — see
+[docs/SETUP.md](../docs/SETUP.md).
+
 ## What's here
 
 - **`install.sh`** — the recommended one-shot entry point for a fresh control-plane
