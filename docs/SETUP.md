@@ -47,9 +47,11 @@ The command runs `scripts/install.sh`, which drives `scripts/bootstrap.sh` under
 the hood. In order:
 
 1. **Installs `git`** if it isn't already present (needed to clone the repo).
-2. **Clones this repository** to `~/homelab-registry-mcp` (or a directory you
-   choose when prompted). Re-running against an existing checkout pulls latest
-   instead of re-cloning.
+2. **Sparse-clones this repository** to `~/homelab-registry-mcp` (or a directory
+   you choose when prompted) — just `docker-compose.yml`, `.env.example`, and
+   `scripts/`, since the app runs from the GHCR image rather than a source
+   checkout. Re-running against an existing checkout pulls latest instead of
+   re-cloning.
 3. **Provisions the OS** by handing off to `bootstrap.sh --skip-network`, which
    installs:
    - **Docker** (`docker-ce`, `docker-ce-cli`, `containerd.io`,

@@ -414,8 +414,16 @@ https://download.docker.com/linux/${DOCKER_REPO_OS} ${DOCKER_REPO_CODENAME} stab
     sudo apt-get update -qq
     sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 
-    sudo usermod -aG docker "$USER"
     info "Docker installed: $(docker --version)"
+fi
+
+# Runs regardless of whether Docker was just installed or already present —
+# a box with Docker pre-installed but the invoking user never added to the
+# group would otherwise never get fixed on rerun.
+if groups "$USER" | grep -qw docker; then
+    info "${USER} already in the docker group"
+else
+    sudo usermod -aG docker "$USER"
     warn "Docker group added — run 'newgrp docker' or log out/in before using 'docker ps'"
 fi
 
@@ -480,11 +488,17 @@ if command -v nmcli &>/dev/null; then
 else
     action "Installing NetworkManager (required for the Phase 6 static IP step)..."
     sudo apt-get install -y -qq network-manager
-    if sudo systemctl enable --now NetworkManager >/dev/null 2>&1; then
-        info "NetworkManager installed and running"
-    else
-        warn "NetworkManager installed but the service could not be enabled/started — check 'systemctl status NetworkManager' before Phase 6"
-    fi
+fi
+
+# Runs regardless of whether NetworkManager was just installed or already
+# present — a box with the package pre-installed but the service disabled
+# would otherwise only surface as a cryptic nmcli failure in Phase 6.
+if systemctl is-active --quiet NetworkManager; then
+    info "NetworkManager service is running"
+elif sudo systemctl enable --now NetworkManager >/dev/null 2>&1; then
+    info "NetworkManager service enabled and started"
+else
+    warn "NetworkManager installed but the service could not be enabled/started — check 'systemctl status NetworkManager' before Phase 6"
 fi
 
 # --- UTILITY PACKAGES ---
