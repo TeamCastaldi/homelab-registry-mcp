@@ -110,9 +110,12 @@ container — no OS provisioning, no source checkout.
 ### Prerequisites
 
 - A host with Docker and the Compose plugin.
-- Traefik running on an external Docker network named `traefik`, with a
-  `websecure` TLS entrypoint and DNS for `registry-mcp.<your-domain>` pointing
-  at it.
+- Traefik reachable from this host, if you want it fronted by Traefik. The
+  shipped `docker-compose.yml` publishes port 8765 directly and does not join
+  a Docker network — Traefik routes to it via a static backend (an IP:port
+  entry in Traefik's dynamic file config), not Docker label discovery. Point a
+  `websecure` TLS entrypoint and DNS for `registry-mcp.<your-domain>` at
+  `<this-host>:8765`.
 - A read-only Authentik service-account token (never an admin token), if you
   want Authentik discovery.
 
@@ -162,12 +165,14 @@ In Claude Desktop, add an MCP server with the same URL under Settings.
 ## Connecting Traefik and Authentik later
 
 Both installer paths assume you may not have Traefik/Authentik set up yet.
-Once they exist, don't hand-edit `.env` — ask your MCP client to run
-`discovery_connect_traefik` / `discovery_connect_authentik` (see
-`src/registry_mcp/tools/discovery.py`). Each one live-tests the URL and
-credentials and hands back the exact `.env` lines to add, plus a restart —
-they never write the file for you (the container has no access to the host's
-`.env`) and never start discovery immediately.
+Once they exist, don't guess at the values yourself — ask your MCP client to
+run `discovery_connect_traefik` / `discovery_connect_authentik` (see
+`src/registry_mcp/tools/discovery.py`) first. Each one live-tests the URL and
+credentials and hands back the validated `.env` lines to add. `AUTHENTIK_TOKEN`
+is the one exception: the tool never echoes it back (only a placeholder), so
+you'll add that line with the token value yourself. Add the returned lines to
+`.env` and restart — the tool never writes the file for you (the container has
+no access to the host's `.env`) and never starts discovery immediately.
 
 ## Troubleshooting
 
