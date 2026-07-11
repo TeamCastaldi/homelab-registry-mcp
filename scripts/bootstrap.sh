@@ -86,6 +86,16 @@ require_root_or_sudo() {
     fi
 }
 
+# True when running inside a container (LXC, systemd-nspawn, etc.) rather than
+# on bare metal or a VM. Matters for Phase 6: an LXC guest's IP is normally
+# assigned by the host (e.g. Proxmox's own network config for the container),
+# so applying a static IP with nmcli inside the guest is redundant at best and
+# fights the host's own addressing at worst — unlike a VM, where the guest OS
+# genuinely owns its own network stack.
+is_container() {
+    systemd-detect-virt --container --quiet 2>/dev/null
+}
+
 # --- ARGUMENT PARSING ---
 
 DRY_RUN=false
@@ -240,7 +250,11 @@ if [ "$SKIP_NETWORK" == "true" ]; then
     echo ""
 elif [ "$NETWORK_ONLY" == "true" ]; then
     echo "This script will (--network-only: hostname/packages/SSH key already done):"
-    echo "  - Apply a static IP to ${STATIC_IFACE}  ← last step, drops this SSH session"
+    if is_container; then
+        echo "  - Skip static IP application to ${STATIC_IFACE} — running inside a container, where addressing is owned by the host"
+    else
+        echo "  - Apply a static IP to ${STATIC_IFACE}  ← last step, drops this SSH session"
+    fi
     echo ""
     echo "You are currently connected via: $(ip route get 8.8.8.8 2>/dev/null | awk '{print $7; exit}' || echo 'unknown')"
     echo ""
@@ -249,7 +263,11 @@ else
     echo "  - Set hostname to \"${HOSTNAME}\""
     echo "  - Install Docker, Ansible, uv, git-crypt, gh"
     echo "  - Generate an ED25519 SSH key (if none exists)"
-    echo "  - Apply a static IP to ${STATIC_IFACE}  ← last step, drops this SSH session"
+    if is_container; then
+        echo "  - Skip static IP application to ${STATIC_IFACE} — running inside a container, where addressing is owned by the host"
+    else
+        echo "  - Apply a static IP to ${STATIC_IFACE}  ← last step, drops this SSH session"
+    fi
     echo ""
     echo "You are currently connected via: $(ip route get 8.8.8.8 2>/dev/null | awk '{print $7; exit}' || echo 'unknown')"
     echo ""
@@ -322,11 +340,16 @@ if [ "$DRY_RUN" == "true" ]; then
         echo "  4. Validate all installs"
     fi
     if [ "$SKIP_NETWORK" != "true" ]; then
-        echo "  5. Apply static IP ${TARGET_IP}/${TARGET_PREFIX} to ${STATIC_IFACE} via nmcli"
-        echo "       Gateway: ${TARGET_GATEWAY}"
-        echo "       DNS:     ${TARGET_DNS}"
-        echo "       This will drop your current SSH session."
-        echo "       Reconnect: ssh ${TARGET_USER}@${TARGET_IP}"
+        if is_container; then
+            echo "  5. Skip static IP application — running inside a container, where"
+            echo "       addressing is owned by the host, not this guest."
+        else
+            echo "  5. Apply static IP ${TARGET_IP}/${TARGET_PREFIX} to ${STATIC_IFACE} via nmcli"
+            echo "       Gateway: ${TARGET_GATEWAY}"
+            echo "       DNS:     ${TARGET_DNS}"
+            echo "       This will drop your current SSH session."
+            echo "       Reconnect: ssh ${TARGET_USER}@${TARGET_IP}"
+        fi
     fi
     echo ""
     echo "Re-run without --dry-run to execute."
@@ -630,6 +653,28 @@ if [ "$SKIP_NETWORK" != "true" ]; then
 # =============================================================================
 
 header "[PHASE 6] Static IP (${STATIC_IFACE})"
+
+if is_container; then
+    info "Running inside a container ($(systemd-detect-virt --container 2>/dev/null || echo 'lxc')) — network addressing is normally owned by the host, not this guest (e.g. a Proxmox LXC gets its IP from the container's net0 config on the host)."
+    info "Skipping the in-guest static IP step. If this container should have a different address, set it via the host, not nmcli inside the guest."
+    rm -f "$NETWORK_STATE_FILE" 2>/dev/null || true
+
+    echo ""
+    echo "======================================="
+    echo "  BOOTSTRAP COMPLETE (network owned by host)"
+    echo "======================================="
+    echo ""
+    echo "  Hostname:   ${HOSTNAME}"
+    echo "  Network:    unchanged — set this container's static IP via the host"
+    echo "              (e.g. 'pct set <vmid> -net0 ...,ip=${TARGET_IP}/${TARGET_PREFIX},gw=${TARGET_GATEWAY}' on Proxmox)"
+    echo ""
+    echo "  OOBE handoff (ADR-001 §5.1):"
+    echo "    Start the MCP server, then run: oobe_status"
+    echo "    The OOBE will guide you through steps 1-15."
+    echo ""
+
+    exit 0
+fi
 
 # Fail clearly here rather than mid-way through nmcli — e.g. this node was
 # bootstrapped by an older script version before NetworkManager install was

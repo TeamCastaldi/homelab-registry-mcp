@@ -185,7 +185,16 @@ no access to the host's `.env`) and never starts discovery immediately.
   `bash scripts/bootstrap.sh --network-only`.
 - **`nmcli` errors about an unmanaged interface** — Ubuntu Server defaults to
   netplan + systemd-networkd, not NetworkManager. Add `renderer: NetworkManager`
-  to `/etc/netplan/*.yaml`, `sudo netplan apply`, then re-run bootstrap.
+  to `/etc/netplan/*.yaml`, `sudo netplan apply`, then re-run bootstrap. If
+  you're inside a container (LXC, etc.), this doesn't apply to you — see below.
+- **Running Option A inside an LXC container (e.g. a Proxmox community-scripts
+  Ubuntu template)** — `bootstrap.sh` detects this and automatically skips the
+  step 6 static-IP application, since a container's address is normally owned
+  by the host (Proxmox's own `net0` config for that container), not the guest.
+  You'll see a "network owned by host" completion message instead of an SSH
+  drop. If the earlier install already errored out before this detection was
+  added, that's fine — steps 1-5 (packages, `.env`, the running server) still
+  completed; only the redundant network step failed, and you can ignore it.
 - **Re-running `install.sh`** is safe — it skips already-installed packages,
   pulls latest instead of re-cloning, and leaves an existing `.env` untouched
   rather than overwriting it.
