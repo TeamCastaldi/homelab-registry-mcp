@@ -67,6 +67,9 @@ prompt() {
 }
 
 # Same as prompt() but silent (for tokens/keys) and never echoed back.
+# Nothing is shown as you type — not even asterisks — so paste/typing
+# mistakes are otherwise invisible; print a length-only receipt afterward
+# so there's some confirmation without ever putting the value on screen.
 prompt_secret() {
     local var_name="$1" prompt_text="$2"
     if [ -n "${!var_name:-}" ]; then
@@ -75,6 +78,11 @@ prompt_secret() {
     local input
     read -rsp "${prompt_text}: " input
     echo ""
+    if [ -n "$input" ]; then
+        info "Received (${#input} characters, not echoed)"
+    else
+        warn "No input received — leaving blank"
+    fi
     printf -v "$var_name" '%s' "$input"
 }
 
@@ -170,7 +178,15 @@ prompt GIT_PROVIDER "Git provider for the write path (github/gitea, blank to ski
 if [ -n "${GIT_PROVIDER:-}" ]; then
     prompt GIT_REPO "Homelab config repo (owner/name)"
     prompt_secret GIT_TOKEN "Git token (classic: repo scope; fine-grained: Contents + Pull requests, read+write)"
-    prompt GIT_BASE_URL "Git base URL" "https://github.com"
+    # The GitHub provider talks to the API root directly (no path prefix
+    # added), so the default here must be api.github.com, not github.com —
+    # GHES users override with their own /api/v3 root. Gitea/Forgejo has no
+    # sensible universal default (self-hosted), so it's prompted with none.
+    if [ "$GIT_PROVIDER" == "github" ]; then
+        prompt GIT_BASE_URL "Git base URL (blank = public GitHub; GHES: e.g. https://ghe.example.com/api/v3)" "https://api.github.com"
+    else
+        prompt GIT_BASE_URL "Git base URL (your Gitea/Forgejo instance, e.g. https://gitea.example.com)"
+    fi
 fi
 
 DSPY_ENABLED="${DSPY_ENABLED:-false}"
