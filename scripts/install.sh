@@ -169,7 +169,7 @@ echo ""
 prompt GIT_PROVIDER "Git provider for the write path (github/gitea, blank to skip)"
 if [ -n "${GIT_PROVIDER:-}" ]; then
     prompt GIT_REPO "Homelab config repo (owner/name)"
-    prompt_secret GIT_TOKEN "Git token (repo read+write scope)"
+    prompt_secret GIT_TOKEN "Git token (classic: repo scope; fine-grained: Contents + Pull requests, read+write)"
     prompt GIT_BASE_URL "Git base URL" "https://github.com"
 fi
 

@@ -237,6 +237,12 @@ if [ "$SKIP_NETWORK" == "true" ]; then
     echo "  - Install Docker, Ansible, uv, git-crypt, gh"
     echo "  - Generate an ED25519 SSH key (if none exists)"
     echo ""
+elif [ "$NETWORK_ONLY" == "true" ]; then
+    echo "This script will (--network-only: hostname/packages/SSH key already done):"
+    echo "  - Apply a static IP to ${STATIC_IFACE}  ← last step, drops this SSH session"
+    echo ""
+    echo "You are currently connected via: $(ip route get 8.8.8.8 2>/dev/null | awk '{print $7; exit}' || echo 'unknown')"
+    echo ""
 else
     echo "This script will:"
     echo "  - Set hostname to \"${HOSTNAME}\""
