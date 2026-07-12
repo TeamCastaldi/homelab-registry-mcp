@@ -108,12 +108,20 @@ async def gather_facts(
         f"-o ConnectTimeout={connect_timeout_seconds}",
     ]
     try:
-        _rc, stdout, stderr = await _run(cmd, env)
+        rc, stdout, stderr = await _run(cmd, env)
     except FileNotFoundError as exc:
         raise AnsibleFactsError(f"ansible CLI not found: {exc}") from exc
     if not stdout.strip() and stderr.strip():
         raise AnsibleFactsError(f"ansible setup against {pattern!r} failed: {stderr.strip()}")
-    return parse_setup_output(stdout)
+    facts_by_host, failures = parse_setup_output(stdout)
+    if rc != 0 and not facts_by_host and not failures:
+        # Nonzero exit with output that didn't match a single per-host line
+        # (e.g. an inventory/parsing error printed as plain text) — surface it
+        # rather than silently reporting an empty, ostensibly successful pass.
+        raise AnsibleFactsError(
+            f"ansible setup against {pattern!r} exited {rc}: {(stderr or stdout).strip()}"
+        )
+    return facts_by_host, failures
 
 
 def hostname_from_facts(facts: dict[str, Any]) -> str | None:

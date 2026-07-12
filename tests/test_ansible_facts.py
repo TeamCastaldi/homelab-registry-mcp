@@ -119,6 +119,35 @@ async def test_gather_facts_raises_when_no_output_and_stderr():
         )
 
 
+async def test_gather_facts_raises_on_nonzero_rc_with_unparseable_output():
+    """A nonzero exit with output that never matched a per-host line (e.g. an
+    inventory error printed as plain text rather than the one-line-per-host
+    format) must not be reported back as an empty, ostensibly successful pass."""
+    with (
+        patch.object(
+            ansible_facts,
+            "_run",
+            new=AsyncMock(return_value=(1, "ERROR! Unable to parse inventory", "")),
+        ),
+        pytest.raises(ansible_facts.AnsibleFactsError),
+    ):
+        await ansible_facts.gather_facts(
+            pattern="all", ansible_cfg_path="/etc/ansible.cfg", ssh_key_path="/key"
+        )
+
+
+async def test_gather_facts_nonzero_rc_with_partial_success_is_not_an_error():
+    """A nonzero exit is expected whenever any host is unreachable — only a
+    *total* failure to parse anything should raise."""
+    stdout = 'a | SUCCESS => {"ansible_facts": {"ansible_hostname": "a"}}'
+    with patch.object(ansible_facts, "_run", new=AsyncMock(return_value=(2, stdout, ""))):
+        facts_by_host, failures = await ansible_facts.gather_facts(
+            pattern="all", ansible_cfg_path="/etc/ansible.cfg", ssh_key_path="/key"
+        )
+    assert facts_by_host == {"a": {"ansible_hostname": "a"}}
+    assert failures == {}
+
+
 async def test_gather_facts_parses_stdout():
     stdout = 'nas | SUCCESS => {"ansible_facts": {"ansible_hostname": "nas"}}'
     with patch.object(ansible_facts, "_run", new=AsyncMock(return_value=(0, stdout, ""))):

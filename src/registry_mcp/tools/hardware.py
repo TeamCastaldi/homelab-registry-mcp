@@ -63,14 +63,19 @@ async def discover_now(
     hardware registry. Pulled out of the tool closure so it's unit-testable
     without a running FastMCP server."""
     pattern = host or "all"
-    # Callers gate on _discover_now_unavailable() first, so both are set.
-    assert settings.ansible_cfg_path is not None
-    assert settings.ssh_key_path is not None
+    # discover_now() is called directly by tests as well as the tool wrapper
+    # (which gates on _discover_now_unavailable() first), so this is a real
+    # check, not just documentation of a caller invariant.
+    if err := _discover_now_unavailable(settings):
+        return {"status": "error", "error": err}
+    ansible_cfg_path = settings.ansible_cfg_path
+    ssh_key_path = settings.ssh_key_path
+    assert ansible_cfg_path is not None and ssh_key_path is not None  # checked above
     try:
         facts_by_host, failures = await ansible_facts.gather_facts(
             pattern=pattern,
-            ansible_cfg_path=settings.ansible_cfg_path,
-            ssh_key_path=settings.ssh_key_path,
+            ansible_cfg_path=ansible_cfg_path,
+            ssh_key_path=ssh_key_path,
             ssh_user=settings.ssh_default_user,
         )
     except ansible_facts.AnsibleFactsError as exc:
@@ -85,7 +90,11 @@ async def discover_now(
         node = hardware_store.upsert_from_discovery(
             hostname=hostname,
             ansible_host=inventory_host,
-            ansible_groups=[],
+            # The ad-hoc `ansible -m setup` pass doesn't expose inventory
+            # group membership, so leave an existing node's groups alone
+            # (see HardwareStore.upsert_from_discovery) instead of clobbering
+            # them with an empty list every pass.
+            ansible_groups=None,
             fields=fields,
         )
         (created if was_new else updated).append(node.hostname)
@@ -212,11 +221,12 @@ def register_hardware_tools(
         probe the whole inventory."""
         if read_only:
             return {
+                "status": "error",
                 "error": "Server is in read-only mode (startup health check failed). "
-                "Run system_health_check for details."
+                "Run system_health_check for details.",
             }
-        if err := _discover_now_unavailable(settings):
-            return {"error": err}
+        # discover_now() re-checks ANSIBLE_CFG_PATH/SSH_KEY_PATH itself and
+        # returns the same {"status": "error", ...} shape either way.
         return await discover_now(hardware_store, settings, host)
 
     @mcp.tool(name="hardware-discovery-status")

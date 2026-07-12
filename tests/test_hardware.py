@@ -290,6 +290,30 @@ def test_upsert_from_discovery_ignores_unmapped_fields(hardware_store):
     assert node.role == NodeRole.other
 
 
+def test_upsert_from_discovery_preserves_groups_when_none(hardware_store):
+    hardware_store.upsert_from_discovery(
+        hostname="nas",
+        ansible_host="10.0.0.5",
+        ansible_groups=["nas_hosts"],
+        fields={},
+    )
+    updated = hardware_store.upsert_from_discovery(
+        hostname="nas",
+        ansible_host="10.0.0.5",
+        ansible_groups=None,
+        fields={"ram_gb": 64.0},
+    )
+    assert updated.ansible_groups == ["nas_hosts"]
+    assert updated.ram_gb == 64.0
+
+
+def test_upsert_from_discovery_new_node_defaults_groups_to_empty(hardware_store):
+    node = hardware_store.upsert_from_discovery(
+        hostname="nas", ansible_host="10.0.0.5", ansible_groups=None, fields={}
+    )
+    assert node.ansible_groups == []
+
+
 def test_storage_disk_model():
     disk = StorageDisk(device="/dev/sda", size_gb=4000.0, type="hdd")
     assert disk.device == "/dev/sda"

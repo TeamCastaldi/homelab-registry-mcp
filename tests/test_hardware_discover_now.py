@@ -86,3 +86,27 @@ async def test_discover_now_returns_error_on_ansible_failure(hardware_store, set
         result = await discover_now(hardware_store, settings, host=None)
 
     assert result == {"status": "error", "error": "boom"}
+
+
+async def test_discover_now_returns_error_shape_when_unconfigured(hardware_store, settings):
+    """discover_now() re-checks its own prerequisites so it's safe to call
+    directly (e.g. from a future scheduler), not just from the tool wrapper —
+    and the failure shape matches the ansible-failure path above."""
+    result = await discover_now(hardware_store, settings, host=None)
+    assert result == {"status": "error", "error": _discover_now_unavailable(settings)}
+
+
+async def test_discover_now_preserves_existing_ansible_groups(hardware_store, settings):
+    settings.ansible_cfg_path = "/opt/homelab/ansible.cfg"
+    settings.ssh_key_path = "/opt/homelab/.ssh/id_ed25519"
+
+    hardware_store.upsert_from_discovery(
+        hostname="existing", ansible_host="10.0.0.9", ansible_groups=["nas_hosts"], fields={}
+    )
+    facts_by_host = {"existing": {"ansible_hostname": "existing"}}
+    with patch.object(
+        ansible_facts, "gather_facts", new=AsyncMock(return_value=(facts_by_host, {}))
+    ):
+        await discover_now(hardware_store, settings, host=None)
+
+    assert hardware_store.get_node("existing").ansible_groups == ["nas_hosts"]
