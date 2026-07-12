@@ -101,6 +101,7 @@ whatever's already installed or configured.
 - Reconnect: `ssh <your-user>@<the-static-ip-you-chose>`
 - Check it's healthy: `docker compose logs -f homelab-registry-mcp` (look for a
   `scheduler_started` line) from the install directory
+- [Set up your homelab config repo](#setting-up-your-homelab-config-repo)
 - [Discover your hardware](#discovering-your-hardware)
 - [Connect an MCP client](#connecting-an-mcp-client)
 
@@ -152,11 +153,79 @@ container image is pulled from GHCR.
 
 ---
 
+## Setting up your homelab config repo
+
+`hardware-discover-now`, the `secrets_*` tools, and the automated deploy
+pipeline all read from (or write to) a private Git repo you control —
+`SECRETS_REPO_PATH`, `/opt/homelab` by default. This project never creates
+that repo or its contents for you; do this once before
+[Discovering your hardware](#discovering-your-hardware) below.
+
+### 1. Authenticate the GitHub CLI
+
+`bootstrap.sh` installs the `gh` binary, but can't log it in for you — unlike
+the plain `read -rp` text prompts `install.sh` asks, `gh auth login` opens a
+browser OAuth flow or a device-code flow, either of which needs a human to
+click through somewhere, and it writes to its own credential store
+(`~/.config/gh/hosts.yml`), not `.env`. Run it once, manually:
+
+```bash
+gh auth login
+```
+
+Don't confuse this with `GIT_TOKEN` in `.env` — that's a *different*
+credential, used by registry-mcp's own code (inside the container) to open
+PRs for the Phase 8 write path. Authenticating `gh` on the host doesn't set
+`GIT_TOKEN`, and setting `GIT_TOKEN` doesn't authenticate `gh`.
+
+### 2. Create the repo (first time only), or re-clone it (every other time)
+
+The very first time, on any machine:
+
+```bash
+scripts/setup-homelab-repo.sh
+```
+
+This creates a private GitHub repo, clones it to `/opt/homelab`, initializes
+git-crypt, and exports the encryption key — follow its printed instructions
+to back that key up (Bitwarden, 1Password, etc.) *before* doing anything
+else. If you lose it, every `.env` file it encrypts becomes unrecoverable.
+
+If the repo already exists on GitHub (e.g. you're re-provisioning a node, or
+reflashing an SD card) **don't re-run `setup-homelab-repo.sh`** — it creates
+the repo itself, not just the local clone, and running it again against an
+existing repo is not what you want. Just re-clone:
+
+```bash
+gh repo clone <your-github-user>/homelab /opt/homelab
+```
+
+`ansible.cfg`/`ansible/inventory.yml` aren't git-crypt-encrypted (only
+`**/.env` files are, per `.gitattributes`), so they're readable immediately
+from a plain clone — you only need the git-crypt key restored (from wherever
+you backed it up in step 2 above) if you also want the `secrets_*` tools or
+adoption features working on this node.
+
+### 3. Point registry-mcp at it
+
+Add to `.env` (adjust the path to wherever you cloned it):
+
+```
+SECRETS_REPO_PATH=/opt/homelab
+SECRETS_KEY_PATH=/opt/homelab/.git-crypt.key
+# OR, if you'd rather not keep the key as a file on disk:
+# SECRETS_GIT_CRYPT_KEY=<base64 of the key, from your password manager>
+```
+
+Recreate the container (`docker compose up -d --force-recreate`), then
+continue to [Discovering your hardware](#discovering-your-hardware).
+
 ## Discovering your hardware
 
-Once the server is up, the next step (control-plane path only — it needs the
-SSH key `install.sh` set up) is to have it fact-gather the nodes it's going
-to manage, rather than typing each one in by hand:
+Once your homelab config repo is set up (previous section), the next step is
+to have the server fact-gather the nodes it's going to manage, rather than
+typing each one in by hand — control-plane path only, it needs the SSH key
+`install.sh` set up:
 
 1. Make sure `ansible.cfg` and an inventory listing your nodes exist in your
    homelab config repo (the OOBE CLI that will generate these automatically
