@@ -88,7 +88,19 @@ async def gather_facts(
     ssh_user: str = "root",
     connect_timeout_seconds: int = 15,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
-    """Run `ansible <pattern> -m setup` and return `(facts_by_host, failures)`."""
+    """Run `ansible <pattern> -m setup` and return `(facts_by_host, failures)`.
+
+    Deliberately does *not* pass `ansible_ssh_common_args`/a raw `-o ...` ssh
+    string: ansible-core's ssh connection plugin re-parses that value with
+    its own internal argparse to detect a `-tt` flag (`_is_tty_requested()`
+    in `ansible/plugins/connection/ssh.py`), and that parser chokes on a
+    plain `-o KEY=VALUE` token, crashing the whole worker with "A worker was
+    found in a dead state" — reproduced directly against ansible-core
+    2.21.1. `ansible_ssh_timeout` (a plain int, never touches that code
+    path) covers the connect timeout; `host_key_checking = False` in
+    `ansible.cfg` (see `setup-ansible-inventory.sh`) already covers what
+    `StrictHostKeyChecking` would have.
+    """
     env = {
         **os.environ,
         "ANSIBLE_CONFIG": ansible_cfg_path,
@@ -104,8 +116,7 @@ async def gather_facts(
         "-u",
         ssh_user,
         "-e",
-        "ansible_ssh_common_args=-o StrictHostKeyChecking=accept-new "
-        f"-o ConnectTimeout={connect_timeout_seconds}",
+        f"ansible_ssh_timeout={connect_timeout_seconds}",
     ]
     try:
         rc, stdout, stderr = await _run(cmd, env)

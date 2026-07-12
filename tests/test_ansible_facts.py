@@ -99,6 +99,25 @@ def test_hostname_from_facts_falls_back_to_fqdn():
     assert ansible_facts.hostname_from_facts({"ansible_fqdn": "nas.lan"}) == "nas.lan"
 
 
+async def test_gather_facts_never_passes_raw_ssh_common_args():
+    """Regression test: ansible_ssh_common_args (a raw `-o KEY=VALUE` ssh args
+    string) crashes ansible-core's ssh connection plugin — its internal
+    _is_tty_requested() re-parses that value with its own argparse instance
+    and chokes on a bare -o token, reproduced directly against ansible-core
+    2.21.1 as "ERROR! A worker was found in a dead state". The timeout must
+    go through the plain-int ansible_ssh_timeout var instead."""
+    with patch.object(ansible_facts, "_run", new=AsyncMock(return_value=(0, "", ""))) as mock_run:
+        await ansible_facts.gather_facts(
+            pattern="all",
+            ansible_cfg_path="/etc/ansible.cfg",
+            ssh_key_path="/key",
+            connect_timeout_seconds=15,
+        )
+    cmd = mock_run.call_args.args[0]
+    assert not any("ansible_ssh_common_args" in arg for arg in cmd)
+    assert "ansible_ssh_timeout=15" in cmd
+
+
 async def test_gather_facts_raises_on_missing_ansible_binary():
     with (
         patch.object(ansible_facts, "_run", new=AsyncMock(side_effect=FileNotFoundError())),
