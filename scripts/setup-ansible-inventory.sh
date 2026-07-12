@@ -18,6 +18,13 @@
 #   scripts/setup-ansible-inventory.sh
 #   SECRETS_REPO_PATH=/opt/homelab scripts/setup-ansible-inventory.sh
 #
+# Prompts for the SSH private key Ansible should use (default
+# ~/.ssh/id_ed25519, bootstrap.sh's default) and authorizes it (ssh-copy-id)
+# on every host you add — skipped for the control-plane's own entry, which
+# runs locally instead of over SSH. ssh-keygen only creates the key pair
+# locally; nothing else copies the public half to a target's
+# authorized_keys for you.
+#
 # What it writes (inside SECRETS_REPO_PATH):
 #   ansible.cfg            — minimal defaults, points at ansible/inventory.yml.
 #                             Left untouched if it already exists.
@@ -34,7 +41,7 @@
 # (`docker compose up -d --force-recreate` — a plain restart won't reread
 # .env):
 #   ANSIBLE_CFG_PATH=<repo>/ansible.cfg
-#   SSH_KEY_PATH=<path to the key Ansible should use to reach these hosts>
+#   SSH_KEY_PATH=<the key path you entered above>
 
 set -euo pipefail
 
@@ -74,6 +81,31 @@ cd "${SECRETS_REPO_PATH}"
 info "Using ${SECRETS_REPO_PATH}"
 
 prompt ANSIBLE_SSH_USER "SSH user Ansible should connect as on every host" "$(whoami)"
+prompt SSH_KEY_PATH "Path to the SSH private key Ansible should use" "${HOME}/.ssh/id_ed25519"
+
+CAN_AUTHORIZE=true
+if [ ! -f "${SSH_KEY_PATH}.pub" ]; then
+    warn "${SSH_KEY_PATH}.pub not found — can't auto-authorize this key on new hosts."
+    warn "You'll need to run ssh-copy-id yourself for each host added below."
+    CAN_AUTHORIZE=false
+fi
+
+# Authorizes SSH_KEY_PATH on one remote host (ssh-copy-id only copies the
+# *public* key — never touches the private half). Idempotent: ssh-copy-id
+# already skips a key that's authorized there. Never aborts the script —
+# an unreachable host here just means retrying it manually later.
+authorize_host() {
+    local ip="$1"
+    if [ "$CAN_AUTHORIZE" != "true" ]; then
+        return
+    fi
+    if ssh-copy-id -i "${SSH_KEY_PATH}.pub" -o StrictHostKeyChecking=accept-new \
+        "${ANSIBLE_SSH_USER}@${ip}" >/dev/null 2>&1; then
+        info "Authorized this key on ${ip}"
+    else
+        warn "Couldn't authorize the key on ${ip} — run manually: ssh-copy-id -i ${SSH_KEY_PATH}.pub ${ANSIBLE_SSH_USER}@${ip}"
+    fi
+}
 
 header "[2/4] ansible.cfg"
 
@@ -164,6 +196,7 @@ while true; do
         continue
     fi
     add_host "$HOST_NAME" "$HOST_IP"
+    authorize_host "$HOST_IP"
 done
 
 header "[4/4] Commit and push"
@@ -182,20 +215,19 @@ echo "============================================================"
 echo "  Inventory ready: ${SECRETS_REPO_PATH}/${INVENTORY_FILE}"
 echo "============================================================"
 echo ""
-echo "Before hardware-discover-now can reach any host you just added (not the"
-echo "control-plane node itself — that one runs locally, no SSH needed),"
-echo "authorize its SSH key on each one:"
-echo ""
-echo "  ssh-copy-id -i <SSH_KEY_PATH>.pub ${ANSIBLE_SSH_USER}@<host-ip>"
-echo ""
-echo "ssh-keygen only creates the key pair locally — nothing copies the"
-echo "public half to a target's authorized_keys for you."
+if [ "$CAN_AUTHORIZE" = "true" ]; then
+    echo "Any host reported above as not authorized needs ssh-copy-id run"
+    echo "manually before hardware-discover-now can reach it."
+else
+    echo "This key couldn't be auto-authorized (see warning above) — run"
+    echo "ssh-copy-id yourself for every host you just added."
+fi
 echo ""
 echo "Add these to registry-mcp's .env (if not already set), then recreate"
 echo "the container — a plain restart won't reread .env:"
 echo ""
 echo "  ANSIBLE_CFG_PATH=${SECRETS_REPO_PATH}/ansible.cfg"
-echo "  SSH_KEY_PATH=<path to the key Ansible should use to reach these hosts>"
+echo "  SSH_KEY_PATH=${SSH_KEY_PATH}"
 echo ""
 echo "  docker compose up -d --force-recreate"
 echo ""

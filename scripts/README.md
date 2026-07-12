@@ -57,11 +57,16 @@ exactly what gets installed and what you'll be prompted for — see
   reusable `.github/workflows/deploy.yml` and the `hardware-discover-now` MCP
   tool expect these to already exist and neither Ansible nor this project
   generates them for you. Seeds the inventory with the control-plane node
-  itself (auto-detecting hostname/IP), then interactively prompts for more
-  hosts (blank name to stop) — commits and pushes when done. Idempotent: safe
-  to re-run any time you want to add hosts; skips any host already present by
-  name and leaves an existing `ansible.cfg` untouched. Run from the
-  control-plane node: `scripts/setup-ansible-inventory.sh`.
+  itself (auto-detecting hostname/IP, marked `ansible_connection: local` — no
+  SSH loopback to itself), then interactively prompts for more hosts (blank
+  name to stop). Also prompts for the SSH private key Ansible should use and
+  runs `ssh-copy-id` against each host you add — `ssh-keygen` only creates
+  the key pair locally, nothing else authorizes it on a target — falling
+  back to printing the manual command if that fails or the key's `.pub`
+  file is missing. Commits and pushes when done. Idempotent: safe to re-run
+  any time you want to add hosts; skips any host already present by name and
+  leaves an existing `ansible.cfg` untouched. Run from the control-plane
+  node: `scripts/setup-ansible-inventory.sh`.
 
 ## What belongs here
 
