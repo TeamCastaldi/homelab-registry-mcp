@@ -253,14 +253,19 @@ fi
 
 header "[STEP 5] Starting the MCP server"
 
+# bootstrap.sh may have just added this user to the docker group in this
+# same run — group membership changes don't apply to an already-open shell
+# (this script's own process) until logout/login, so a plain `docker`
+# command here would fail with "permission denied" on a truly fresh node.
+# `sg docker -c "..."` applies the group for just that command, sidestepping
+# the need to restart the shell mid-script.
 action "docker compose pull && docker compose up -d"
-docker compose pull
-docker compose up -d
+sg docker -c "docker compose pull && docker compose up -d"
 
 action "Waiting for homelab-registry-mcp to report running..."
 READY=false
 for _ in $(seq 1 30); do
-    if docker compose ps --status running --services 2>/dev/null | grep -qx "homelab-registry-mcp"; then
+    if sg docker -c "docker compose ps --status running --services" 2>/dev/null | grep -qx "homelab-registry-mcp"; then
         READY=true
         break
     fi
