@@ -1,5 +1,12 @@
 FROM python:3.12-slim
 
+# ansible-core's forked worker processes crash immediately ("ERROR! A worker
+# was found in a dead state") without a UTF-8 locale, and python:3.12-slim
+# sets none by default. C.UTF-8 is glibc's built-in locale — no `locales`
+# package/locale-gen needed.
+ENV LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
+
 # git-crypt for encrypted .env file management (Phase C secrets tools).
 # ansible-core for hardware-discover-now's `ansible ... -m setup` fact-gather
 # (Phase 9b) — the `setup` module it runs is a core module, so ansible-core
