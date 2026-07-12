@@ -116,29 +116,40 @@ fi
 # works because the file's shape is one this script fully controls
 # (a top-level `all:` with `hosts:`/`vars:` siblings at 2-space indent).
 # Hand-editing the file is fine as long as that shape stays intact.
+# $3 (optional) is one extra `key: value` line, used below to mark the
+# control-plane's own entry ansible_connection: local — SSH key-based auth
+# needs the *public* key manually copied to a target's authorized_keys
+# (ssh-keygen only creates the pair locally), and there's no reason to loop
+# an SSH connection back to the box Ansible is already running on.
 add_host() {
-    local name="$1" ip="$2"
+    local name="$1" ip="$2" extra="${3:-}"
     if grep -q "^    ${name}:\$" "$INVENTORY_FILE"; then
         warn "${name} is already in the inventory — skipping"
         return
     fi
-    awk -v name="$name" -v ip="$ip" '
+    awk -v name="$name" -v ip="$ip" -v extra="$extra" '
         { print }
-        /^  hosts:$/ && !done { print "    " name ":"; print "      ansible_host: " ip; done=1 }
+        /^  hosts:$/ && !done {
+            print "    " name ":"
+            print "      ansible_host: " ip
+            if (extra != "") print "      " extra
+            done=1
+        }
     ' "$INVENTORY_FILE" > "${INVENTORY_FILE}.tmp"
     mv "${INVENTORY_FILE}.tmp" "$INVENTORY_FILE"
     info "Added ${name} (${ip})"
 }
 
 # Seed with the control-plane node itself, so hardware-discover-now picks up
-# the box running registry-mcp without a manual prompt for it.
+# the box running registry-mcp without a manual prompt for it. Local, not
+# SSH — see add_host's comment above.
 CP_HOSTNAME="$(hostname)"
 CP_IP="$(ip route get 8.8.8.8 2>/dev/null | awk '{print $7; exit}' || true)"
 if [ -z "$CP_IP" ]; then
     warn "Couldn't auto-detect this node's IP — enter it manually."
     prompt CP_IP "IP address of ${CP_HOSTNAME} (this node)"
 fi
-add_host "$CP_HOSTNAME" "$CP_IP"
+add_host "$CP_HOSTNAME" "$CP_IP" "ansible_connection: local"
 
 echo ""
 echo "Now add any other hosts you want in the inventory (workload nodes, NAS, etc.)."
@@ -170,6 +181,15 @@ echo ""
 echo "============================================================"
 echo "  Inventory ready: ${SECRETS_REPO_PATH}/${INVENTORY_FILE}"
 echo "============================================================"
+echo ""
+echo "Before hardware-discover-now can reach any host you just added (not the"
+echo "control-plane node itself — that one runs locally, no SSH needed),"
+echo "authorize its SSH key on each one:"
+echo ""
+echo "  ssh-copy-id -i <SSH_KEY_PATH>.pub ${ANSIBLE_SSH_USER}@<host-ip>"
+echo ""
+echo "ssh-keygen only creates the key pair locally — nothing copies the"
+echo "public half to a target's authorized_keys for you."
 echo ""
 echo "Add these to registry-mcp's .env (if not already set), then recreate"
 echo "the container — a plain restart won't reread .env:"
