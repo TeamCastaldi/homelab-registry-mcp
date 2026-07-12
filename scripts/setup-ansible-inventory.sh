@@ -119,11 +119,17 @@ else
     # pipeline that can reach a brand-new host non-interactively — the
     # ad-hoc hardware-discover-now probe already pins
     # StrictHostKeyChecking=accept-new itself regardless of this setting.
+    # forks=1 avoids a real ansible-core bug (POSIX fork() of a
+    # multithreaded process is undefined behavior — see ansible/ansible#59642):
+    # forking several workers concurrently (default 5) can deadlock/crash with
+    # "ERROR! A worker was found in a dead state". A homelab inventory is
+    # small enough that serial execution costs nothing worth trading for it.
     cat > ansible.cfg <<'EOF'
 [defaults]
 inventory = ansible/inventory.yml
 host_key_checking = False
 interpreter_python = auto_silent
+forks = 1
 EOF
     info "Wrote ansible.cfg"
 fi
