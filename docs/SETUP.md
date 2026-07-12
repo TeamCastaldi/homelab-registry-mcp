@@ -158,14 +158,18 @@ Once the server is up, the next step (control-plane path only — it needs the
 SSH key `install.sh` set up) is to have it fact-gather the nodes it's going
 to manage, rather than typing each one in by hand:
 
-1. Make sure `ansible.cfg` and an inventory listing your workload nodes exist
-   (the OOBE CLI that will generate these automatically is planned but not
-   built yet — [ADR-001](ARDs/ADR-001-Homelab-Control-Plane.md) step 7 —
-   so for now, write or extend one yourself; `bootstrap.sh` leaves a minimal
-   stub at `ansible/archive/inventory/discovered-hosts.yml` to start from).
-2. Set `ANSIBLE_CFG_PATH` and `SSH_KEY_PATH` in `.env` and restart the
-   container (`docker compose up -d`) — these are also the two prerequisites
-   `system_health_check` looks for to leave read-only mode.
+1. Make sure `ansible.cfg` and an inventory listing your nodes exist in your
+   homelab config repo (the OOBE CLI that will generate these automatically
+   is planned but not built yet — [ADR-001](ARDs/ADR-001-Homelab-Control-Plane.md)
+   step 7). Run `scripts/setup-ansible-inventory.sh` from the control-plane
+   node to bootstrap them: it seeds the inventory with the control-plane node
+   itself (auto-detected), then prompts you for any other hosts to add.
+   Idempotent — re-run it any time to add more.
+2. Set `ANSIBLE_CFG_PATH` and `SSH_KEY_PATH` in `.env` — the script prints the
+   exact `ANSIBLE_CFG_PATH` value to use — and recreate the container
+   (`docker compose up -d --force-recreate`; a plain restart won't reread
+   `.env`). These are also the two prerequisites `system_health_check` looks
+   for to leave read-only mode.
 3. From an MCP client, call the `hardware-discover-now` tool (optionally with
    `host: "<name-or-group>"` to target one node/group instead of the whole
    inventory). It runs `ansible <pattern> -m setup` over SSH and upserts each

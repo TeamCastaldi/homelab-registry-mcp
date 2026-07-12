@@ -52,6 +52,16 @@ exactly what gets installed and what you'll be prompted for — see
   defaults to `$HOME`-relative paths (`$HOME/homelab`,
   `$HOME/.config/homelab/git-crypt.key`) so it runs without root on a laptop —
   override via `SECRETS_REPO_PATH` / `SECRETS_KEY_PATH` for the Pi (`/opt/homelab`).
+- **`setup-ansible-inventory.sh`** — bootstraps (or extends) `ansible.cfg` +
+  `ansible/inventory.yml` inside your homelab config repo (Phase 9b): both the
+  reusable `.github/workflows/deploy.yml` and the `hardware-discover-now` MCP
+  tool expect these to already exist and neither Ansible nor this project
+  generates them for you. Seeds the inventory with the control-plane node
+  itself (auto-detecting hostname/IP), then interactively prompts for more
+  hosts (blank name to stop) — commits and pushes when done. Idempotent: safe
+  to re-run any time you want to add hosts; skips any host already present by
+  name and leaves an existing `ansible.cfg` untouched. Run from the
+  control-plane node: `scripts/setup-ansible-inventory.sh`.
 
 ## What belongs here
 
