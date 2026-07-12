@@ -101,6 +101,7 @@ whatever's already installed or configured.
 - Reconnect: `ssh <your-user>@<the-static-ip-you-chose>`
 - Check it's healthy: `docker compose logs -f homelab-registry-mcp` (look for a
   `scheduler_started` line) from the install directory
+- [Discover your hardware](#discovering-your-hardware)
 - [Connect an MCP client](#connecting-an-mcp-client)
 
 ---
@@ -148,6 +149,35 @@ docker compose logs -f homelab-registry-mcp   # expect a scheduler_started line
 
 No other software gets installed for you on this path — only the one
 container image is pulled from GHCR.
+
+---
+
+## Discovering your hardware
+
+Once the server is up, the next step (control-plane path only — it needs the
+SSH key `install.sh` set up) is to have it fact-gather the nodes it's going
+to manage, rather than typing each one in by hand:
+
+1. Make sure `ansible.cfg` and an inventory listing your workload nodes exist
+   (the OOBE CLI that will generate these automatically is planned but not
+   built yet — [ADR-001](ARDs/ADR-001-Homelab-Control-Plane.md) step 7 —
+   so for now, write or extend one yourself; `bootstrap.sh` leaves a minimal
+   stub at `ansible/archive/inventory/discovered-hosts.yml` to start from).
+2. Set `ANSIBLE_CFG_PATH` and `SSH_KEY_PATH` in `.env` and restart the
+   container (`docker compose up -d`) — these are also the two prerequisites
+   `system_health_check` looks for to leave read-only mode.
+3. From an MCP client, call the `hardware-discover-now` tool (optionally with
+   `host: "<name-or-group>"` to target one node/group instead of the whole
+   inventory). It runs `ansible <pattern> -m setup` over SSH and upserts each
+   host's OS, CPU, RAM, and disks into the hardware registry as a `confirmed`
+   `HardwareNode` — nothing is written back to the nodes themselves.
+4. Re-run it any time (e.g. after adding a node to the inventory) — it's
+   idempotent, and any `display_name`/`role`/`tags`/`notes` you've set by hand
+   via `hardware-update-node` are never overwritten.
+
+Nodes registered manually via `hardware-add-node` stay as-is until the next
+`hardware-discover-now` pass confirms them; `hardware-list-unconfirmed` and
+`hardware-discovery-status` show what's still pending.
 
 ---
 

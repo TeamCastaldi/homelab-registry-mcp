@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlmodel import Session, SQLModel, col, select
 
+from registry_mcp.hardware.ansible_facts import DISCOVERY_FIELDS
 from registry_mcp.logging import get_logger
 from registry_mcp.models.hardware import (
     HardwareChangeEvent,
@@ -108,6 +109,51 @@ class HardwareStore:
             session.commit()
             session.refresh(node)
             return node
+
+    def upsert_from_discovery(
+        self,
+        *,
+        hostname: str,
+        ansible_host: str,
+        ansible_groups: list[str],
+        fields: dict[str, Any],
+        actor: str = "ansible",
+    ) -> HardwareNode:
+        """Create or refresh a node from a live Ansible fact-gather pass
+        (Phase 9b). Only provenance fields (`DISCOVERY_FIELDS`, plus
+        `ansible_host`/`ansible_groups`/`status`/`last_confirmed_at`/
+        `last_seen_at`) are written — curated fields (`display_name`, `role`,
+        `tags`, `notes`, `location`, ...) set via `hardware-add-node`/
+        `hardware-update-node` are never touched, mirroring the Service
+        curated-field convention (`registry/reconcile.py`)."""
+        now = _utcnow()
+        discovered = {k: v for k, v in fields.items() if k in DISCOVERY_FIELDS}
+        existing = self.get_node(hostname)
+        if existing is None:
+            node = HardwareNode(
+                hostname=hostname,
+                display_name=hostname,
+                ansible_host=ansible_host,
+                ansible_groups=ansible_groups,
+                status=NodeStatus.confirmed,
+                last_confirmed_at=now,
+                last_seen_at=now,
+                manual=False,
+                **discovered,
+            )
+            return self.create_node(node, actor=actor)
+
+        updates: dict[str, Any] = {
+            **discovered,
+            "ansible_host": ansible_host,
+            "ansible_groups": ansible_groups,
+            "status": NodeStatus.confirmed,
+            "last_confirmed_at": now,
+            "last_seen_at": now,
+        }
+        updated = self.update_node(existing.id, updates, actor=actor)
+        assert updated is not None  # existing was just fetched above
+        return updated
 
     def get_node(self, id_or_hostname: str) -> HardwareNode | None:
         with Session(self.engine) as session:
