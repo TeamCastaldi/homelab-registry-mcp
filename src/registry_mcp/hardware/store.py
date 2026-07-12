@@ -189,8 +189,16 @@ class HardwareStore:
     def update_node(
         self, node_id: str, updates: dict[str, Any], actor: str = "manual"
     ) -> HardwareNode | None:
+        """`node_id` may be the UUID primary key or the hostname, matching
+        `get_node()` — a caller shouldn't need the internal UUID just to
+        patch a node it already knows by hostname."""
         with Session(self.engine) as session:
-            node = session.get(HardwareNode, node_id)
+            node = (
+                session.get(HardwareNode, node_id)
+                or session.exec(
+                    select(HardwareNode).where(HardwareNode.hostname == node_id)
+                ).first()
+            )
             if node is None:
                 return None
             for field, value in updates.items():
@@ -200,7 +208,7 @@ class HardwareStore:
                 if old == value:
                     continue
                 setattr(node, field, value)
-                self._record(session, node_id=node_id, field=field, old=old, new=value, actor=actor)
+                self._record(session, node_id=node.id, field=field, old=old, new=value, actor=actor)
             node.updated_at = _utcnow()
             session.add(node)
             session.commit()
@@ -208,13 +216,20 @@ class HardwareStore:
             return node
 
     def delete_node(self, node_id: str, actor: str = "manual") -> bool:
+        """`node_id` may be the UUID primary key or the hostname, matching
+        `get_node()`."""
         with Session(self.engine) as session:
-            node = session.get(HardwareNode, node_id)
+            node = (
+                session.get(HardwareNode, node_id)
+                or session.exec(
+                    select(HardwareNode).where(HardwareNode.hostname == node_id)
+                ).first()
+            )
             if node is None:
                 return False
             self._record(
                 session,
-                node_id=node_id,
+                node_id=node.id,
                 field=_HARDWARE_DELETED,
                 old=node.hostname,
                 new=None,

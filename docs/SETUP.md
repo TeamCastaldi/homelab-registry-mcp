@@ -163,11 +163,12 @@ to manage, rather than typing each one in by hand:
    is planned but not built yet — [ADR-001](ARDs/ADR-001-Homelab-Control-Plane.md)
    step 7). Run `scripts/setup-ansible-inventory.sh` from the control-plane
    node to bootstrap them: it seeds the inventory with the control-plane node
-   itself (auto-detected, connects locally rather than over SSH), then
-   prompts you for any other hosts to add — and for each one, runs
-   `ssh-copy-id` so its SSH key is actually authorized there (falling back to
-   printing the manual command if that fails). Idempotent — re-run it any
-   time to add more.
+   itself (auto-detected, connects over SSH to its own LAN IP like any other
+   host — so it needs its own key authorized on itself too), then prompts
+   you for any other hosts to add — and for each one, runs `ssh-copy-id` so
+   its SSH key is actually authorized there (falling back to printing the
+   manual command if that fails). Idempotent — re-run it any time to add
+   more.
 2. Set `ANSIBLE_CFG_PATH` and `SSH_KEY_PATH` in `.env` — the script prints the
    exact values to use — and recreate the container
    (`docker compose up -d --force-recreate`; a plain restart won't reread

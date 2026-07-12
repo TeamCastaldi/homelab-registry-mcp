@@ -102,6 +102,16 @@ def test_update_missing_node_returns_none(hardware_store):
     assert result is None
 
 
+def test_update_node_by_hostname(hardware_store):
+    """update_node accepts a hostname, matching get_node — a caller
+    shouldn't need the internal UUID just to patch a node it already
+    knows by hostname."""
+    hardware_store.create_node(_node())
+    updated = hardware_store.update_node("workload-01", {"display_name": "Updated"})
+    assert updated is not None
+    assert updated.display_name == "Updated"
+
+
 def test_delete_node(hardware_store):
     node = hardware_store.create_node(_node())
     assert hardware_store.delete_node(node.id) is True
@@ -110,6 +120,12 @@ def test_delete_node(hardware_store):
 
 def test_delete_missing_returns_false(hardware_store):
     assert hardware_store.delete_node("nonexistent") is False
+
+
+def test_delete_node_by_hostname(hardware_store):
+    hardware_store.create_node(_node())
+    assert hardware_store.delete_node("workload-01") is True
+    assert hardware_store.get_node("workload-01") is None
 
 
 def test_delete_preserves_events(hardware_store):

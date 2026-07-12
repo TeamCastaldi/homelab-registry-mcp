@@ -20,10 +20,13 @@
 #
 # Prompts for the SSH private key Ansible should use (default
 # ~/.ssh/id_ed25519, bootstrap.sh's default) and authorizes it (ssh-copy-id)
-# on every host you add — skipped for the control-plane's own entry, which
-# runs locally instead of over SSH. ssh-keygen only creates the key pair
-# locally; nothing else copies the public half to a target's
-# authorized_keys for you.
+# on every host you add — including the control-plane node's own entry,
+# which connects over SSH to its own LAN IP like any other host rather than
+# running locally: "local" execution runs inside whatever process is acting
+# as the controller, which is the registry-mcp *container* — gathering the
+# container's own ephemeral hostname/OS, not the physical machine's.
+# ssh-keygen only creates the key pair locally; nothing else copies the
+# public half to a target's authorized_keys for you.
 #
 # What it writes (inside SECRETS_REPO_PATH):
 #   ansible.cfg            — minimal defaults, points at ansible/inventory.yml.
@@ -154,40 +157,33 @@ fi
 # works because the file's shape is one this script fully controls
 # (a top-level `all:` with `hosts:`/`vars:` siblings at 2-space indent).
 # Hand-editing the file is fine as long as that shape stays intact.
-# $3 (optional) is one extra `key: value` line, used below to mark the
-# control-plane's own entry ansible_connection: local — SSH key-based auth
-# needs the *public* key manually copied to a target's authorized_keys
-# (ssh-keygen only creates the pair locally), and there's no reason to loop
-# an SSH connection back to the box Ansible is already running on.
 add_host() {
-    local name="$1" ip="$2" extra="${3:-}"
+    local name="$1" ip="$2"
     if grep -q "^    ${name}:\$" "$INVENTORY_FILE"; then
         warn "${name} is already in the inventory — skipping"
         return
     fi
-    awk -v name="$name" -v ip="$ip" -v extra="$extra" '
+    awk -v name="$name" -v ip="$ip" '
         { print }
-        /^  hosts:$/ && !done {
-            print "    " name ":"
-            print "      ansible_host: " ip
-            if (extra != "") print "      " extra
-            done=1
-        }
+        /^  hosts:$/ && !done { print "    " name ":"; print "      ansible_host: " ip; done=1 }
     ' "$INVENTORY_FILE" > "${INVENTORY_FILE}.tmp"
     mv "${INVENTORY_FILE}.tmp" "$INVENTORY_FILE"
     info "Added ${name} (${ip})"
 }
 
 # Seed with the control-plane node itself, so hardware-discover-now picks up
-# the box running registry-mcp without a manual prompt for it. Local, not
-# SSH — see add_host's comment above.
+# the box running registry-mcp without a manual prompt for it — over SSH to
+# its own LAN IP like any other host (see the file header comment for why
+# ansible_connection: local is wrong here: it would run inside the
+# registry-mcp container, not the physical machine).
 CP_HOSTNAME="$(hostname)"
 CP_IP="$(ip route get 8.8.8.8 2>/dev/null | awk '{print $7; exit}' || true)"
 if [ -z "$CP_IP" ]; then
     warn "Couldn't auto-detect this node's IP — enter it manually."
     prompt CP_IP "IP address of ${CP_HOSTNAME} (this node)"
 fi
-add_host "$CP_HOSTNAME" "$CP_IP" "ansible_connection: local"
+add_host "$CP_HOSTNAME" "$CP_IP"
+authorize_host "$CP_IP"
 
 echo ""
 echo "Now add any other hosts you want in the inventory (workload nodes, NAS, etc.)."
