@@ -8,11 +8,15 @@ ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
 
 # git-crypt for encrypted .env file management (Phase C secrets tools).
-# ansible-core for hardware-discover-now's `ansible ... -m setup` fact-gather
-# (Phase 9b) — the `setup` module it runs is a core module, so ansible-core
-# (not the much larger `ansible` community metapackage bootstrap.sh installs
-# on the host for the separate GitHub Actions runner) is enough here.
-RUN apt-get update && apt-get install -y --no-install-recommends git git-crypt ansible-core && rm -rf /var/lib/apt/lists/*
+# ansible-core is NOT installed here via apt deliberately: Debian's
+# ansible-core package depends on (and forks its workers under) the
+# distro's *system* Python — which drifted to 3.13 on this base image's
+# Debian snapshot, independent of and untested against the 3.12 this
+# project targets — and that pairing reproducibly crashed every
+# hardware-discover-now run with "A worker was found in a dead state".
+# It's a project dependency instead (see pyproject.toml), so it runs
+# under the exact same pinned, tested Python 3.12 as the rest of the app.
+RUN apt-get update && apt-get install -y --no-install-recommends git git-crypt && rm -rf /var/lib/apt/lists/*
 
 # uv for reproducible, fast dependency installs
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
