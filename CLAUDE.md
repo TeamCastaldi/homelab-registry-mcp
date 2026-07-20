@@ -56,7 +56,7 @@ src/registry_mcp/
 │   └── notification/      # NotificationProvider protocol + Ntfy/Smtp/Null + factory
 ├── integrations/
 │   ├── traefik/           # httpx client + 7 MCP tools + resource + prompt
-│   └── authentik/         # httpx client + 8 MCP tools + resource + prompt
+│   └── authentik/         # httpx client + 10 MCP tools + resource + prompt
 ├── tools/
 │   ├── registry.py        # CRUD: add/get/list/update/delete service
 │   ├── events.py          # query change + discovery logs
@@ -96,11 +96,12 @@ nodes, stored in the same SQLite database as services.
 - `HardwareNode` — one row per node: hostname, role (`pve_host`, `docker_host`, `nas`, `pi`, etc.),
   status (`confirmed`/`unconfirmed`/`stale`/`offline`), IP/MAC, CPU, RAM, GPU, structured disk and
   storage-pool lists, Ansible inventory fields, and a `HardwareChangeEvent` audit log.
-- 11 MCP tools: `hardware-add-node`, `hardware-get-node`, `hardware-list-nodes`,
+- 12 MCP tools: `hardware-add-node`, `hardware-get-node`, `hardware-list-nodes`,
   `hardware-update-node`, `hardware-delete-node`, `hardware-link-service`,
   `hardware-node-services`, `hardware-list-unconfirmed`, `hardware-list-stale`,
-  `hardware-capacity-summary`, and `hardware-discover-now` (Phase 9b — live Ansible
-  fact-gather).
+  `hardware-capacity-summary`, `hardware-discover-now` (Phase 9b — live Ansible
+  fact-gather), and `hardware-discovery-status` (node counts by status plus most
+  recent confirmation/sighting).
 - Two MCP resources: `hardware://all` (index) and `hardware://{node_id}` (detail).
 - Services can be manually linked to nodes via `hardware-link-service`; the link is
   surfaced in `service_get_full_context()`.
@@ -324,9 +325,9 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
 ## Current Status
 
 - **Phase 7 complete**: cross-source linking (Authentik ↔ Traefik ↔ Docker), `service_get_full_context()`, and the DSPy reasoning layer (`ResolveServiceIdentity`, `InferServiceMetadata`, `SummarizeAccessAudit`) — off by default via `DSPY_ENABLED`
-- **Phase 8 in progress**: security write path landed — `GenerateRemediationPatch`, Gitea + Ntfy/Smtp/Null providers, `Proposal` model/store, proposal engine (create + verification sweep), and the `proposal_*` tools. Off by default (`GIT_*` unset, `PROPOSAL_AUTO_CREATE=false`); see ADR-002.
+- **Phase 8 in progress**: security write path landed — `GenerateRemediationPatch`, Gitea + Ntfy/Smtp/Null providers, `Proposal` model/store, proposal engine (create + verification sweep), and the `proposal_*` tools. Off by default (`GIT_*` unset, `PROPOSAL_AUTO_CREATE=false`). No ADR currently documents this decision — `ADR-002` is unrelated (Web UI/Discord bot client interfaces; its Discord bot section was abandoned 2026-07-20).
 - **Phase 8 remaining**: normalization path (`NormalizeConfigFile`, yamllint, `proposal_normalize`); flipping `PROPOSAL_DRY_RUN=false` against the homelab repo (a deliberate human step); runbooks, cold-restore testing, Ansible provisioning. (GitHub provider landed — `GitHubGitProvider` alongside Gitea, selected via `GIT_PROVIDER=github`.)
-- **Phase 9a-9b complete**: hardware node registry — `HardwareNode` model + `HardwareStore` + 11 MCP tools registered in `server.py`; `hardware-discover-now` runs a live Ansible `setup` fact-gather against `ANSIBLE_CFG_PATH`'s inventory and upserts provenance fields (curated fields untouched). `scripts/setup-ansible-inventory.sh` bootstraps the `ansible.cfg`/inventory prerequisite itself (seeds the control-plane node, then prompts for more hosts) until the OOBE CLI replaces it.
+- **Phase 9a-9b complete**: hardware node registry — `HardwareNode` model + `HardwareStore` + 12 MCP tools registered in `server.py`; `hardware-discover-now` runs a live Ansible `setup` fact-gather against `ANSIBLE_CFG_PATH`'s inventory and upserts provenance fields (curated fields untouched). `scripts/setup-ansible-inventory.sh` bootstraps the `ansible.cfg`/inventory prerequisite itself (seeds the control-plane node, then prompts for more hosts) until the OOBE CLI replaces it.
 - **Phase C complete**: git-crypt secrets integration — 6 `secrets_*` MCP tools, `scripts/setup-homelab-repo.sh` bootstrap, `git-crypt` in Dockerfile. Path validation hardened against arbitrary file read/write via absolute paths (`check_path` in `gitcrypt.py`, shared with Phase 7 adoption); `setup-homelab-repo.sh` and `.env.example` work cross-platform (macOS/Linux/WSL), defaulting to `$HOME`-relative paths instead of `/opt/homelab`
 - **Phase D complete**: migrated registry-mcp off the workload node onto the dedicated control-plane node; Traefik static backend routes `registry-mcp.<your-domain>` → the control-plane node; GitHub Actions self-hosted runner operational; first automated CD deploy proven end-to-end; `docker-compose.yml` binds `0.0.0.0:8765`
 - **`docs/plans/updated-phases.md` Phases 1-6 complete** (separate numbering from the phases above): `scripts/install.sh` one-shot installer for a fresh control-plane node (Phase 1); `health.py` startup checks (Git repo/`ansible.cfg`/SSH key) + always-on `system_health_check` tool + read-only degradation of the GitOps write tools when unhealthy (Phase 2); conversational GitOps loop — `poll_pr_comments`/`apply_review_feedback` push a DSPy-generated revision commit in response to a trusted PR comment, gated by a fail-closed `PROPOSAL_COMMENT_ALLOWED_USERS` allowlist and the same confidence/YAML gates as initial patch generation (Phase 3); `ansible/roles/docker-stack-deploy` + reusable `.github/workflows/deploy.yml` — the deploy *action* ships here, each operator's private homelab repo supplies only the *config* and a thin caller workflow (Phase 4); `SmtpNotificationProvider` — templated HTML proposal email (PR summary, diff, Approve/Request Changes/View Diff buttons) via stdlib `smtplib`, validated against SMTP2GO, `NOTIFICATION_PROVIDER=smtp` (Phase 5); public release scrub — removed an accidentally-committed operator-specific `nodes/` config and genericized real hostnames/IPs/personal identifiers across scripts and docs (Phase 6)

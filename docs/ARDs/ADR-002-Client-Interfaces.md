@@ -8,6 +8,8 @@
 | **License** | MIT |
 | **Date** | 2026 |
 
+> **UPDATE (2026-07-20)** — The Discord bot (Section 5) is an abandoned idea; do not resource it. The Web UI (Section 4) is unaffected and remains PROPOSED.
+
 ---
 
 ## 1. Purpose
@@ -110,6 +112,8 @@ Phase 1 and Phase 2 decisions should not be made in ways that foreclose Phase 3.
 
 ## 5. Discord Bot
 
+> **ABANDONED (2026-07-20)** — This section is kept as a historical record only. The Discord bot is no longer planned; `github.com/TeamCastaldi/frank-discord` is not being migrated or built out further. Sections 6, 8, and 9 below have been annotated accordingly — treat any Discord-bot item in this ADR as cancelled, not as a live plan.
+
 ### 5.1 Repository and Image
 
 | | |
@@ -199,9 +203,9 @@ Both interfaces are optional OOBE steps. The operator is asked about each after 
 | # | OOBE Question / Action | Result |
 |---|---|---|
 | **16** | Would you like to enable the web UI? | Yes: confirm `/ui` is accessible, note the URL. No: skip. Web UI is bundled in the MCP image — no additional setup required. |
-| **17** | Would you like to set up the Discord bot? | Yes: collect bot token, guild ID, and notification channel ID. Pull and start the bot container. Verify it connects and responds to `!health`. |
+| ~~**17**~~ | ~~Would you like to set up the Discord bot?~~ | **Abandoned — step removed from the OOBE flow.** The Discord bot is not being built; do not implement this step. |
 
-Both steps are numbered as continuations of the 15-step OOBE flow defined in ADR-001 Section 5.1.
+Step 16 is numbered as a continuation of the 15-step OOBE flow defined in ADR-001 Section 5.1.
 
 ---
 
@@ -250,9 +254,9 @@ These phases are sequenced after ADR-001 Phase H (public release of the core MCP
 | Phase | Name | Scope | Depends on |
 |---|---|---|---|
 | **I** | Web UI — Phase 1 | React scaffold, read-only status dashboard, bundled into MCP image, accessible at `/ui` | ADR-001 Phase H |
-| **J** | Discord Bot Migration | Refactor to MCP API calls, apply formatting standards, repo transfer to TeamCastaldi, public release prep | ADR-001 Phase H |
+| ~~**J**~~ | ~~Discord Bot Migration~~ **(ABANDONED)** | Refactor to MCP API calls, apply formatting standards, repo transfer to TeamCastaldi, public release prep | ADR-001 Phase H |
 | **K** | Web UI — Phase 2 | Interactive controls: proposal approval, discovery triggers, service management | I |
-| **L** | Discord Bot — Notifications | Push notifications from MCP to Discord channel for proposals, stale services, discovery failures | J |
+| ~~**L**~~ | ~~Discord Bot — Notifications~~ **(ABANDONED)** | Push notifications from MCP to Discord channel for proposals, stale services, discovery failures | J |
 | **M** | Web UI — Phase 3 | Conversational interface. Design and implementation pending resolution of Open Questions 1 and 2. | K + OQ 1, 2 |
 
 > **NOTE** — Phase M (Web UI Phase 3) is blocked on the open questions about model credentials and API architecture. It should not be scoped until those questions are resolved. Phases I through L can proceed independently.
