@@ -1,7 +1,26 @@
 FROM python:3.12-slim
 
-# git-crypt for encrypted .env file management (Phase C secrets tools)
-RUN apt-get update && apt-get install -y --no-install-recommends git git-crypt && rm -rf /var/lib/apt/lists/*
+# ansible-core's forked worker processes crash immediately ("ERROR! A worker
+# was found in a dead state") without a UTF-8 locale, and python:3.12-slim
+# sets none by default. C.UTF-8 is glibc's built-in locale — no `locales`
+# package/locale-gen needed.
+ENV LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
+
+# git-crypt for encrypted .env file management (Phase C secrets tools).
+# openssh-client so ansible-core's ssh connection plugin has an `ssh`
+# binary to shell out to — it was previously along for the ride as a
+# transitive dependency of Debian's ansible-core apt package; removing
+# that apt package (see pyproject.toml) took the ssh client with it.
+# ansible-core is NOT installed here via apt deliberately: Debian's
+# ansible-core package depends on (and forks its workers under) the
+# distro's *system* Python — which drifted to 3.13 on this base image's
+# Debian snapshot, independent of and untested against the 3.12 this
+# project targets — and that pairing reproducibly crashed every
+# hardware-discover-now run with "A worker was found in a dead state".
+# It's a project dependency instead (see pyproject.toml), so it runs
+# under the exact same pinned, tested Python 3.12 as the rest of the app.
+RUN apt-get update && apt-get install -y --no-install-recommends git git-crypt openssh-client && rm -rf /var/lib/apt/lists/*
 
 # uv for reproducible, fast dependency installs
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/

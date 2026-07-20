@@ -17,6 +17,7 @@ dependencies = [
     "apscheduler>=3.10",
     "docker>=7.0",
     "dspy>=2.6",
+    "ansible-core>=2.21.1",
 ]
 
 [project.scripts]

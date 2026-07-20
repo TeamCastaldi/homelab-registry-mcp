@@ -102,6 +102,16 @@ def test_update_missing_node_returns_none(hardware_store):
     assert result is None
 
 
+def test_update_node_by_hostname(hardware_store):
+    """update_node accepts a hostname, matching get_node — a caller
+    shouldn't need the internal UUID just to patch a node it already
+    knows by hostname."""
+    hardware_store.create_node(_node())
+    updated = hardware_store.update_node("workload-01", {"display_name": "Updated"})
+    assert updated is not None
+    assert updated.display_name == "Updated"
+
+
 def test_delete_node(hardware_store):
     node = hardware_store.create_node(_node())
     assert hardware_store.delete_node(node.id) is True
@@ -110,6 +120,12 @@ def test_delete_node(hardware_store):
 
 def test_delete_missing_returns_false(hardware_store):
     assert hardware_store.delete_node("nonexistent") is False
+
+
+def test_delete_node_by_hostname(hardware_store):
+    hardware_store.create_node(_node())
+    assert hardware_store.delete_node("workload-01") is True
+    assert hardware_store.get_node("workload-01") is None
 
 
 def test_delete_preserves_events(hardware_store):
@@ -211,7 +227,7 @@ def test_discovery_status_counts_by_status(hardware_store):
     summary = summarize_discovery_status(hardware_store.list_nodes())
     assert summary["total_nodes"] == 3
     assert summary["by_status"] == {"confirmed": 1, "unconfirmed": 1, "stale": 1}
-    assert summary["push_discovery"] == "not_implemented (Phase 9b)"
+    assert summary["push_discovery"] == "implemented (hardware-discover-now)"
 
 
 def test_discovery_status_reports_latest_timestamps():
@@ -237,6 +253,81 @@ def test_discovery_status_empty_registry():
     assert summary["total_nodes"] == 0
     assert summary["by_status"] == {}
     assert summary["last_confirmed_at"] is None
+
+
+def test_upsert_from_discovery_creates_new_node(hardware_store):
+    node = hardware_store.upsert_from_discovery(
+        hostname="nas",
+        ansible_host="10.0.0.5",
+        ansible_groups=["nas_hosts"],
+        fields={"ip_address": "10.0.0.5", "ram_gb": 32.0},
+    )
+    assert node.hostname == "nas"
+    assert node.display_name == "nas"
+    assert node.status == NodeStatus.confirmed
+    assert node.manual is False
+    assert node.ram_gb == 32.0
+    assert node.last_confirmed_at is not None
+    assert node.last_seen_at is not None
+
+
+def test_upsert_from_discovery_updates_existing_node(hardware_store):
+    hardware_store.create_node(
+        _node(
+            hostname="nas",
+            display_name="My NAS",
+            tags=["storage"],
+            notes="curated by hand",
+        )
+    )
+    updated = hardware_store.upsert_from_discovery(
+        hostname="nas",
+        ansible_host="10.0.0.5",
+        ansible_groups=[],
+        fields={"ram_gb": 64.0, "cpu_cores": 8},
+    )
+    assert updated.ram_gb == 64.0
+    assert updated.cpu_cores == 8
+    assert updated.status == NodeStatus.confirmed
+    # Curated fields untouched by discovery.
+    assert updated.display_name == "My NAS"
+    assert updated.tags == ["storage"]
+    assert updated.notes == "curated by hand"
+
+
+def test_upsert_from_discovery_ignores_unmapped_fields(hardware_store):
+    node = hardware_store.upsert_from_discovery(
+        hostname="nas",
+        ansible_host="10.0.0.5",
+        ansible_groups=[],
+        fields={"display_name": "should not be set", "role": "pve_host"},
+    )
+    assert node.display_name == "nas"
+    assert node.role == NodeRole.other
+
+
+def test_upsert_from_discovery_preserves_groups_when_none(hardware_store):
+    hardware_store.upsert_from_discovery(
+        hostname="nas",
+        ansible_host="10.0.0.5",
+        ansible_groups=["nas_hosts"],
+        fields={},
+    )
+    updated = hardware_store.upsert_from_discovery(
+        hostname="nas",
+        ansible_host="10.0.0.5",
+        ansible_groups=None,
+        fields={"ram_gb": 64.0},
+    )
+    assert updated.ansible_groups == ["nas_hosts"]
+    assert updated.ram_gb == 64.0
+
+
+def test_upsert_from_discovery_new_node_defaults_groups_to_empty(hardware_store):
+    node = hardware_store.upsert_from_discovery(
+        hostname="nas", ansible_host="10.0.0.5", ansible_groups=None, fields={}
+    )
+    assert node.ansible_groups == []
 
 
 def test_storage_disk_model():

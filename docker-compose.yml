@@ -25,6 +25,12 @@ services:
       # Read-only Docker socket: lets DockerDiscoverySource enumerate containers
       # with traefik.enable=true. Discovery is gated on DOCKER_BASE_URL below.
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      # SSH private key Ansible uses to reach workload nodes (hardware-discover-now's
+      # fact-gather + Phase 7 adoption's SSH inspection) — same path in and out, like
+      # /opt/homelab above, so it must match SSH_KEY_PATH in .env exactly. Falls back
+      # to a harmless /dev/null-onto-itself mount when SSH_KEY_PATH is unset, so this
+      # line is a no-op for operators not using either feature.
+      - ${SSH_KEY_PATH:-/dev/null}:${SSH_KEY_PATH:-/dev/null}:ro
 
 volumes:
   registry-data:

@@ -117,7 +117,7 @@ def build_server(settings: Settings | None = None) -> FastMCP:
     register_authentik_tools(mcp, settings, reasoner=reasoner)
     register_discovery_tools(mcp, engine)
     register_linking_tools(mcp, store, settings, hardware_store=hardware_store)
-    register_hardware_tools(mcp, store, hardware_store)
+    register_hardware_tools(mcp, store, hardware_store, settings, read_only=read_only)
     register_proposal_tools(
         mcp, proposal_engine, proposal_store, engine, store, read_only=read_only
     )

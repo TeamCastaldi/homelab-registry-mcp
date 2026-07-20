@@ -7,16 +7,20 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from registry_mcp.config import Settings
+from registry_mcp.hardware import ansible_facts
 from registry_mcp.hardware.store import DuplicateNodeError, HardwareStore
+from registry_mcp.logging import get_logger
 from registry_mcp.models.hardware import HardwareNode, NodeRole
 from registry_mcp.registry import RegistryStore
+
+_log = get_logger("tools.hardware")
 
 
 def summarize_discovery_status(nodes: list[HardwareNode]) -> dict[str, Any]:
     """Aggregate registry state for ``hardware-discovery-status``: node counts by
     status and the most recent confirmation/sighting. Pure function over a node
-    list so it can be unit-tested without the MCP server. Live push-mode
-    fact-gather remains Phase 9b."""
+    list so it can be unit-tested without the MCP server."""
     by_status: dict[str, int] = {}
     last_confirmed: datetime | None = None
     last_seen: datetime | None = None
@@ -37,12 +41,82 @@ def summarize_discovery_status(nodes: list[HardwareNode]) -> dict[str, Any]:
         "by_status": by_status,
         "last_confirmed_at": last_confirmed.isoformat() if last_confirmed else None,
         "last_seen_at": last_seen.isoformat() if last_seen else None,
-        "push_discovery": "not_implemented (Phase 9b)",
+        "push_discovery": "implemented (hardware-discover-now)",
+    }
+
+
+def _discover_now_unavailable(settings: Settings) -> str | None:
+    """Return an error message if live Ansible fact-gather can't run."""
+    if not settings.ansible_cfg_path:
+        return "ANSIBLE_CFG_PATH is not configured (needed to reach the operator's inventory)."
+    if not settings.ssh_key_path:
+        return "SSH_KEY_PATH is not configured (needed to SSH into inventory hosts)."
+    return None
+
+
+async def discover_now(
+    hardware_store: HardwareStore,
+    settings: Settings,
+    host: str | None = None,
+) -> dict[str, Any]:
+    """Run one live Ansible fact-gather pass and upsert results into the
+    hardware registry. Pulled out of the tool closure so it's unit-testable
+    without a running FastMCP server."""
+    pattern = host or "all"
+    # discover_now() is called directly by tests as well as the tool wrapper
+    # (which gates on _discover_now_unavailable() first), so this is a real
+    # check, not just documentation of a caller invariant.
+    if err := _discover_now_unavailable(settings):
+        return {"status": "error", "error": err}
+    ansible_cfg_path = settings.ansible_cfg_path
+    ssh_key_path = settings.ssh_key_path
+    assert ansible_cfg_path is not None and ssh_key_path is not None  # checked above
+    try:
+        facts_by_host, failures = await ansible_facts.gather_facts(
+            pattern=pattern,
+            ansible_cfg_path=ansible_cfg_path,
+            ssh_key_path=ssh_key_path,
+            ssh_user=settings.ssh_default_user,
+        )
+    except ansible_facts.AnsibleFactsError as exc:
+        return {"status": "error", "error": str(exc)}
+
+    created: list[str] = []
+    updated: list[str] = []
+    for inventory_host, facts in facts_by_host.items():
+        hostname = ansible_facts.hostname_from_facts(facts) or inventory_host
+        fields = ansible_facts.node_fields_from_facts(facts)
+        was_new = hardware_store.get_node(hostname) is None
+        node = hardware_store.upsert_from_discovery(
+            hostname=hostname,
+            ansible_host=inventory_host,
+            # The ad-hoc `ansible -m setup` pass doesn't expose inventory
+            # group membership, so leave an existing node's groups alone
+            # (see HardwareStore.upsert_from_discovery) instead of clobbering
+            # them with an empty list every pass.
+            ansible_groups=None,
+            fields=fields,
+        )
+        (created if was_new else updated).append(node.hostname)
+
+    if failures:
+        _log.warning("hardware_discover_now_failures", pattern=pattern, failures=failures)
+
+    return {
+        "status": "ok",
+        "pattern": pattern,
+        "nodes_created": created,
+        "nodes_updated": updated,
+        "failures": failures,
     }
 
 
 def register_hardware_tools(
-    mcp: FastMCP, store: RegistryStore, hardware_store: HardwareStore
+    mcp: FastMCP,
+    store: RegistryStore,
+    hardware_store: HardwareStore,
+    settings: Settings,
+    read_only: bool = False,
 ) -> None:
     """Register hardware node CRUD and linking tools."""
 
@@ -138,17 +212,27 @@ def register_hardware_tools(
         return hardware_store.capacity_summary()
 
     @mcp.tool(name="hardware-discover-now")
-    def hardware_discover_now(host: str | None = None) -> dict[str, Any]:
-        """Trigger a live Ansible fact-gather for one or all nodes. (Phase 9b — not implemented.)"""
-        return {
-            "status": "not_implemented",
-            "message": "Push-mode discovery is Phase 9b. Use hardware-add-node to register nodes.",
-        }
+    async def hardware_discover_now(host: str | None = None) -> dict[str, Any]:
+        """Run a live Ansible fact-gather pass (`ansible <host|all> -m setup`)
+        against the operator's own inventory (`ANSIBLE_CFG_PATH`) and upsert
+        the results into the hardware registry. Only provenance fields are
+        written — curated fields (display_name, role, tags, notes, ...) are
+        untouched. Pass `host` to target one inventory host/group; omit it to
+        probe the whole inventory."""
+        if read_only:
+            return {
+                "status": "error",
+                "error": "Server is in read-only mode (startup health check failed). "
+                "Run system_health_check for details.",
+            }
+        # discover_now() re-checks ANSIBLE_CFG_PATH/SSH_KEY_PATH itself and
+        # returns the same {"status": "error", ...} shape either way.
+        return await discover_now(hardware_store, settings, host)
 
     @mcp.tool(name="hardware-discovery-status")
     def hardware_discovery_status() -> dict[str, Any]:
         """Summarize hardware registry state: node counts by status and the most
-        recent confirmation/sighting. Live push-mode fact-gather is Phase 9b."""
+        recent confirmation/sighting."""
         return summarize_discovery_status(hardware_store.list_nodes())
 
     @mcp.resource("hardware://all")

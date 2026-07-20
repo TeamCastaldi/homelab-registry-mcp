@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlmodel import Session, SQLModel, col, select
 
+from registry_mcp.hardware.ansible_facts import DISCOVERY_FIELDS
 from registry_mcp.logging import get_logger
 from registry_mcp.models.hardware import (
     HardwareChangeEvent,
@@ -109,6 +110,55 @@ class HardwareStore:
             session.refresh(node)
             return node
 
+    def upsert_from_discovery(
+        self,
+        *,
+        hostname: str,
+        ansible_host: str,
+        ansible_groups: list[str] | None,
+        fields: dict[str, Any],
+        actor: str = "ansible",
+    ) -> HardwareNode:
+        """Create or refresh a node from a live Ansible fact-gather pass
+        (Phase 9b). Only provenance fields (`DISCOVERY_FIELDS`, plus
+        `ansible_host`/`ansible_groups`/`status`/`last_confirmed_at`/
+        `last_seen_at`) are written — curated fields (`display_name`, `role`,
+        `tags`, `notes`, `location`, ...) set via `hardware-add-node`/
+        `hardware-update-node` are never touched, mirroring the Service
+        curated-field convention (`registry/reconcile.py`). `ansible_groups`
+        is `None` when the caller has no group membership to report (the
+        ad-hoc `ansible ... -m setup` pass doesn't expose it) — that leaves
+        an existing node's groups untouched rather than clobbering them with
+        an empty list on every pass; a new node still gets `[]`."""
+        now = _utcnow()
+        discovered = {k: v for k, v in fields.items() if k in DISCOVERY_FIELDS}
+        existing = self.get_node(hostname)
+        if existing is None:
+            node = HardwareNode(
+                hostname=hostname,
+                display_name=hostname,
+                ansible_host=ansible_host,
+                ansible_groups=ansible_groups or [],
+                status=NodeStatus.confirmed,
+                last_confirmed_at=now,
+                last_seen_at=now,
+                manual=False,
+                **discovered,
+            )
+            return self.create_node(node, actor=actor)
+
+        updates: dict[str, Any] = {
+            **discovered,
+            "ansible_host": ansible_host,
+            "ansible_groups": ansible_groups,
+            "status": NodeStatus.confirmed,
+            "last_confirmed_at": now,
+            "last_seen_at": now,
+        }
+        updated = self.update_node(existing.id, updates, actor=actor)
+        assert updated is not None  # existing was just fetched above
+        return updated
+
     def get_node(self, id_or_hostname: str) -> HardwareNode | None:
         with Session(self.engine) as session:
             node = session.get(HardwareNode, id_or_hostname)
@@ -139,8 +189,16 @@ class HardwareStore:
     def update_node(
         self, node_id: str, updates: dict[str, Any], actor: str = "manual"
     ) -> HardwareNode | None:
+        """`node_id` may be the UUID primary key or the hostname, matching
+        `get_node()` — a caller shouldn't need the internal UUID just to
+        patch a node it already knows by hostname."""
         with Session(self.engine) as session:
-            node = session.get(HardwareNode, node_id)
+            node = (
+                session.get(HardwareNode, node_id)
+                or session.exec(
+                    select(HardwareNode).where(HardwareNode.hostname == node_id)
+                ).first()
+            )
             if node is None:
                 return None
             for field, value in updates.items():
@@ -150,7 +208,7 @@ class HardwareStore:
                 if old == value:
                     continue
                 setattr(node, field, value)
-                self._record(session, node_id=node_id, field=field, old=old, new=value, actor=actor)
+                self._record(session, node_id=node.id, field=field, old=old, new=value, actor=actor)
             node.updated_at = _utcnow()
             session.add(node)
             session.commit()
@@ -158,13 +216,20 @@ class HardwareStore:
             return node
 
     def delete_node(self, node_id: str, actor: str = "manual") -> bool:
+        """`node_id` may be the UUID primary key or the hostname, matching
+        `get_node()`."""
         with Session(self.engine) as session:
-            node = session.get(HardwareNode, node_id)
+            node = (
+                session.get(HardwareNode, node_id)
+                or session.exec(
+                    select(HardwareNode).where(HardwareNode.hostname == node_id)
+                ).first()
+            )
             if node is None:
                 return False
             self._record(
                 session,
-                node_id=node_id,
+                node_id=node.id,
                 field=_HARDWARE_DELETED,
                 old=node.hostname,
                 new=None,
