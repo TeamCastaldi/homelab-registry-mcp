@@ -38,6 +38,10 @@ query and act on.
 - Manages encrypted secrets in the homelab Git repo via `git-crypt`: read, add,
   rotate, and list keys in `.env` files without the operator touching the command
   line.
+- Adopts a live, hand-run Docker service into GitOps management: SSHes into its
+  host, sanitizes hardcoded secrets out of the original compose file, and pauses
+  for you to choose whether to keep or rotate them before a PR is opened —
+  nothing is committed until you decide.
 - Closes the loop after a human merges a PR: a reusable GitHub Actions workflow
   and Ansible role (shipped here — your private homelab repo only holds config)
   redeploy the affected compose stack automatically.
