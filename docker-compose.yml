@@ -32,5 +32,160 @@ services:
       # line is a no-op for operators not using either feature.
       - ${SSH_KEY_PATH:-/dev/null}:${SSH_KEY_PATH:-/dev/null}:ro
 
+  # =====================================================================
+  # ADR-005 monitoring/alerting/ingress stack. Enabled by adding "monitoring"
+  # to COMPOSE_PROFILES in .env (scripts/install.sh does this when the
+  # relevant prompts aren't skipped) so a bare `docker compose up -d` with no
+  # profile set only brings up homelab-registry-mcp, unchanged from before.
+  # =====================================================================
+
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    container_name: docker-socket-proxy
+    restart: unless-stopped
+    profiles: ["monitoring"]
+    environment:
+      # Read-only, container-list/inspect only — least privilege for the
+      # monitoring stack's three consumers (ADR-005 §4).
+      CONTAINERS: 1
+      IMAGES: 1
+      INFO: 1
+      POST: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "127.0.0.1:2375:2375"
+
+  beszel-agent:
+    image: henrygd/beszel-agent:latest
+    container_name: beszel-agent
+    restart: unless-stopped
+    profiles: ["monitoring"]
+    network_mode: host
+    environment:
+      LISTEN: 45876
+      KEY: ${BESZEL_AGENT_KEY:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  gatus:
+    image: twinproduction/gatus:latest
+    container_name: gatus
+    restart: unless-stopped
+    profiles: ["monitoring"]
+    env_file:
+      - .env
+    ports:
+      - "0.0.0.0:8081:8080"
+    volumes:
+      - ./monitoring/gatus/config.yml:/config/config.yaml:ro
+      - gatus-data:/data
+
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: dozzle
+    restart: unless-stopped
+    profiles: ["monitoring"]
+    environment:
+      DOZZLE_REMOTE_HOST: "tcp://docker-socket-proxy:2375"
+    ports:
+      - "0.0.0.0:8082:8080"
+    depends_on:
+      - docker-socket-proxy
+
+  wud:
+    image: getwud/wud:latest
+    container_name: wud
+    restart: unless-stopped
+    profiles: ["monitoring"]
+    environment:
+      WUD_WATCHER_LOCAL_DOCKER_HOST: "docker-socket-proxy"
+      WUD_WATCHER_LOCAL_DOCKER_PORT: "2375"
+      # HTTP trigger → registry's WUD webhook listener (ADR-005 §5). Must
+      # match WUD_WEBHOOK_PATH / WUD_WEBHOOK_SECRET in .env.
+      WUD_TRIGGER_HTTP_REGISTRY_URL: "http://homelab-registry-mcp:8765${WUD_WEBHOOK_PATH:-/webhooks/wud}"
+      WUD_TRIGGER_HTTP_REGISTRY_AUTH_BEARER_TOKEN: ${WUD_WEBHOOK_SECRET:-}
+      WUD_TRIGGER_HTTP_REGISTRY_METHOD: POST
+    ports:
+      - "0.0.0.0:3001:3000"
+    volumes:
+      - wud-data:/store
+    depends_on:
+      - docker-socket-proxy
+      - homelab-registry-mcp
+
+  homepage:
+    image: ghcr.io/gethomepage/homepage:latest
+    container_name: homepage
+    restart: unless-stopped
+    profiles: ["monitoring"]
+    environment:
+      HOMEPAGE_VAR_HOST: ${CONTROL_PLANE_HOST:-localhost}
+    ports:
+      - "0.0.0.0:3000:3000"
+    volumes:
+      - ./monitoring/homepage:/app/config:ro
+
+  glance:
+    image: glanceapp/glance:latest
+    container_name: glance
+    restart: unless-stopped
+    profiles: ["monitoring"]
+    ports:
+      - "0.0.0.0:8083:8080"
+    volumes:
+      - ./monitoring/glance/glance.yml:/app/config/glance.yml:ro
+
+  # Out-of-band dead man's switch (ADR-005 §1): a local heartbeat to
+  # Healthchecks.io. A no-op when HEALTHCHECKS_PING_URL is unset.
+  healthchecks-ping:
+    image: busybox:latest
+    container_name: healthchecks-ping
+    restart: unless-stopped
+    profiles: ["monitoring"]
+    environment:
+      HEALTHCHECKS_PING_URL: ${HEALTHCHECKS_PING_URL:-}
+    command:
+      - sh
+      - -c
+      - 'while true; do [ -n "$$HEALTHCHECKS_PING_URL" ] && wget -q -T 10 -O- "$$HEALTHCHECKS_PING_URL" >/dev/null 2>&1; sleep 300; done'
+
+  # Cross-node ingress (ADR-005 §4). Requires Node B's Traefik/Redis details —
+  # opt in separately via the "cross-node-ingress" profile so a first install
+  # isn't blocked on a second node existing yet.
+  traefik-kop:
+    image: ghcr.io/jittering/traefik-kop:latest
+    container_name: traefik-kop
+    restart: unless-stopped
+    profiles: ["cross-node-ingress"]
+    environment:
+      DOCKER_HOST: "tcp://docker-socket-proxy:2375"
+      REDIS_ADDR: ${TRAEFIK_KOP_REDIS_HOST:-}
+      REDIS_PASSWORD: ${TRAEFIK_KOP_REDIS_PASSWORD:-}
+      TRAEFIK_KOP_HOST_IP: ${CONTROL_PLANE_HOST:-}
+    depends_on:
+      - docker-socket-proxy
+
+  # Disaster recovery (ADR-005 §2). Requires a backup target — opt in
+  # separately via the "backup" profile.
+  autorestic:
+    image: cupcakearmy/autorestic:latest
+    container_name: autorestic
+    restart: unless-stopped
+    profiles: ["backup"]
+    environment:
+      AUTORESTIC_BACKUP_TARGET: ${AUTORESTIC_BACKUP_TARGET:-}
+    volumes:
+      - /opt/homelab:/data/homelab:ro
+      - registry-data:/data/registry-data:ro
+      - autorestic-config:/root/.autorestic
+    command:
+      - sh
+      - -c
+      - "while true; do autorestic backup -a --ci; sleep 86400; done"
+
 volumes:
   registry-data:
+  gatus-data:
+  wud-data:
+  autorestic-config:

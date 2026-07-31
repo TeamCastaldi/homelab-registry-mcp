@@ -12,11 +12,13 @@ exactly what gets installed and what you'll be prompted for — see
 
 - **`install.sh`** — the recommended one-shot entry point for a fresh control-plane
   node: sparse-clones root-level files (`docker-compose.yml`, `.env.example`, etc.)
-  plus `scripts/`, skipping `src/`, `ansible/`, `tests/`, and other build/CI-time
+  plus `scripts/` and `monitoring/` (config for the ADR-005 stack below),
+  skipping `src/`, `ansible/`, `tests/`, and other build/CI-time
   directories (the app runs from the GHCR image, not a source checkout), runs
   `bootstrap.sh --skip-network`,
-  prompts for the Git secrets and an optional DSPy opt-in, writes `.env`, brings
-  the MCP server up with `docker compose up -d`, and only then applies the
+  prompts for the Git secrets, an optional DSPy opt-in, and an optional
+  ADR-005 monitoring stack, writes `.env`, brings everything enabled up
+  together with `docker compose up -d`, and only then applies the
   static IP (`bootstrap.sh --network-only`) so the server is already running
   when the SSH session drops. Designed to be run via
   `curl -fsSL <raw-url>/scripts/install.sh | bash`; every prompt can be pre-seeded
@@ -24,6 +26,19 @@ exactly what gets installed and what you'll be prompted for — see
   Assumes a greenfield setup — it deliberately doesn't ask about Traefik or
   Authentik, since a fresh homelab won't have those yet. Connect them later via
   the `discovery_connect_traefik` / `discovery_connect_authentik` MCP tools.
+  - **ADR-005 monitoring stack prompt**: opting in adds `monitoring` to
+    `COMPOSE_PROFILES` in `.env`, which is what actually turns on the extra
+    services in `docker-compose.yml` (Beszel, Gatus, Dozzle, WUD,
+    `docker-socket-proxy`, Homepage, Glance) — `docker compose up -d` reads
+    `COMPOSE_PROFILES` from the same `.env` automatically. A random
+    `WUD_WEBHOOK_SECRET` is generated if you leave it blank, since WUD needs
+    it to call back into `homelab-registry-mcp`'s `/webhooks/wud` route.
+    Cross-node ingress (`traefik-kop`) and scheduled backups (`autorestic`)
+    are separate follow-up prompts behind their own `cross-node-ingress` /
+    `backup` profiles, since both need details (a second node, a backup
+    target) a first install on a single Pi won't have yet — safe to skip and
+    re-run `install.sh` later once you do (re-running against an existing
+    `.env` leaves it untouched; edit it by hand to add these afterward).
 - **`bootstrap.sh`** — prepares a fresh node for the homelab control plane:
   installs Docker, Ansible, `uv`, `git-crypt`, and the GitHub CLI, sets the
   hostname, generates an SSH key, and applies a static IP. Supports Debian and

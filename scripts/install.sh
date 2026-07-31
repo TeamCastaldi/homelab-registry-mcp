@@ -155,9 +155,9 @@ else
     # cone-mode sparse-checkout gets root-level files (docker-compose.yml,
     # .env.example, etc.) for free and adds just scripts/ — skipping src/,
     # ansible/, tests/, and the rest, which are build/CI-time only.
-    action "Cloning ${REPO_URL} into ${INSTALL_DIR} (sparse: root-level files + scripts/, skipping src/, ansible/, tests/, etc.)..."
+    action "Cloning ${REPO_URL} into ${INSTALL_DIR} (sparse: root-level files + scripts/ + monitoring/, skipping src/, ansible/, tests/, etc.)..."
     git clone --filter=blob:none --sparse "$REPO_URL" "$INSTALL_DIR"
-    git -C "$INSTALL_DIR" sparse-checkout set scripts
+    git -C "$INSTALL_DIR" sparse-checkout set scripts monitoring
     info "Cloned to ${INSTALL_DIR}"
 fi
 
@@ -218,6 +218,43 @@ if [ "$DSPY_ENABLED" != "true" ]; then
     fi
 fi
 
+echo ""
+echo "ADR-005 monitoring/alerting/ingress stack (Beszel, Gatus, Dozzle, WUD,"
+echo "Homepage, Glance) — press Enter to skip and bring up only"
+echo "homelab-registry-mcp, same as before."
+echo ""
+
+COMPOSE_PROFILES="${COMPOSE_PROFILES:-}"
+read -rp "Enable the ADR-005 monitoring stack alongside the registry? [y/N]: " enable_monitoring
+if [[ "$enable_monitoring" =~ ^[Yy]$ ]]; then
+    COMPOSE_PROFILES="monitoring${COMPOSE_PROFILES:+,${COMPOSE_PROFILES}}"
+    prompt CONTROL_PLANE_HOST "This node's LAN IP or hostname (for Homepage links)"
+    prompt HEALTHCHECKS_PING_URL "Healthchecks.io ping URL (dead man's switch, blank to skip)"
+    prompt BESZEL_AGENT_KEY "Beszel hub's agent public key (blank if you haven't set up the hub yet)"
+
+    WUD_WEBHOOK_ENABLED=true
+    prompt_secret WUD_WEBHOOK_SECRET "WUD webhook shared secret (blank to auto-generate)"
+    if [ -z "${WUD_WEBHOOK_SECRET:-}" ]; then
+        WUD_WEBHOOK_SECRET="$(openssl rand -hex 32)"
+        info "Generated a random WUD webhook secret"
+    fi
+
+    read -rp "Also enable cross-node ingress (traefik-kop, requires a Node B already running Traefik+Redis)? [y/N]: " enable_kop
+    if [[ "$enable_kop" =~ ^[Yy]$ ]]; then
+        COMPOSE_PROFILES="${COMPOSE_PROFILES},cross-node-ingress"
+        prompt TRAEFIK_KOP_REDIS_HOST "Node B Redis address (host:port)"
+        prompt_secret TRAEFIK_KOP_REDIS_PASSWORD "Node B Redis password"
+    fi
+
+    read -rp "Also enable scheduled backups (Autorestic, requires a backup target)? [y/N]: " enable_backup
+    if [[ "$enable_backup" =~ ^[Yy]$ ]]; then
+        COMPOSE_PROFILES="${COMPOSE_PROFILES},backup"
+        prompt AUTORESTIC_BACKUP_TARGET "Autorestic backup target (e.g. s3:bucket, b2:bucket, sftp:host:/path)"
+    fi
+else
+    WUD_WEBHOOK_ENABLED=false
+fi
+
 # =============================================================================
 # STEP 4: WRITE .env
 # =============================================================================
@@ -244,6 +281,15 @@ else
     set_env GIT_BASE_URL "${GIT_BASE_URL:-}" true
     set_env DSPY_ENABLED "${DSPY_ENABLED}"
     set_env ANTHROPIC_API_KEY "${ANTHROPIC_API_KEY:-}" true
+    set_env COMPOSE_PROFILES "${COMPOSE_PROFILES:-}" true
+    set_env WUD_WEBHOOK_ENABLED "${WUD_WEBHOOK_ENABLED}"
+    set_env WUD_WEBHOOK_SECRET "${WUD_WEBHOOK_SECRET:-}" true
+    set_env CONTROL_PLANE_HOST "${CONTROL_PLANE_HOST:-}" true
+    set_env HEALTHCHECKS_PING_URL "${HEALTHCHECKS_PING_URL:-}" true
+    set_env BESZEL_AGENT_KEY "${BESZEL_AGENT_KEY:-}" true
+    set_env TRAEFIK_KOP_REDIS_HOST "${TRAEFIK_KOP_REDIS_HOST:-}" true
+    set_env TRAEFIK_KOP_REDIS_PASSWORD "${TRAEFIK_KOP_REDIS_PASSWORD:-}" true
+    set_env AUTORESTIC_BACKUP_TARGET "${AUTORESTIC_BACKUP_TARGET:-}" true
     info ".env written"
 fi
 

@@ -105,6 +105,7 @@ class PatchGenerator:
         current_file: str,
         file_path: str,
         apply_mode: str,
+        context: str = "",
     ) -> PatchResult:
         existing_middlewares = await self._fetch_existing_middlewares()
         raw = self._reasoner.generate_remediation_patch(
@@ -114,6 +115,7 @@ class PatchGenerator:
             file_path=file_path,
             apply_mode=apply_mode,
             existing_middlewares=existing_middlewares,
+            context=context,
         )
         if raw is None:
             return PatchResult(

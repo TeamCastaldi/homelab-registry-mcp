@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -9,6 +10,8 @@ from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from mcp.server.fastmcp import FastMCP
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
 
 from registry_mcp import __version__
 from registry_mcp.adoption import AdoptionDraftStore
@@ -134,6 +137,59 @@ def build_server(settings: Settings | None = None) -> FastMCP:
         build_notification_provider(settings),
         read_only=read_only,
     )
+
+    @mcp.custom_route(settings.wud_webhook_path, methods=["POST"])
+    async def wud_webhook(request: Request) -> Response:
+        """WUD (What's Up Docker) HTTP trigger receiver (ADR-005).
+
+        Turns an upstream-image-update notification into an `image_update`
+        proposal via the proposal engine. Fail-closed on both feature flag and
+        shared secret; a non-2xx response makes WUD retry, so a payload we
+        can't act on (unknown container) still returns 200.
+
+        NOTE: WUD's HTTP trigger payload field names are read defensively
+        (multiple fallbacks) since this was written without a live WUD
+        instance to verify against — confirm against the deployed trigger
+        config and adjust the field lookups below if they don't match.
+        """
+        if not settings.wud_webhook_enabled:
+            return JSONResponse({"error": "wud webhook not enabled"}, status_code=404)
+        if read_only:
+            return JSONResponse(
+                {"error": "server is in read-only mode (startup health check failed)"},
+                status_code=403,
+            )
+        secret = settings.wud_webhook_secret
+        provided = request.headers.get("authorization", "")
+        if provided.lower().startswith("bearer "):
+            provided = provided[len("bearer ") :]
+        if not secret or not hmac.compare_digest(provided, secret):
+            return JSONResponse({"error": "unauthorized"}, status_code=403)
+
+        try:
+            payload = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+        container = payload.get("container") or {}
+        image = container.get("image") or {}
+        name = container.get("name") or container.get("id") or ""
+        image_name = image.get("name") or ""
+        current_tag = (image.get("tag") or {}).get("value") or ""
+        update = payload.get("updateKind") or payload.get("update") or {}
+        new_tag = update.get("remoteValue") or update.get("new_tag") or ""
+
+        if not name:
+            return JSONResponse({"error": "missing container name in payload"}, status_code=400)
+
+        service = store.get_service(name)
+        if service is None:
+            return JSONResponse({"skipped": "no matching service", "container": name})
+
+        result = await proposal_engine.create_for_image_update(
+            service.id, image=image_name, current_tag=current_tag, new_tag=new_tag
+        )
+        return JSONResponse(result)
 
     @mcp.tool()
     def health() -> dict[str, str]:
