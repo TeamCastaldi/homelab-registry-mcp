@@ -263,6 +263,7 @@ class Reasoner:
         file_path: str,
         apply_mode: str,
         existing_middlewares: str = "",
+        context: str = "",
     ) -> dict | None:
         """Generate a complete corrected file for a security finding.
 
@@ -284,6 +285,7 @@ class Reasoner:
                 file_path=file_path,
                 apply_mode=apply_mode,
                 existing_middlewares=existing_middlewares,
+                context=context,
             )
         except Exception as exc:
             # A truncated response fails field parsing here; capture the partial

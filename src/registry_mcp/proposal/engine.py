@@ -115,6 +115,46 @@ class ProposalEngine:
         if finding is None:
             return {"error": f"service {service.name!r} has no open finding to remediate"}
 
+        return await self._open_proposal(finding, service, actor=actor)
+
+    async def create_for_image_update(
+        self,
+        service_id: str,
+        *,
+        image: str,
+        current_tag: str,
+        new_tag: str,
+        actor: str = "wud-webhook",
+    ) -> dict[str, Any]:
+        """Open an image-tag-bump PR from a WUD webhook notification (ADR-005).
+
+        WUD already supplies the exact new tag, so unlike ADR-004's polling
+        path there is no tag-interpretation ambiguity to resolve here — the
+        finding is fed straight to the patch generator as a literal context
+        string.
+        """
+        if not self.configured:
+            return {"error": "write path not configured (set GIT_BASE_URL, GIT_TOKEN, GIT_REPO)"}
+        if not image or not new_tag:
+            return {"error": "image and new_tag are required to open an image_update proposal"}
+
+        service = self._store.get_service(service_id)
+        if service is None:
+            return {"error": f"no service found for {service_id!r}"}
+
+        context = f"image: {image}\ncurrent_tag: {current_tag}\nnew_tag: {new_tag}"
+        return await self._open_proposal(
+            FindingType.image_update, service, actor=actor, context=context
+        )
+
+    async def _open_proposal(
+        self,
+        finding: FindingType,
+        service: Service,
+        *,
+        actor: str,
+        context: str = "",
+    ) -> dict[str, Any]:
         existing = self._proposals.find_open(service.id, finding)
         if existing is not None:
             return {
@@ -141,6 +181,7 @@ class ProposalEngine:
             current_file=current_file,
             file_path=file_path,
             apply_mode=self._settings.apply_mode,
+            context=context,
         )
 
         if not result.ok:

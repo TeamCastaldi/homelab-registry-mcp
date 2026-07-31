@@ -225,6 +225,9 @@ GitOps-managed) under management without leaking its hardcoded secrets. Off by d
 | `ADOPTION_ENABLED` | `false` | Enables the `proposal_adopt_service*` brownfield adoption tools |
 | `SSH_DEFAULT_USER` | `root` | User for the ad-hoc SSH connection adoption uses to inspect a live container; reuses `SSH_KEY_PATH` |
 | `ADOPTION_DRAFT_TTL_MINUTES` | `60` | How long a drafted adoption may await the operator's keep/rotate decision before expiring |
+| `WUD_WEBHOOK_ENABLED` | `false` | Enables the `/webhooks/wud` HTTP route (ADR-005) that turns a WUD upstream-image-update notification into an `image_update` proposal |
+| `WUD_WEBHOOK_PATH` | `/webhooks/wud` | Must match the `wud` compose service's HTTP trigger URL |
+| `WUD_WEBHOOK_SECRET` | unset | Shared bearer secret WUD sends back. **Fails closed** — unset means the route always rejects |
 | `EVENT_RETENTION_DAYS` | `90` | Old events purged on startup |
 | `LOG_LEVEL` | `INFO` | |
 
@@ -277,6 +280,21 @@ doesn't ask about them. Once those exist, connect them via the
 container has no filesystem access to the host's `.env`) and never start
 discovery immediately (`Settings` and the scheduler are only read/built at
 server startup).
+
+**Monitoring/alerting/ingress stack (ADR-005, opt-in)**: `docker-compose.yml`
+also carries Beszel, Gatus, Dozzle, WUD, Homepage, Glance, and a
+`docker-socket-proxy` in front of them, gated behind the `monitoring`
+Compose profile (`traefik-kop` and Autorestic sit behind their own
+`cross-node-ingress`/`backup` profiles since each needs details — a second
+node, a backup target — a first install won't have yet). `install.sh` prompts
+for this during Step 3 and writes `COMPOSE_PROFILES` to `.env`, so `docker
+compose up -d` in Step 5 brings the whole enabled set up together, before
+the network swap in Step 6. Config for these lives in `monitoring/` (sparse-
+checked-out by `install.sh` alongside `scripts/`). WUD is wired to POST to
+`homelab-registry-mcp`'s `/webhooks/wud` route (`WUD_WEBHOOK_*` in
+`.env` — see Environment Variables) on every detected upstream image update,
+which opens an `image_update` proposal through the same proposal engine as
+security findings (`proposal/engine.py`'s `create_for_image_update`).
 
 **Existing Docker host**:
 
@@ -331,6 +349,7 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
 - **Phase D complete**: migrated registry-mcp off the workload node onto the dedicated control-plane node; Traefik static backend routes `registry-mcp.<your-domain>` → the control-plane node; GitHub Actions self-hosted runner operational; first automated CD deploy proven end-to-end; `docker-compose.yml` binds `0.0.0.0:8765`
 - **`docs/plans/updated-phases.md` Phases 1-6 complete** (separate numbering from the phases above): `scripts/install.sh` one-shot installer for a fresh control-plane node (Phase 1); `health.py` startup checks (Git repo/`ansible.cfg`/SSH key) + always-on `system_health_check` tool + read-only degradation of the GitOps write tools when unhealthy (Phase 2); conversational GitOps loop — `poll_pr_comments`/`apply_review_feedback` push a DSPy-generated revision commit in response to a trusted PR comment, gated by a fail-closed `PROPOSAL_COMMENT_ALLOWED_USERS` allowlist and the same confidence/YAML gates as initial patch generation (Phase 3); `ansible/roles/docker-stack-deploy` + reusable `.github/workflows/deploy.yml` — the deploy *action* ships here, each operator's private homelab repo supplies only the *config* and a thin caller workflow (Phase 4); `SmtpNotificationProvider` — templated HTML proposal email (PR summary, diff, Approve/Request Changes/View Diff buttons) via stdlib `smtplib`, validated against SMTP2GO, `NOTIFICATION_PROVIDER=smtp` (Phase 5); public release scrub — removed an accidentally-committed operator-specific `nodes/` config and genericized real hostnames/IPs/personal identifiers across scripts and docs (Phase 6)
 - **`docs/plans/updated-phases.md` Phase 7 complete** (brownfield adoption & secret interception — the final phase in that plan): `proposal_adopt_service`/`_finalize`/`_cancel`/`_get` tools, `AdoptionDraft` model/store, `DetectHardcodedSecrets` DSPy signature, and the shared `gitcrypt.py` module (extracted from `tools/secrets.py` so both features encrypt through the same local-clone path rather than the remote Git API, which bypasses git-crypt's filter). Off by default (`ADOPTION_ENABLED=false`).
-- **ARD-004 proposed**: upstream version detection — `HomelabrepoDiscoverySource`, `UpstreamRegistrySource`, `ResolveLatestTag` DSPy module, `IMAGE_UPDATE` proposal type — not yet implemented
+- **ADR-005 in progress**: WUD webhook listener implemented — `/webhooks/wud` HTTP route (fail-closed on `WUD_WEBHOOK_ENABLED`/`WUD_WEBHOOK_SECRET`), `FindingType.image_update`, and `ProposalEngine.create_for_image_update` reuse the existing proposal engine/`GenerateRemediationPatch` (extended with a generic `context` field) rather than a new code path. The rest of the ADR-005 stack (Beszel, Gatus, Dozzle, WUD, docker-socket-proxy, Homepage, Glance, traefik-kop, Autorestic, Healthchecks.io heartbeat) is wired into `docker-compose.yml` behind the `monitoring`/`cross-node-ingress`/`backup` Compose profiles and `scripts/install.sh` Step 3, so it comes up alongside `homelab-registry-mcp` in one `docker compose up -d`. Off by default; `traefik-kop` and Autorestic need a second node/backup target the installer can't assume on a first run.
+- **ARD-004 proposed**: upstream version detection — `HomelabrepoDiscoverySource`, `UpstreamRegistrySource`, `ResolveLatestTag` DSPy module — shares the `image_update` `FindingType` ADR-005 introduced; the polling-based discovery source itself is not yet implemented
 - **OOBE CLI** (ARD-003): fully documented but not yet implemented; currently a manual process
 - **Deferred**: network probe discovery (`DISCOVERY_NETWORK_ENABLED=false`), real auth (Bearer/mTLS), multi-node Ansible bootstrap (Phase E)

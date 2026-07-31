@@ -23,6 +23,7 @@ class FindingType(StrEnum):
     exposed_dashboard = "exposed_dashboard"
     normalization = "normalization"
     legacy_adoption = "legacy_adoption"
+    image_update = "image_update"
 
 
 class ProposalStatus(StrEnum):

@@ -205,6 +205,54 @@ async def test_unknown_host_cannot_resolve_file(store):
     assert "cannot resolve" in result["error"]
 
 
+# --- image_update (ADR-005 WUD webhook) --------------------------------------
+
+
+async def test_create_for_image_update_opens_pr(store):
+    service = store.create_service(Service(name="plex", display_name="Plex", host="workload-01"))
+    git = FakeGit()
+    engine, proposals = _engine(store, git=git)
+
+    result = await engine.create_for_image_update(
+        service.id,
+        image="lscr.io/linuxserver/plex",
+        current_tag="1.32.0",
+        new_tag="1.32.1",
+        actor="wud-webhook",
+    )
+
+    assert result["status"] == "open"
+    assert result["finding_type"] == "image_update"
+    assert result["actor"] == "wud-webhook"
+    assert git.branches and git.commits and git.opened
+
+
+async def test_create_for_image_update_rejects_missing_image_or_tag(store):
+    service = store.create_service(Service(name="plex", display_name="Plex", host="workload-01"))
+    engine, _ = _engine(store)
+
+    result = await engine.create_for_image_update(
+        service.id, image="", current_tag="1.32.0", new_tag="1.32.1"
+    )
+    assert "error" in result
+
+    result = await engine.create_for_image_update(
+        service.id, image="lscr.io/linuxserver/plex", current_tag="1.32.0", new_tag=""
+    )
+    assert "error" in result
+
+
+async def test_create_for_image_update_skips_duplicate_open_proposal(store):
+    service = store.create_service(Service(name="plex", display_name="Plex", host="workload-01"))
+    engine, _ = _engine(store)
+    kwargs = dict(image="lscr.io/linuxserver/plex", current_tag="1.32.0", new_tag="1.32.1")
+
+    await engine.create_for_image_update(service.id, **kwargs)
+    again = await engine.create_for_image_update(service.id, **kwargs)
+
+    assert "skipped" in again
+
+
 # --- verification + cancel --------------------------------------------------
 
 

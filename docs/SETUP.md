@@ -81,13 +81,23 @@ the hood. In order:
      base URL
    - Whether to enable the optional DSPy reasoning layer, and your Anthropic
      API key if so
+   - Whether to enable the ADR-005 monitoring/alerting/ingress stack
+     (Beszel, Gatus, Dozzle, WUD, Homepage, Glance) alongside the registry —
+     if yes, your control-plane node's LAN IP/hostname, an optional
+     Healthchecks.io ping URL, and a WUD webhook secret (auto-generated if
+     left blank). Two more follow-up prompts, both skippable: cross-node
+     ingress (`traefik-kop`, needs a second node already running
+     Traefik+Redis) and scheduled backups (`autorestic`, needs a backup
+     target) — safe to defer and add later by hand in `.env`.
 
    This installer assumes a **greenfield** setup — no Traefik or Authentik yet
    — so it doesn't ask about them. Connect those once they exist (see
    [Connecting Traefik and Authentik later](#connecting-traefik-and-authentik-later)
    below).
 5. **Starts the server**: `docker compose pull && docker compose up -d`, then
-   waits for it to report running.
+   waits for it to report running. Anything enabled in step 4 (the monitoring
+   stack, cross-node ingress, backups) comes up in this same command, via
+   `COMPOSE_PROFILES` written to `.env`.
 6. **Applies the static IP** last, by handing off to
    `bootstrap.sh --network-only` — this is deliberately the final step, so the
    server is already up and running by the time this drops your SSH session.

@@ -64,16 +64,19 @@ class InferServiceMetadata(dspy.Signature):
 
 
 class GenerateRemediationPatch(dspy.Signature):
-    """Given a service record, its conflict details, and the current file
-    content, generate the minimal correct change to resolve an
-    auth_mode_conflict. Normalize incidental formatting as part of the same
-    operation.
+    """Given a service record, its finding details, and the current file
+    content, generate the minimal correct change to resolve the finding.
+    Normalize incidental formatting as part of the same operation.
 
     Output the COMPLETE modified file content, never a diff — Git computes the
     diff. Change only what is necessary to resolve the finding; preserve every
     other line, comment, and value verbatim. If you are not confident the patch
     is correct and complete, say so with a low confidence score rather than
     guessing.
+
+    For an `image_update` finding, `context` gives the exact image and
+    current/new tag to bump to — apply that literal change to the file's
+    image reference and do not otherwise second-guess the tag.
 
     IMPORTANT: Never include real credentials, tokens, or secrets in the
     patch output. Use descriptive placeholders for any secret values.
@@ -88,6 +91,11 @@ class GenerateRemediationPatch(dspy.Signature):
     existing_middlewares: str = dspy.InputField(
         desc="Contents of the Traefik dynamic middleware config file "
         "(middleware.yml). Empty string if unavailable.",
+        default="",
+    )
+    context: str = dspy.InputField(
+        desc="Extra structured context specific to this finding_type (e.g. "
+        "current/new image tag for image_update). Empty string if none.",
         default="",
     )
 
