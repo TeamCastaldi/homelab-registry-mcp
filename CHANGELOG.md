@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.15.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.14.2...v0.15.0) (2026-07-31)
+
+
+### Features
+
+* **docs:** add ADR-005 for Monitoring, Alerting, Disaster Recovery, and Ingress Architecture ([fc48965](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/fc48965604ed04ed29986b68a65dd70a2dc8feb0))
+* **docs:** renamed from ARD to ADR ([d3fcef7](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/d3fcef7b30ebbb3e2a367fd93cfdeae68d64610e))
+* implement ADR-005 WUD webhook listener and monitoring stack ([8f471c1](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/8f471c19a52ba00ee9f159be1de81282af7c029c))
+
+
+### Bug Fixes
+
+* address Copilot review on PR [#65](https://github.com/TeamCastaldi/homelab-registry-mcp/issues/65) ([b29ba05](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/b29ba053d209b5af81af964dd73e025905bb39b5))
+
+
+### Documentation
+
+* mark Phase 7 brownfield adoption complete ([fb0231f](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/fb0231f24a80c685576533ea7adbc4d2daf54030))
+
 ## [0.14.2](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.14.1...v0.14.2) (2026-07-11)
 
 
