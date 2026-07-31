@@ -90,6 +90,25 @@ async def test_unknown_container_is_skipped_not_errored(tmp_path):
     assert resp.json()["skipped"] == "no matching service"
 
 
+async def test_missing_image_or_tag_returns_400(tmp_path):
+    settings = _healthy_settings(tmp_path, str(tmp_path / "r.db"))
+    server = build_server(settings)
+
+    resp = await _post(
+        server,
+        json=_payload(image=""),
+        headers={"Authorization": f"Bearer {SECRET}"},
+    )
+    assert resp.status_code == 400
+
+    resp = await _post(
+        server,
+        json=_payload(new=""),
+        headers={"Authorization": f"Bearer {SECRET}"},
+    )
+    assert resp.status_code == 400
+
+
 async def test_known_container_reaches_proposal_engine(tmp_path):
     db_path = str(tmp_path / "r.db")
     store = RegistryStore(db_path)
@@ -103,8 +122,11 @@ async def test_known_container_reaches_proposal_engine(tmp_path):
 
     assert resp.status_code == 200
     body = resp.json()
-    # No real Git backend or DSPy in this test, so the call fails downstream
-    # (unreachable Git host) — what matters is it reached create_for_image_update
-    # rather than being skipped for an unmatched container.
+    # git_base_url/git_token/git_repo are all set (see _healthy_settings), so
+    # engine.configured is True and this reaches a real GitProvider.read_file
+    # call against a fake host — it fails downstream (not "write path not
+    # configured"), which is what matters here: the image_update finding
+    # reached the engine rather than being skipped for an unmatched container.
     assert "skipped" not in body
     assert "error" in body
+    assert "write path not configured" not in body["error"]

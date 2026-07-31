@@ -43,7 +43,9 @@ services:
     image: tecnativa/docker-socket-proxy:latest
     container_name: docker-socket-proxy
     restart: unless-stopped
-    profiles: ["monitoring"]
+    # Also under "cross-node-ingress": traefik-kop depends on this proxy too,
+    # and that profile can be enabled without "monitoring".
+    profiles: ["monitoring", "cross-node-ingress"]
     environment:
       # Read-only, container-list/inspect only — least privilege for the
       # monitoring stack's three consumers (ADR-005 §4).
@@ -104,7 +106,7 @@ services:
       # HTTP trigger → registry's WUD webhook listener (ADR-005 §5). Must
       # match WUD_WEBHOOK_PATH / WUD_WEBHOOK_SECRET in .env.
       WUD_TRIGGER_HTTP_REGISTRY_URL: "http://homelab-registry-mcp:8765${WUD_WEBHOOK_PATH:-/webhooks/wud}"
-      WUD_TRIGGER_HTTP_REGISTRY_AUTH_BEARER_TOKEN: ${WUD_WEBHOOK_SECRET:-}
+      WUD_TRIGGER_HTTP_REGISTRY_AUTH_BEARER_TOKEN: "${WUD_WEBHOOK_SECRET:-}"
       WUD_TRIGGER_HTTP_REGISTRY_METHOD: POST
     ports:
       - "0.0.0.0:3001:3000"

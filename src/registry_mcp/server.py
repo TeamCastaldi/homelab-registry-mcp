@@ -181,6 +181,10 @@ def build_server(settings: Settings | None = None) -> FastMCP:
 
         if not name:
             return JSONResponse({"error": "missing container name in payload"}, status_code=400)
+        if not image_name or not new_tag:
+            return JSONResponse(
+                {"error": "missing image name or new tag in payload"}, status_code=400
+            )
 
         service = store.get_service(name)
         if service is None:

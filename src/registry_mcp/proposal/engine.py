@@ -135,6 +135,8 @@ class ProposalEngine:
         """
         if not self.configured:
             return {"error": "write path not configured (set GIT_BASE_URL, GIT_TOKEN, GIT_REPO)"}
+        if not image or not new_tag:
+            return {"error": "image and new_tag are required to open an image_update proposal"}
 
         service = self._store.get_service(service_id)
         if service is None:
