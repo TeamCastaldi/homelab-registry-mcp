@@ -37,6 +37,8 @@ services:
   # to COMPOSE_PROFILES in .env (scripts/install.sh does this when the
   # relevant prompts aren't skipped) so a bare `docker compose up -d` with no
   # profile set only brings up homelab-registry-mcp, unchanged from before.
+  # beszel-agent is the one exception: it needs its own "beszel-agent" profile
+  # (see its own comment below) since it can't start without a real hub key.
   # =====================================================================
 
   docker-socket-proxy:
@@ -58,11 +60,21 @@ services:
     ports:
       - "127.0.0.1:2375:2375"
 
+  # Own profile, not "monitoring": henrygd/beszel-agent's entrypoint exits
+  # (no shell-guard possible in its minimal image) the instant KEY is unset,
+  # so under restart:unless-stopped it crash-loops forever rather than
+  # degrading gracefully -- unlike healthchecks-ping, which can no-op a blank
+  # URL itself. A first-run operator commonly hasn't set up the Beszel hub
+  # yet (BESZEL_AGENT_KEY is documented as "blank if you haven't set up the
+  # hub yet"), so this container must not start until a real key exists.
+  # scripts/install.sh only adds "beszel-agent" to COMPOSE_PROFILES once
+  # BESZEL_AGENT_KEY is actually non-empty -- same opt-in-once-ready pattern
+  # as "cross-node-ingress"/"backup" below.
   beszel-agent:
     image: henrygd/beszel-agent:latest
     container_name: beszel-agent
     restart: unless-stopped
-    profiles: ["monitoring"]
+    profiles: ["beszel-agent"]
     network_mode: host
     environment:
       LISTEN: 45876

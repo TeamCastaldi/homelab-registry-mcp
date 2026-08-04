@@ -36,19 +36,34 @@
 #      (Docker group membership, NetworkManager service) even when it does.
 #   4. Prompt for Git/DSPy secrets and opt-in, write .env
 #   5. `docker compose up -d` and confirm the server is running
-#   6. Run `bootstrap.sh --network-only` — applies the static IP last
+#   6. Run `bootstrap.sh --network-only` — applies the static IP last, unless
+#      INSTALL_SKIP_NETWORK=true (CI/test mode — see below), which skips it
 # ==============================================================================
 
 set -euo pipefail
 
 # When piped via `curl ... | bash`, stdin is the script itself, not the
 # terminal — reopen it from the tty so the prompts below work interactively.
+# /dev/tty existing as a device node doesn't mean it's openable: a CI runner
+# (or any process with no controlling terminal) has no tty to reopen from —
+# `|| true` lets that fail quietly and fall through to whatever stdin already
+# is (piped answers, or a prompt() env var skipping the read entirely),
+# instead of aborting the whole script under `set -e` before Step 0 even runs.
 if [ ! -t 0 ] && [ -e /dev/tty ]; then
-    exec < /dev/tty
+    exec < /dev/tty 2>/dev/null || true
 fi
 
 REPO_URL="${REPO_URL:-https://github.com/TeamCastaldi/homelab-registry-mcp.git}"
 DEFAULT_INSTALL_DIR="${HOME}/homelab-registry-mcp"
+
+# CI/test-only escape hatch: skips Step 6's static IP application entirely.
+# A GitHub Actions runner's own connectivity to the Actions coordinator runs
+# over its network interface, so `nmcli connection up` there could sever that
+# connection mid-job for a reason unrelated to whether install.sh itself is
+# correct. Never set this on a real control-plane node — the MCP server would
+# work, but the node would be permanently stuck on DHCP instead of getting
+# the static IP a control plane needs (ADR-001 §3.1).
+INSTALL_SKIP_NETWORK="${INSTALL_SKIP_NETWORK:-false}"
 
 info()    { echo "  [✓] $*"; }
 action()  { echo "  [⚙] $*"; }
@@ -57,9 +72,12 @@ header()  { echo ""; echo "$*"; echo "---"; }
 die()     { echo ""; echo "ERROR: $*" >&2; exit 1; }
 
 # Prompt for VAR unless it's already set in the environment (non-interactive override).
+# Tests whether the variable is *set* (via `+`), not whether it's non-empty (`:-`) —
+# an operator pre-seeding an intentionally blank answer (e.g. `GIT_PROVIDER=`) must
+# skip the prompt too, not just one seeded with a real value.
 prompt() {
     local var_name="$1" prompt_text="$2" default="${3:-}"
-    if [ -n "${!var_name:-}" ]; then
+    if [ -n "${!var_name+set}" ]; then
         return
     fi
     local input
@@ -78,7 +96,7 @@ prompt() {
 # so there's some confirmation without ever putting the value on screen.
 prompt_secret() {
     local var_name="$1" prompt_text="$2"
-    if [ -n "${!var_name:-}" ]; then
+    if [ -n "${!var_name+set}" ]; then
         return
     fi
     local input
@@ -209,12 +227,17 @@ if [ -n "${GIT_PROVIDER:-}" ]; then
     fi
 fi
 
-DSPY_ENABLED="${DSPY_ENABLED:-false}"
-if [ "$DSPY_ENABLED" != "true" ]; then
+# Asks only when DSPY_ENABLED isn't already set at all — pre-seeding
+# DSPY_ENABLED=false (not just =true) skips the ask, same as every prompt()
+# above; a bare `${DSPY_ENABLED:-false}` default here would make that
+# impossible, since it makes the variable "set" before the check runs.
+if [ -z "${DSPY_ENABLED+set}" ]; then
     read -rp "Enable Advanced AI Reasoning (DSPy)? [y/N]: " enable_dspy
     if [[ "$enable_dspy" =~ ^[Yy]$ ]]; then
         DSPY_ENABLED=true
         prompt_secret ANTHROPIC_API_KEY "Anthropic API key (used by DSPy)"
+    else
+        DSPY_ENABLED=false
     fi
 fi
 
@@ -231,6 +254,13 @@ if [[ "$enable_monitoring" =~ ^[Yy]$ ]]; then
     prompt CONTROL_PLANE_HOST "This node's LAN IP or hostname (for Homepage links)"
     prompt HEALTHCHECKS_PING_URL "Healthchecks.io ping URL (dead man's switch, blank to skip)"
     prompt BESZEL_AGENT_KEY "Beszel hub's agent public key (blank if you haven't set up the hub yet)"
+    # beszel-agent has its own profile, not "monitoring" -- it crash-loops
+    # without a real key (see its comment in docker-compose.yml), so only
+    # start it once one actually exists. Re-run `docker compose up -d` after
+    # adding "beszel-agent" to COMPOSE_PROFILES in .env once the hub is set up.
+    if [ -n "${BESZEL_AGENT_KEY:-}" ]; then
+        COMPOSE_PROFILES="${COMPOSE_PROFILES},beszel-agent"
+    fi
 
     WUD_WEBHOOK_ENABLED=true
     prompt_secret WUD_WEBHOOK_SECRET "WUD webhook shared secret (blank to auto-generate)"
@@ -275,7 +305,16 @@ else
     set_env TRAEFIK_API_URL "" true
     set_env AUTHENTIK_API_URL "" true
     set_env AUTHENTIK_TOKEN "" true
-    set_env GIT_PROVIDER "${GIT_PROVIDER:-}" true
+    # GIT_PROVIDER is NOT blanked like the three above -- config.py's
+    # git_provider is a required Literal["gitea","github","gitlab"], not an
+    # Optional[str]. pydantic-settings validates a present-but-empty env var
+    # against the literal (it doesn't fall back to the field default for
+    # that), so `GIT_PROVIDER=` in .env crashes the server at startup. The
+    # write path is actually gated on GIT_BASE_URL/GIT_TOKEN/GIT_REPO being
+    # set (see providers/git/build_git_provider) -- GIT_PROVIDER left at
+    # .env.example's shipped default is harmless when those three are blank,
+    # so skipping the prompt only needs to leave this one untouched.
+    set_env GIT_PROVIDER "${GIT_PROVIDER:-}"
     set_env GIT_REPO "${GIT_REPO:-}" true
     set_env GIT_TOKEN "${GIT_TOKEN:-}" true
     set_env GIT_BASE_URL "${GIT_BASE_URL:-}" true
@@ -331,8 +370,12 @@ fi
 # =============================================================================
 
 header "[STEP 6] Network"
-echo "The MCP server is up. Applying the static IP now — this is the last step"
-echo "and will drop your SSH session, same as a normal bootstrap.sh run."
-echo ""
 
-bash scripts/bootstrap.sh --network-only
+if [ "$INSTALL_SKIP_NETWORK" == "true" ]; then
+    warn "INSTALL_SKIP_NETWORK=true — skipping static IP application (CI/test mode)."
+else
+    echo "The MCP server is up. Applying the static IP now — this is the last step"
+    echo "and will drop your SSH session, same as a normal bootstrap.sh run."
+    echo ""
+    bash scripts/bootstrap.sh --network-only
+fi

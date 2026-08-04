@@ -1,0 +1,239 @@
+name: Install Script Validation
+
+# Fast, non-interactive loop for scripts/install.sh (ADR-001 §5, OOBE
+# prerequisite). Runs the real installer end-to-end on a hosted ubuntu-latest
+# runner and asserts the ADR-005 monitoring stack it can bring up is healthy.
+#
+# This is the *fast* loop only: catches logic bugs, env-var plumbing issues,
+# and container-health regressions fast, without a merge to main -- including
+# beszel-agent, which must NOT start at all when BESZEL_AGENT_KEY is blank
+# (its own dedicated "beszel-agent" Compose profile, not bundled into "monitoring")
+# rather than crash-looping under restart:unless-stopped the way it used to.
+# It intentionally does NOT catch anything that
+# depends on real network-interface ownership or a non-netplan init system
+# (e.g. the ifupdown-vs-netplan class of bug) -- ubuntu-latest ships netplan,
+# not ifupdown, so it can't reproduce that. That fidelity is the *slow* loop's
+# job: a manual Vagrant + Debian trixie64 VM pass, run by hand after merges.
+# See CLAUDE.md's Testing section for the full two-tier rationale.
+
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - "scripts/**"
+      - ".github/workflows/install-validation.yml"
+
+jobs:
+  install-validation:
+    name: install.sh end-to-end (ubuntu-latest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # -----------------------------------------------------------------
+      # scripts/install.sh prompts, pre-seeded via the env-var-of-the-same-
+      # -name mechanism the script's own header documents. Names are taken
+      # verbatim from install.sh's `prompt`/`prompt_secret` calls -- do not
+      # rename these without checking the script first.
+      # -----------------------------------------------------------------
+
+      # Fresh, non-existent path so install.sh takes its "clone" branch, not
+      # its "pull latest into an existing checkout" branch (see REPO_URL).
+      INSTALL_DIR: /home/runner/install-validation-target
+
+      # install.sh always does its own `git clone $REPO_URL` (it doesn't just
+      # use the directory it happens to be run from) -- left at its default
+      # this job would validate main's scripts/ on every run, never the
+      # branch or PR actually under test. Pointing it at this job's own
+      # already-checked-out working tree (a local `file://` clone) makes it
+      # clone exactly the commit actions/checkout put here, PR merge commit
+      # included. Requires the checkout below to be non-shallow -- see its
+      # fetch-depth comment.
+      REPO_URL: file://${{ github.workspace }}
+
+      # CI/test-only escape hatch added alongside this workflow -- see the
+      # comment on INSTALL_SKIP_NETWORK in scripts/install.sh. Never set on a
+      # real control-plane node.
+      INSTALL_SKIP_NETWORK: "true"
+
+      # Greenfield: no git write path exercised in this validation run.
+      GIT_PROVIDER: ""
+
+      # DSPy stays off -- no ANTHROPIC_API_KEY available to (or wanted by)
+      # this fast loop.
+      DSPY_ENABLED: "false"
+
+      # ADR-005 monitoring/alerting/ingress stack -- Gatus, Dozzle, WUD,
+      # Homepage, Glance (plus beszel-agent, gated separately below) -- the
+      # whole point of exercising this in CI. Dead-man's-switch and the
+      # Beszel hub key are both left blank, same as the "second loop"
+      # deferred-config design (no Healthchecks.io check or Beszel hub
+      # exists yet at this point in a real bootstrap either) -- so
+      # beszel-agent's own "beszel-agent" profile never gets added, and the
+      # container correctly never starts (see the Assert step below).
+      CONTROL_PLANE_HOST: "127.0.0.1"
+      HEALTHCHECKS_PING_URL: ""
+      BESZEL_AGENT_KEY: ""
+      # Blank -> install.sh auto-generates one with `openssl rand -hex 32`.
+      WUD_WEBHOOK_SECRET: ""
+
+    steps:
+      # fetch-depth: 0 -- install.sh's own `git clone --filter=blob:none
+      # --sparse "$REPO_URL"` (STEP 1) is pointed at this checkout via
+      # REPO_URL below. Combining that partial-clone filter with a *shallow*
+      # local source repo (actions/checkout's default) sends git into a
+      # non-terminating "filtering not recognized by server, ignoring" retry
+      # loop instead of a clean fallback -- reproduced locally, confirmed
+      # fixed by a non-shallow source; a shallow one hangs regardless of
+      # whether REPO_URL uses file:// or a plain path.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run install.sh non-interactively
+        run: |
+          # Every prompt covered by an env var above is skipped entirely by
+          # install.sh's own prompt()/prompt_secret() helpers -- no stdin
+          # needed for those. A handful of prompts in install.sh and
+          # bootstrap.sh are raw `read -rp` yes/no or value gates with no
+          # env-var equivalent to pre-seed (bootstrap.sh's four
+          # network-value prompts + its "Proceed?" confirm, and install.sh's
+          # monitoring/traefik-kop/Autorestic yes-no gates). Those are
+          # answered here via stdin, in the exact order the scripts ask them,
+          # mirroring the manually-validated Vagrant/Debian path:
+          #
+          #   1-4  bootstrap.sh static IP / prefix / gateway / DNS  -> blank (accept auto-detected defaults)
+          #   5    bootstrap.sh "Proceed? [y/N]"                    -> y
+          #   6    install.sh  "Enable the ADR-005 monitoring stack? [y/N]"                            -> y
+          #   7    install.sh  "Also enable cross-node ingress (traefik-kop)...? [y/N]" (no Node B)     -> blank (N)
+          #   8    install.sh  "Also enable scheduled backups (Autorestic)...? [y/N]" (no backup target) -> blank (N)
+          #
+          # If scripts/install.sh or scripts/bootstrap.sh change how many
+          # prompts they ask, or the order, this will fail loudly (a `read`
+          # hitting EOF aborts the script under `set -e`) rather than
+          # silently answering the wrong question -- that failure is exactly
+          # the kind of env-var/prompt plumbing regression this workflow
+          # exists to catch.
+          #
+          # printf, not a heredoc: a heredoc body inherits this step's YAML
+          # indentation as literal leading whitespace on every line (no `-`
+          # variant strips spaces, only leading tabs), which would corrupt
+          # the "y" answers into "        y" -- failing the `^[Yy]$` regex
+          # bootstrap.sh/install.sh match against and silently declining
+          # everything instead of confirming it.
+          printf '%s\n' \
+              "" "" "" "" \
+              "y" \
+              "y" \
+              "" "" \
+              | bash scripts/install.sh
+
+      - name: Assert container health
+        id: assert
+        run: |
+          set -uo pipefail
+          cd "$INSTALL_DIR"
+
+          # The ADR-005 "monitoring" profile set (docker-compose.yml) --
+          # homelab-registry-mcp carries no profile so it's always up;
+          # cross-node-ingress (traefik-kop) and backup (autorestic) were
+          # both declined above, so they're deliberately excluded here.
+          EXPECTED_UP=(homelab-registry-mcp docker-socket-proxy gatus dozzle wud homepage glance healthchecks-ping)
+          # beszel-agent is NOT in EXPECTED_UP: BESZEL_AGENT_KEY is blank in
+          # this job (no Beszel hub set up yet -- the documented first-run
+          # case), and install.sh only adds "beszel-agent" to COMPOSE_PROFILES once
+          # a real key exists, so this container should not be created at
+          # all here. Checked separately below -- its presence in *any*
+          # state (not just a bad one) means that gate regressed and it's
+          # back to crash-looping under restart:unless-stopped.
+          EXPECT_ABSENT=(beszel-agent)
+
+          check_once() {
+              local raw_json
+              raw_json="$(docker compose ps --all --format json)"
+              # Normalizes both known `docker compose ps --format json` shapes
+              # (NDJSON, one object per line, vs. a single JSON array) into
+              # one flat array so the lookups below don't need to care which
+              # the installed Compose version emits.
+              echo "$raw_json" | jq -s 'flatten' > /tmp/compose-ps.json
+
+              FAILED=0
+              declare -gA ACTUAL
+              for name in "${EXPECTED_UP[@]}"; do
+                  local state status
+                  state="$(jq -r --arg n "$name" '.[] | select(.Name==$n) | .State // empty' /tmp/compose-ps.json)"
+                  status="$(jq -r --arg n "$name" '.[] | select(.Name==$n) | .Status // empty' /tmp/compose-ps.json)"
+                  if [ -z "$state" ]; then
+                      ACTUAL["$name"]="missing"
+                      FAILED=1
+                  elif [ "$state" != "running" ]; then
+                      ACTUAL["$name"]="${state}${status:+ (${status})}"
+                      FAILED=1
+                  else
+                      ACTUAL["$name"]="Up${status:+ (${status})}"
+                  fi
+              done
+              for name in "${EXPECT_ABSENT[@]}"; do
+                  local state status
+                  state="$(jq -r --arg n "$name" '.[] | select(.Name==$n) | .State // empty' /tmp/compose-ps.json)"
+                  status="$(jq -r --arg n "$name" '.[] | select(.Name==$n) | .Status // empty' /tmp/compose-ps.json)"
+                  if [ -z "$state" ]; then
+                      ACTUAL["$name"]="correctly absent (no key)"
+                  else
+                      ACTUAL["$name"]="regressed: ${state}${status:+ (${status})}"
+                      FAILED=1
+                  fi
+              done
+          }
+
+          # install.sh's own readiness wait only polls homelab-registry-mcp
+          # itself before returning -- the rest of the monitoring stack
+          # (pulled and started at the same time) may still be settling.
+          # Retry over ~40s before treating a non-running container as a
+          # real failure, rather than flagging normal startup lag; a
+          # genuinely crash-looping container stays non-"running" (or, for
+          # beszel-agent, present at all) across every attempt, so this
+          # doesn't mask the real thing.
+          for attempt in 1 2 3 4; do
+              check_once
+              [ "$FAILED" -eq 0 ] && break
+              [ "$attempt" -lt 4 ] && sleep 10
+          done
+
+          {
+              if [ "$FAILED" -eq 0 ]; then
+                  echo "## ✅ install-validation: PASS"
+              else
+                  echo "## ❌ install-validation: FAIL"
+              fi
+              echo ""
+              echo "Ran \`scripts/install.sh\` non-interactively on a hosted \`ubuntu-latest\` runner (fast loop -- see CLAUDE.md's Testing section; this does not replace the manual Vagrant/Debian pass for network-interface-level fidelity)."
+              echo ""
+              echo "| Container | Expected | Actual |"
+              echo "|---|---|---|"
+              for name in "${EXPECTED_UP[@]}"; do
+                  echo "| \`${name}\` | Up | ${ACTUAL[$name]} |"
+              done
+              for name in "${EXPECT_ABSENT[@]}"; do
+                  echo "| \`${name}\` | Absent (no key configured) | ${ACTUAL[$name]} |"
+              done
+              echo ""
+              if [ "$FAILED" -ne 0 ]; then
+                  echo "See the **Dump container logs** step below for full \`docker compose logs\` output."
+              fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit "$FAILED"
+
+      - name: Dump container logs
+        if: failure()
+        run: |
+          if [ -d "$INSTALL_DIR" ]; then
+              cd "$INSTALL_DIR"
+              echo "=== docker compose ps --all ==="
+              docker compose ps --all || true
+              echo ""
+              echo "=== docker compose logs (all services) ==="
+              docker compose logs --no-color --timestamps || true
+          else
+              echo "INSTALL_DIR (${INSTALL_DIR}) does not exist -- install.sh failed before cloning the repo; nothing to dump."
+          fi
