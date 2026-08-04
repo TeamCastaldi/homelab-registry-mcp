@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.15.2](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.15.1...v0.15.2) (2026-08-04)
+
+
+### Bug Fixes
+
+* **ci:** use non-shallow checkout for install-validation ([ca83ccf](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/ca83ccfc7cad41a59ede104a30370d5e8a3f7b53))
+* don't crash-loop beszel-agent when no hub key is configured ([4a3d81a](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/4a3d81a3721ed6e704adbeb17459a4f701c6b77d))
+* don't write a blank GIT_PROVIDER when the git prompt is skipped ([8aaa106](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/8aaa106b7f897c14afd552c29d63595f49c10de7))
+* VERSION must be exported for install.sh's own clone to see it ([883c8e0](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/883c8e04919512741d9fd63c7c1d1461b22ebe90))
+
 ## [0.15.1](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.15.0...v0.15.1) (2026-08-04)
 
 
