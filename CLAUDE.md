@@ -291,14 +291,21 @@ discovery immediately (`Settings` and the scheduler are only read/built at
 server startup).
 
 **Monitoring/alerting/ingress stack (ADR-005, opt-in)**: `docker-compose.yml`
-also carries Beszel, Gatus, Dozzle, WUD, Homepage, Glance, and a
-`docker-socket-proxy` in front of them, gated behind the `monitoring`
-Compose profile (`traefik-kop` and Autorestic sit behind their own
-`cross-node-ingress`/`backup` profiles since each needs details — a second
-node, a backup target — a first install won't have yet). `install.sh` prompts
-for this during Step 3 and writes `COMPOSE_PROFILES` to `.env`, so `docker
-compose up -d` in Step 5 brings the whole enabled set up together, before
-the network swap in Step 6. Config for these lives in `monitoring/` (sparse-
+also carries Gatus, Dozzle, WUD, Homepage, Glance, and a `docker-socket-proxy`
+in front of them, gated behind the `monitoring` Compose profile (`traefik-kop`
+and Autorestic sit behind their own `cross-node-ingress`/`backup` profiles
+since each needs details — a second node, a backup target — a first install
+won't have yet). `install.sh` prompts for this during Step 3 and writes
+`COMPOSE_PROFILES` to `.env`, so `docker compose up -d` in Step 5 brings the
+whole enabled set up together, before the network swap in Step 6. Beszel is
+the one monitoring component *not* bundled into `monitoring`: `beszel-agent`
+sits behind its own `beszel-agent` profile because henrygd/beszel-agent's
+entrypoint exits immediately without a real hub key, which under
+`restart: unless-stopped` crash-loops forever rather than degrading — a
+first-run operator commonly hasn't set up the Beszel hub yet
+(`BESZEL_AGENT_KEY` is documented as "blank if you haven't set up the hub
+yet"), so `install.sh` only adds the `beszel-agent` profile once a real key
+is actually provided. Config for these lives in `monitoring/` (sparse-
 checked-out by `install.sh` alongside `scripts/`). WUD is wired to POST to
 `homelab-registry-mcp`'s `/webhooks/wud` route (`WUD_WEBHOOK_*` in
 `.env` — see Environment Variables) on every detected upstream image update,

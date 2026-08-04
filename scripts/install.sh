@@ -254,6 +254,13 @@ if [[ "$enable_monitoring" =~ ^[Yy]$ ]]; then
     prompt CONTROL_PLANE_HOST "This node's LAN IP or hostname (for Homepage links)"
     prompt HEALTHCHECKS_PING_URL "Healthchecks.io ping URL (dead man's switch, blank to skip)"
     prompt BESZEL_AGENT_KEY "Beszel hub's agent public key (blank if you haven't set up the hub yet)"
+    # beszel-agent has its own profile, not "monitoring" -- it crash-loops
+    # without a real key (see its comment in docker-compose.yml), so only
+    # start it once one actually exists. Re-run `docker compose up -d` after
+    # adding "beszel-agent" to COMPOSE_PROFILES in .env once the hub is set up.
+    if [ -n "${BESZEL_AGENT_KEY:-}" ]; then
+        COMPOSE_PROFILES="${COMPOSE_PROFILES},beszel-agent"
+    fi
 
     WUD_WEBHOOK_ENABLED=true
     prompt_secret WUD_WEBHOOK_SECRET "WUD webhook shared secret (blank to auto-generate)"

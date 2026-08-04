@@ -5,8 +5,11 @@ name: Install Script Validation
 # runner and asserts the ADR-005 monitoring stack it can bring up is healthy.
 #
 # This is the *fast* loop only: catches logic bugs, env-var plumbing issues,
-# and container-health regressions (e.g. a crash-looping beszel-agent) fast,
-# without a merge to main. It intentionally does NOT catch anything that
+# and container-health regressions fast, without a merge to main -- including
+# beszel-agent, which must NOT start at all when BESZEL_AGENT_KEY is blank
+# (its own dedicated "beszel-agent" Compose profile, not bundled into "monitoring")
+# rather than crash-looping under restart:unless-stopped the way it used to.
+# It intentionally does NOT catch anything that
 # depends on real network-interface ownership or a non-netplan init system
 # (e.g. the ifupdown-vs-netplan class of bug) -- ubuntu-latest ships netplan,
 # not ifupdown, so it can't reproduce that. That fidelity is the *slow* loop's
@@ -59,11 +62,14 @@ jobs:
       # this fast loop.
       DSPY_ENABLED: "false"
 
-      # ADR-005 monitoring/alerting/ingress stack -- Beszel, Gatus, Dozzle,
-      # WUD, Homepage, Glance -- the whole point of exercising this in CI.
-      # Dead-man's-switch and the Beszel hub key are both left blank, same as
-      # the "second loop" deferred-config design (no Healthchecks.io check or
-      # Beszel hub exists yet at this point in a real bootstrap either).
+      # ADR-005 monitoring/alerting/ingress stack -- Gatus, Dozzle, WUD,
+      # Homepage, Glance (plus beszel-agent, gated separately below) -- the
+      # whole point of exercising this in CI. Dead-man's-switch and the
+      # Beszel hub key are both left blank, same as the "second loop"
+      # deferred-config design (no Healthchecks.io check or Beszel hub
+      # exists yet at this point in a real bootstrap either) -- so
+      # beszel-agent's own "beszel-agent" profile never gets added, and the
+      # container correctly never starts (see the Assert step below).
       CONTROL_PLANE_HOST: "127.0.0.1"
       HEALTHCHECKS_PING_URL: ""
       BESZEL_AGENT_KEY: ""
@@ -131,7 +137,15 @@ jobs:
           # homelab-registry-mcp carries no profile so it's always up;
           # cross-node-ingress (traefik-kop) and backup (autorestic) were
           # both declined above, so they're deliberately excluded here.
-          EXPECTED=(homelab-registry-mcp docker-socket-proxy beszel-agent gatus dozzle wud homepage glance healthchecks-ping)
+          EXPECTED_UP=(homelab-registry-mcp docker-socket-proxy gatus dozzle wud homepage glance healthchecks-ping)
+          # beszel-agent is NOT in EXPECTED_UP: BESZEL_AGENT_KEY is blank in
+          # this job (no Beszel hub set up yet -- the documented first-run
+          # case), and install.sh only adds "beszel-agent" to COMPOSE_PROFILES once
+          # a real key exists, so this container should not be created at
+          # all here. Checked separately below -- its presence in *any*
+          # state (not just a bad one) means that gate regressed and it's
+          # back to crash-looping under restart:unless-stopped.
+          EXPECT_ABSENT=(beszel-agent)
 
           check_once() {
               local raw_json
@@ -144,7 +158,7 @@ jobs:
 
               FAILED=0
               declare -gA ACTUAL
-              for name in "${EXPECTED[@]}"; do
+              for name in "${EXPECTED_UP[@]}"; do
                   local state status
                   state="$(jq -r --arg n "$name" '.[] | select(.Name==$n) | .State // empty' /tmp/compose-ps.json)"
                   status="$(jq -r --arg n "$name" '.[] | select(.Name==$n) | .Status // empty' /tmp/compose-ps.json)"
@@ -158,6 +172,17 @@ jobs:
                       ACTUAL["$name"]="Up${status:+ (${status})}"
                   fi
               done
+              for name in "${EXPECT_ABSENT[@]}"; do
+                  local state status
+                  state="$(jq -r --arg n "$name" '.[] | select(.Name==$n) | .State // empty' /tmp/compose-ps.json)"
+                  status="$(jq -r --arg n "$name" '.[] | select(.Name==$n) | .Status // empty' /tmp/compose-ps.json)"
+                  if [ -z "$state" ]; then
+                      ACTUAL["$name"]="correctly absent (no key)"
+                  else
+                      ACTUAL["$name"]="regressed: ${state}${status:+ (${status})}"
+                      FAILED=1
+                  fi
+              done
           }
 
           # install.sh's own readiness wait only polls homelab-registry-mcp
@@ -165,9 +190,9 @@ jobs:
           # (pulled and started at the same time) may still be settling.
           # Retry over ~40s before treating a non-running container as a
           # real failure, rather than flagging normal startup lag; a
-          # genuinely crash-looping container (the beszel-agent regression
-          # this check exists to catch) stays non-"running" across every
-          # attempt, so this doesn't mask the real thing.
+          # genuinely crash-looping container stays non-"running" (or, for
+          # beszel-agent, present at all) across every attempt, so this
+          # doesn't mask the real thing.
           for attempt in 1 2 3 4; do
               check_once
               [ "$FAILED" -eq 0 ] && break
@@ -185,8 +210,11 @@ jobs:
               echo ""
               echo "| Container | Expected | Actual |"
               echo "|---|---|---|"
-              for name in "${EXPECTED[@]}"; do
+              for name in "${EXPECTED_UP[@]}"; do
                   echo "| \`${name}\` | Up | ${ACTUAL[$name]} |"
+              done
+              for name in "${EXPECT_ABSENT[@]}"; do
+                  echo "| \`${name}\` | Absent (no key configured) | ${ACTUAL[$name]} |"
               done
               echo ""
               if [ "$FAILED" -ne 0 ]; then
