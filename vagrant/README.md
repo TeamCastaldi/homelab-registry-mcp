@@ -51,8 +51,18 @@ vagrant ssh          # connects
 Inside the VM, run the installer pointed at your branch:
 
 ```bash
-VERSION=your-branch-name bash -c "$(curl -fsSL https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/${VERSION}/scripts/install.sh)"
+export VERSION=your-branch-name
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/${VERSION}/scripts/install.sh)"
 ```
+
+Must be two lines, and `VERSION` must be `export`ed, not just assigned:
+`${VERSION}` in the `curl` URL is expanded by *this* shell as it builds the
+command, which works either way as long as the assignment happened first —
+but only an *exported* `VERSION` is inherited by the `bash -c` subprocess
+that actually runs `install.sh`. Skip `export` (or collapse it back to one
+line) and the URL still fetches the right `install.sh`, but that script
+won't see `VERSION` in its own environment, so its internal clone silently
+falls back to `main`.
 
 `VERSION` here does double duty: it picks which revision of `install.sh` the
 `curl` fetches *and* which ref `install.sh` itself then clones for

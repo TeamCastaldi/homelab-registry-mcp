@@ -56,16 +56,18 @@ fi
 REPO_URL="${REPO_URL:-https://github.com/TeamCastaldi/homelab-registry-mcp.git}"
 DEFAULT_INSTALL_DIR="${HOME}/homelab-registry-mcp"
 
-# Same variable already used in every documented curl one-liner
-# (`VERSION=main bash -c "$(curl -fsSL .../${VERSION}/scripts/install.sh)"`) to
-# pick which revision of install.sh to fetch and run — reused here (it's
-# already in this process's environment by the time this script runs, since
-# `VERSION=... command` exports it to that command) so the clone below (Step
-# 1) checks out the *same* ref, not always main regardless of what VERSION
-# was. Without this, VERSION only controlled which install.sh you ran; every
-# file it went on to clone — bootstrap.sh, scripts/, monitoring/ — still came
-# from main, which silently defeated both release pinning and testing an
-# unmerged branch (e.g. the Vagrant slow loop, see vagrant/README.md).
+# Same variable already used in every documented curl one-liner:
+#   export VERSION=main   # or a tag/branch
+#   bash -c "$(curl -fsSL .../${VERSION}/scripts/install.sh)"
+# Must be `export`ed there, not just assigned — the curl line's own
+# ${VERSION} is expanded by the calling shell either way, but only an
+# exported VERSION is inherited by the `bash -c` subprocess this script
+# itself then runs as. Reused here so the clone below (Step 1) checks out
+# the *same* ref, not always main regardless of what VERSION was. Without
+# this, VERSION only controlled which install.sh you ran; every file it went
+# on to clone — bootstrap.sh, scripts/, monitoring/ — still came from main,
+# which silently defeated both release pinning and testing an unmerged
+# branch (e.g. the Vagrant slow loop, see vagrant/README.md).
 VERSION="${VERSION:-}"
 
 # CI/test-only escape hatch: skips Step 6's static IP application entirely.
