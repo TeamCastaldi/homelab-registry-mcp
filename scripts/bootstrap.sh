@@ -485,7 +485,9 @@ fi
 # exist; if netplan/systemd-networkd (Ubuntu) or ifupdown via
 # /etc/network/interfaces (Debian, including Raspberry Pi OS) is still
 # rendering the interface, it may remain unmanaged — Phase 6 checks for
-# that explicitly before using it.
+# that explicitly before using it, and fixes the ifupdown case (the common
+# one on this project's primary hardware target) in place rather than
+# requiring a manual re-run; netplan still needs a manual fix.
 if command -v nmcli &>/dev/null; then
     info "NetworkManager already installed: $(nmcli --version 2>/dev/null | head -n1 || echo installed)"
 else
@@ -717,7 +719,31 @@ elif [ "$_nm_iface_state" == "unmanaged" ]; then
     if compgen -G "/etc/netplan/*.yaml" > /dev/null 2>&1; then
         die "NetworkManager is installed but ${STATIC_IFACE} is unmanaged — netplan is likely still rendering it via systemd-networkd. Add 'renderer: NetworkManager' to /etc/netplan/*.yaml, run 'sudo netplan apply', then re-run this script."
     elif grep -qE "^\s*(auto|allow-hotplug)\s+${STATIC_IFACE}\b" /etc/network/interfaces 2>/dev/null; then
-        die "NetworkManager is installed but ${STATIC_IFACE} is unmanaged — ifupdown (/etc/network/interfaces) owns it instead (this is the common case on Debian/Raspberry Pi OS). Set 'managed=true' under the [ifupdown] section in /etc/NetworkManager/NetworkManager.conf, run 'sudo systemctl restart NetworkManager', then re-run this script."
+        # The common case on Debian/Raspberry Pi OS (this project's primary
+        # hardware target, ADR-001 §3.1): the stock NetworkManager.conf ships
+        # `managed=false` under [ifupdown] specifically to defer to it. Fixed
+        # in place rather than dying — requiring a manual edit + restart +
+        # re-run here would break the "one-shot" promise for the majority of
+        # real installs, not just an edge case. (The netplan branch above
+        # stays manual: a YAML rewrite isn't safe to automate the same way.)
+        action "${STATIC_IFACE} is unmanaged because ifupdown owns it — setting managed=true under [ifupdown] in NetworkManager.conf..."
+        _nm_conf="/etc/NetworkManager/NetworkManager.conf"
+        if sudo grep -q '^\[ifupdown\]' "$_nm_conf" 2>/dev/null; then
+            if sudo awk '/^\[ifupdown\]/{f=1;next} /^\[/{f=0} f && /^\s*managed\s*=/{found=1} END{exit !found}' "$_nm_conf"; then
+                sudo sed -i '/^\[ifupdown\]/,/^\[/{s/^\s*managed\s*=.*/managed=true/}' "$_nm_conf"
+            else
+                sudo sed -i '/^\[ifupdown\]/a managed=true' "$_nm_conf"
+            fi
+        else
+            printf '\n[ifupdown]\nmanaged=true\n' | sudo tee -a "$_nm_conf" > /dev/null
+        fi
+        sudo systemctl restart NetworkManager
+        sleep 2
+        _nm_iface_state="$(nmcli -t -f DEVICE,STATE device status 2>/dev/null | awk -F: -v d="$STATIC_IFACE" '$1==d {print $2}' || true)"
+        if [ "$_nm_iface_state" == "unmanaged" ]; then
+            die "Set managed=true under [ifupdown] in ${_nm_conf} and restarted NetworkManager, but ${STATIC_IFACE} is still unmanaged. Check 'cat ${_nm_conf}' and 'nmcli device show ${STATIC_IFACE}' for what else might be excluding it."
+        fi
+        info "${STATIC_IFACE} is now managed by NetworkManager"
     else
         die "NetworkManager is installed but ${STATIC_IFACE} is unmanaged, and the cause couldn't be auto-detected (no netplan config, no matching /etc/network/interfaces stanza). Check 'cat /etc/NetworkManager/NetworkManager.conf' and 'nmcli device show ${STATIC_IFACE}' for what's excluding it, then re-run this script."
     fi
