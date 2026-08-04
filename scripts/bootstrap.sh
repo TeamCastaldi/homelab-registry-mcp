@@ -178,6 +178,19 @@ NM_CON_NAME="static-${STATIC_IFACE}"
 
 DETECTED_GATEWAY="$(ip route show default 2>/dev/null | \
     awk '/^default/ { print $3; exit }' || true)"
+# DEFAULT_IP above is a last-resort fallback, not a live value -- unlike
+# gateway/prefix/DNS, it was never actually detected, so on any subnet other
+# than 192.168.1.0/24 (this project's fixed-config fallback, not
+# universal — e.g. libvirt's default NAT range, or any home router that
+# isn't 192.168.1.1) pressing Enter through all four prompts silently paired
+# a 192.168.1.x static IP with a same-subnet-as-*this*-DHCP-lease gateway,
+# producing a broken combination the warning below catches but doesn't
+# prevent. Detecting the current lease's own IP and offering it as the
+# default keeps the two in the same subnet by construction — "make my
+# current address static" is also the more sensible default behavior than
+# "assume 192.168.1.200," independent of the mismatch this fixes.
+DETECTED_IP="$(ip -o -f inet addr show dev "$STATIC_IFACE" 2>/dev/null | \
+    awk '{print $4}' | cut -d/ -f1 | head -n1 || true)"
 DETECTED_PREFIX="$(ip -o -f inet addr show dev "$STATIC_IFACE" 2>/dev/null | \
     awk '{print $4}' | cut -d/ -f2 | head -n1 || true)"
 # IPv4 only: an IPv6 nameserver here (common with systemd-resolved) would
@@ -204,7 +217,7 @@ if [ -f "$NETWORK_STATE_FILE" ]; then
     DETECTED_GATEWAY="${SAVED_TARGET_GATEWAY:-$DETECTED_GATEWAY}"
     DETECTED_PREFIX="${SAVED_TARGET_PREFIX:-$DETECTED_PREFIX}"
     DETECTED_DNS="${SAVED_TARGET_DNS:-$DETECTED_DNS}"
-    DEFAULT_IP="${SAVED_TARGET_IP:-$DEFAULT_IP}"
+    DETECTED_IP="${SAVED_TARGET_IP:-$DETECTED_IP}"
     info "Reusing network answers saved from the earlier bootstrap run as the defaults below — press Enter through all four to accept them as-is, or type a new value to change one."
 fi
 
@@ -279,8 +292,8 @@ fi
 # so a correct answer is usually just pressing Enter through all four
 # prompts — but every value is editable, since the static IP an operator
 # picks may land in a different subnet than the current DHCP lease.
-read -rp "Enter static IP for ${STATIC_IFACE} [${DEFAULT_IP}]: " TARGET_IP
-TARGET_IP="${TARGET_IP:-${DEFAULT_IP}}"
+read -rp "Enter static IP for ${STATIC_IFACE} [${DETECTED_IP:-$DEFAULT_IP}]: " TARGET_IP
+TARGET_IP="${TARGET_IP:-${DETECTED_IP:-$DEFAULT_IP}}"
 valid_ip_format "$TARGET_IP" || die "Invalid IP address: $TARGET_IP"
 
 read -rp "Subnet prefix length (CIDR bits) [${DETECTED_PREFIX:-$DEFAULT_PREFIX}]: " TARGET_PREFIX
