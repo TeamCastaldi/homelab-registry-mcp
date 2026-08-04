@@ -298,7 +298,16 @@ else
     set_env TRAEFIK_API_URL "" true
     set_env AUTHENTIK_API_URL "" true
     set_env AUTHENTIK_TOKEN "" true
-    set_env GIT_PROVIDER "${GIT_PROVIDER:-}" true
+    # GIT_PROVIDER is NOT blanked like the three above -- config.py's
+    # git_provider is a required Literal["gitea","github","gitlab"], not an
+    # Optional[str]. pydantic-settings validates a present-but-empty env var
+    # against the literal (it doesn't fall back to the field default for
+    # that), so `GIT_PROVIDER=` in .env crashes the server at startup. The
+    # write path is actually gated on GIT_BASE_URL/GIT_TOKEN/GIT_REPO being
+    # set (see providers/git/build_git_provider) -- GIT_PROVIDER left at
+    # .env.example's shipped default is harmless when those three are blank,
+    # so skipping the prompt only needs to leave this one untouched.
+    set_env GIT_PROVIDER "${GIT_PROVIDER:-}"
     set_env GIT_REPO "${GIT_REPO:-}" true
     set_env GIT_TOKEN "${GIT_TOKEN:-}" true
     set_env GIT_BASE_URL "${GIT_BASE_URL:-}" true
