@@ -265,12 +265,14 @@ Fixtures live in `tests/conftest.py` (IsolatedSettings, in-memory store).
 
 ### Installer validation (two-tier)
 
-`scripts/install.sh` / `scripts/bootstrap.sh` have two separate test loops, each catching a different class of bug:
+`scripts/install.sh` / `scripts/bootstrap.sh` have two separate test loops, each catching a different class of bug. Run the fast one first; reach for the slow one only when a change needs fidelity the fast one structurally can't provide.
 
-- **Fast loop — `.github/workflows/install-validation.yml`** (GitHub Actions, `ubuntu-latest`). Runs `install.sh` non-interactively — every prompt pre-seeded via env vars of the same name, `INSTALL_SKIP_NETWORK=true` skips the static-IP swap (which would otherwise risk severing the runner's own network connectivity mid-job) — and asserts the ADR-005 monitoring stack comes up healthy. Triggers on `workflow_dispatch` (`gh workflow run install-validation.yml --ref <branch>` — test a change without opening a PR) and on `pull_request` touching `scripts/**`. Catches logic bugs, env-var plumbing issues, and container-health regressions (e.g. a crash-looping `beszel-agent`) in minutes, without a merge to `main`.
-- **Slow loop — manual Vagrant + Debian VM** (`vagrant destroy -f && vagrant up && vagrant ssh`, unchanged, run by hand after merges). Real systemd and real network-interface ownership catch what the fast loop structurally can't — e.g. the ifupdown-vs-netplan detection bug: `ubuntu-latest` ships netplan, not ifupdown, so only a real Debian VM reproduces that class of failure.
+- **Fast loop — `.github/workflows/install-validation.yml`** (GitHub Actions, `ubuntu-latest`). Runs `install.sh` non-interactively — every prompt pre-seeded via env vars of the same name, `INSTALL_SKIP_NETWORK=true` skips the static-IP swap (which would otherwise risk severing the runner's own network connectivity mid-job) — and asserts the ADR-005 monitoring stack comes up healthy, including that `beszel-agent` correctly stays *absent* (not crash-looping) when no hub key is configured. Triggers on `workflow_dispatch` (`gh workflow run install-validation.yml --ref <branch>` — test a change without opening a PR) and on `pull_request` touching `scripts/**`. Catches logic bugs, env-var plumbing issues, and container-health regressions in minutes, without a merge to `main`.
+- **Slow loop — `vagrant/` (Vagrant + libvirt, Debian trixie64)**. `cd vagrant && vagrant up && vagrant ssh`, then run the installer by hand inside — see `vagrant/README.md` for the full walkthrough. Real systemd and real network-interface ownership catch what the fast loop structurally can't — e.g. the ifupdown-vs-netplan detection bug: `ubuntu-latest` ships netplan, not ifupdown, so only a real Debian VM reproduces that class of failure — and it's the only place the static-IP step (`bootstrap.sh` Phase 6) actually runs at all, since the fast loop always skips it. `vagrant destroy -f` between rounds; both scripts assume a genuinely fresh node.
 
-Both are required for full confidence; neither replaces the other.
+Both loops clone from GitHub rather than a local working tree, so push your branch before testing either one. `install.sh` honors `VERSION` (the same variable the documented `curl -fsSL .../${VERSION}/scripts/install.sh` one-liner already uses) for its own internal clone too — `export VERSION=your-branch-name` first (must be exported, not just assigned, or the `bash -c` subprocess running `install.sh` never sees it) and both loops test that branch end-to-end (`bootstrap.sh`, `scripts/`, `monitoring/` included), not just main with a different `install.sh` grafted on top.
+
+Both loops are required for full confidence; neither replaces the other.
 
 ## Docker / Homelab Deploy
 

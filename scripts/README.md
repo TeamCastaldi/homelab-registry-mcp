@@ -6,7 +6,9 @@ scripts are tools for the operator/developer.
 
 For a step-by-step walkthrough of running `install.sh`/`bootstrap.sh` — including
 exactly what gets installed and what you'll be prompted for — see
-[docs/SETUP.md](../docs/SETUP.md).
+[docs/SETUP.md](../docs/SETUP.md). If you're *changing* either script, see
+[Testing changes to install.sh/bootstrap.sh](#testing-changes-to-installshbootstrapsh)
+below instead.
 
 ## What's here
 
@@ -23,6 +25,9 @@ exactly what gets installed and what you'll be prompted for — see
   when the SSH session drops. Designed to be run via
   `curl -fsSL <raw-url>/scripts/install.sh | bash`; every prompt can be pre-seeded
   with an environment variable of the same name for non-interactive use.
+  `VERSION` (as used in that `curl` URL) also controls which ref
+  `install.sh`'s own internal clone checks out — pointing both at the same
+  branch/tag, not just the top-level `install.sh` you initially fetched.
   Assumes a greenfield setup — it deliberately doesn't ask about Traefik or
   Authentik, since a fresh homelab won't have those yet. Connect them later via
   the `discovery_connect_traefik` / `discovery_connect_authentik` MCP tools.
@@ -85,6 +90,23 @@ exactly what gets installed and what you'll be prompted for — see
   any time you want to add hosts; skips any host already present by name and
   leaves an existing `ansible.cfg` untouched. Run from the control-plane
   node: `scripts/setup-ansible-inventory.sh`.
+
+## Testing changes to install.sh/bootstrap.sh
+
+Two loops, each catching a different class of bug — see
+[CLAUDE.md's "Installer validation (two-tier)" section](../CLAUDE.md#installer-validation-two-tier)
+for the full rationale. Push your branch first; both loops clone from GitHub,
+not your local working tree.
+
+- **Fast — `gh workflow run install-validation.yml --ref your-branch-name`**
+  ([`.github/workflows/install-validation.yml`](../.github/workflows/install-validation.yml)).
+  Runs non-interactively on a hosted runner in a few minutes; also runs
+  automatically on any PR touching `scripts/**`. Catches logic bugs, env-var
+  plumbing issues, and container-health regressions.
+- **Slow — [`vagrant/`](../vagrant/README.md)** (Vagrant + libvirt, Debian
+  trixie64). Real systemd, real network-interface ownership, and the only
+  place the static-IP step actually runs — the fast loop always skips it.
+  Manual and interactive; reach for it when a change needs that fidelity.
 
 ## What belongs here
 

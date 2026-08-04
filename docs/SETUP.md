@@ -33,13 +33,25 @@ it is the tested, documented path and does the most for you.
 ### The command
 
 ```bash
-VERSION=main  # or the latest tagged release, e.g. v0.11.0
+export VERSION=main  # or the latest tagged release, e.g. v0.11.0
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/${VERSION}/scripts/install.sh)"
 ```
 
 Run this over SSH on the target node. It's interactive — you'll answer a handful
 of prompts (see below) — but every prompt can be pre-seeded with an environment
 variable of the same name (e.g. `GIT_PROVIDER=github`) for a non-interactive run.
+
+`VERSION` pins the entire install, not just which copy of `install.sh` the
+`curl` fetches: `install.sh` reads the same variable from its own environment
+and clones the rest of the repo (`bootstrap.sh`, `scripts/`, `monitoring/`)
+from that same ref, so a tagged release stays self-consistent end-to-end —
+this also works with a branch name, not just a tag, if you're testing an
+unreleased change. It must be `export`ed (as above), not just assigned: the
+`curl` line's own `${VERSION}` expands correctly either way, but only an
+exported `VERSION` reaches the `bash -c` subprocess that `install.sh` itself
+runs as — a plain (non-exported) assignment still fetches the right
+`install.sh`, but that script won't see `VERSION`, so its internal clone
+silently falls back to `main`.
 
 ### What it does
 

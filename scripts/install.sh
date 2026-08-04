@@ -56,6 +56,20 @@ fi
 REPO_URL="${REPO_URL:-https://github.com/TeamCastaldi/homelab-registry-mcp.git}"
 DEFAULT_INSTALL_DIR="${HOME}/homelab-registry-mcp"
 
+# Same variable already used in every documented curl one-liner:
+#   export VERSION=main   # or a tag/branch
+#   bash -c "$(curl -fsSL .../${VERSION}/scripts/install.sh)"
+# Must be `export`ed there, not just assigned — the curl line's own
+# ${VERSION} is expanded by the calling shell either way, but only an
+# exported VERSION is inherited by the `bash -c` subprocess this script
+# itself then runs as. Reused here so the clone below (Step 1) checks out
+# the *same* ref, not always main regardless of what VERSION was. Without
+# this, VERSION only controlled which install.sh you ran; every file it went
+# on to clone — bootstrap.sh, scripts/, monitoring/ — still came from main,
+# which silently defeated both release pinning and testing an unmerged
+# branch (e.g. the Vagrant slow loop, see vagrant/README.md).
+VERSION="${VERSION:-}"
+
 # CI/test-only escape hatch: skips Step 6's static IP application entirely.
 # A GitHub Actions runner's own connectivity to the Actions coordinator runs
 # over its network interface, so `nmcli connection up` there could sever that
@@ -174,7 +188,12 @@ else
     # .env.example, etc.) for free and adds just scripts/ — skipping src/,
     # ansible/, tests/, and the rest, which are build/CI-time only.
     action "Cloning ${REPO_URL} into ${INSTALL_DIR} (sparse: root-level files + scripts/ + monitoring/, skipping src/, ansible/, tests/, etc.)..."
-    git clone --filter=blob:none --sparse "$REPO_URL" "$INSTALL_DIR"
+    if [ -n "$VERSION" ] && [ "$VERSION" != "main" ]; then
+        info "VERSION=${VERSION} — cloning that branch/tag instead of the repo default"
+        git clone --filter=blob:none --sparse --branch "$VERSION" "$REPO_URL" "$INSTALL_DIR"
+    else
+        git clone --filter=blob:none --sparse "$REPO_URL" "$INSTALL_DIR"
+    fi
     git -C "$INSTALL_DIR" sparse-checkout set scripts monitoring
     info "Cloned to ${INSTALL_DIR}"
 fi

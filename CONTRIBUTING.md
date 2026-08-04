@@ -62,6 +62,23 @@ uv run pytest -q
 ANSIBLE_ROLES_PATH=ansible/roles ansible-lint ansible/roles ansible/playbooks
 ```
 
+**Touching `scripts/install.sh` or `scripts/bootstrap.sh`?** Those aren't
+covered by the checks above — validate with the two-tier installer testing
+loop instead (see [CLAUDE.md](CLAUDE.md#installer-validation-two-tier) for
+the full rationale):
+
+```bash
+# Fast: non-interactive, ~a few minutes, no PR needed to run it
+gh workflow run install-validation.yml --ref your-branch-name
+```
+
+Push your branch first — `install-validation.yml` also runs automatically
+once you open the PR (it's scoped to `scripts/**` changes via `paths:`), but
+`workflow_dispatch` lets you iterate before that. Reach for the slow loop
+(`vagrant/README.md` — real systemd, real network-interface ownership,
+actually applying the static IP) only for changes the fast loop structurally
+can't verify.
+
 Fill in the PR template.
 
 ### 4. Merge

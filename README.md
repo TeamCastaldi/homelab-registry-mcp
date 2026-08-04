@@ -66,7 +66,7 @@ only then applies a static IP — so the server is already running by the time
 the SSH session drops.
 
 ```bash
-VERSION=main  # or the latest tagged release, e.g. v0.11.0
+export VERSION=main  # or the latest tagged release, e.g. v0.11.0
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/${VERSION}/scripts/install.sh)"
 ```
 
