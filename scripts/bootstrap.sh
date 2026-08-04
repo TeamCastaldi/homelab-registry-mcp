@@ -729,11 +729,20 @@ elif [ "$_nm_iface_state" == "unmanaged" ]; then
         action "${STATIC_IFACE} is unmanaged because ifupdown owns it — setting managed=true under [ifupdown] in NetworkManager.conf..."
         _nm_conf="/etc/NetworkManager/NetworkManager.conf"
         if sudo grep -q '^\[ifupdown\]' "$_nm_conf" 2>/dev/null; then
-            if sudo awk '/^\[ifupdown\]/{f=1;next} /^\[/{f=0} f && /^\s*managed\s*=/{found=1} END{exit !found}' "$_nm_conf"; then
-                sudo sed -i '/^\[ifupdown\]/,/^\[/{s/^\s*managed\s*=.*/managed=true/}' "$_nm_conf"
-            else
-                sudo sed -i '/^\[ifupdown\]/a managed=true' "$_nm_conf"
-            fi
+            # Delete-then-insert instead of detect-then-branch: sidesteps
+            # needing to know whether a managed= key already exists (and in
+            # what form — `managed=false`, `managed = false`, indented, ...)
+            # by unconditionally removing any within the [ifupdown] section
+            # (sed's end-of-range address isn't tested against the same line
+            # the range starts on, so this correctly stops at the *next*
+            # section header, or EOF if [ifupdown] is the last one) and
+            # inserting exactly one fresh line. POSIX bracket expressions
+            # ([[:space:]]), not \s — Debian's default /usr/bin/awk (mawk)
+            # doesn't understand \s as whitespace, so relying on it for
+            # detection previously risked silently leaving the original
+            # `managed=false` in place as a duplicate, un-overridden key.
+            sudo sed -i '/^\[ifupdown\]/,/^\[/{/^[[:space:]]*managed[[:space:]]*=/d}' "$_nm_conf"
+            sudo sed -i '/^\[ifupdown\]/a managed=true' "$_nm_conf"
         else
             printf '\n[ifupdown]\nmanaged=true\n' | sudo tee -a "$_nm_conf" > /dev/null
         fi
