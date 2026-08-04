@@ -43,7 +43,8 @@ jobs:
       # branch or PR actually under test. Pointing it at this job's own
       # already-checked-out working tree (a local `file://` clone) makes it
       # clone exactly the commit actions/checkout put here, PR merge commit
-      # included.
+      # included. Requires the checkout below to be non-shallow -- see its
+      # fetch-depth comment.
       REPO_URL: file://${{ github.workspace }}
 
       # CI/test-only escape hatch added alongside this workflow -- see the
@@ -70,7 +71,17 @@ jobs:
       WUD_WEBHOOK_SECRET: ""
 
     steps:
+      # fetch-depth: 0 -- install.sh's own `git clone --filter=blob:none
+      # --sparse "$REPO_URL"` (STEP 1) is pointed at this checkout via
+      # REPO_URL below. Combining that partial-clone filter with a *shallow*
+      # local source repo (actions/checkout's default) sends git into a
+      # non-terminating "filtering not recognized by server, ignoring" retry
+      # loop instead of a clean fallback -- reproduced locally, confirmed
+      # fixed by a non-shallow source; a shallow one hangs regardless of
+      # whether REPO_URL uses file:// or a plain path.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Run install.sh non-interactively
         run: |
