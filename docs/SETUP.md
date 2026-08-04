@@ -303,10 +303,16 @@ no access to the host's `.env`) and never starts discovery immediately.
   static IP may not match what you entered, or the gateway/subnet was wrong.
   Reconnect via console/serial if available and re-run
   `bash scripts/bootstrap.sh --network-only`.
-- **`nmcli` errors about an unmanaged interface** — Ubuntu Server defaults to
-  netplan + systemd-networkd, not NetworkManager. Add `renderer: NetworkManager`
-  to `/etc/netplan/*.yaml`, `sudo netplan apply`, then re-run bootstrap. If
-  you're inside a container (LXC, etc.), this doesn't apply to you — see below.
+- **`nmcli` errors about an unmanaged interface** — something else already owns
+  the interface. On Ubuntu Server this is usually netplan + systemd-networkd:
+  add `renderer: NetworkManager` to `/etc/netplan/*.yaml`, `sudo netplan
+  apply`, then re-run bootstrap. On Debian/Raspberry Pi OS it's usually
+  ifupdown via `/etc/network/interfaces` instead: set `managed=true` under the
+  `[ifupdown]` section in `/etc/NetworkManager/NetworkManager.conf`, `sudo
+  systemctl restart NetworkManager`, then re-run bootstrap. `bootstrap.sh`
+  Phase 6 detects which of the two applies and prints the matching guidance
+  in its error message. If you're inside a container (LXC, etc.), this
+  doesn't apply to you — see below.
 - **Running Option A inside an LXC container (e.g. a Proxmox community-scripts
   Ubuntu template)** — `bootstrap.sh` detects this and automatically skips the
   step 6 static-IP application, since a container's address is normally owned
