@@ -41,6 +41,13 @@ Run this over SSH on the target node. It's interactive — you'll answer a handf
 of prompts (see below) — but every prompt can be pre-seeded with an environment
 variable of the same name (e.g. `GIT_PROVIDER=github`) for a non-interactive run.
 
+`VERSION` pins the entire install, not just which copy of `install.sh` the
+`curl` fetches: `install.sh` reads the same variable from its own environment
+and clones the rest of the repo (`bootstrap.sh`, `scripts/`, `monitoring/`)
+from that same ref, so a tagged release stays self-consistent end-to-end —
+this also works with a branch name, not just a tag, if you're testing an
+unreleased change.
+
 ### What it does
 
 The command runs `scripts/install.sh`, which drives `scripts/bootstrap.sh` under
