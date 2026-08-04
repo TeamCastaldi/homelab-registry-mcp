@@ -482,8 +482,10 @@ fi
 # all, so nmcli isn't guaranteed on every OS this script supports. Installed
 # here so it's ready before Phase 6 runs, whether in this same invocation or
 # a later --network-only one. This only guarantees the binary + service
-# exist; if netplan is still rendering via systemd-networkd, the interface
-# may remain unmanaged — Phase 6 checks for that explicitly before using it.
+# exist; if netplan/systemd-networkd (Ubuntu) or ifupdown via
+# /etc/network/interfaces (Debian, including Raspberry Pi OS) is still
+# rendering the interface, it may remain unmanaged — Phase 6 checks for
+# that explicitly before using it.
 if command -v nmcli &>/dev/null; then
     info "NetworkManager already installed: $(nmcli --version 2>/dev/null | head -n1 || echo installed)"
 else
@@ -693,9 +695,11 @@ fi
 
 # Fail clearly here rather than mid-way through nmcli — e.g. this node was
 # bootstrapped by an older script version before NetworkManager install was
-# added above, or Phase 2 ran but netplan is still rendering the interface
-# via systemd-networkd (installing the package alone doesn't hand control
-# of the device to NetworkManager).
+# added above, or something else still owns the interface: netplan still
+# rendering it via systemd-networkd (Ubuntu's default), or ifupdown via
+# /etc/network/interfaces (Debian's default, including Raspberry Pi OS) —
+# installing the NetworkManager package alone doesn't hand control of the
+# device to it either way.
 command -v nmcli &>/dev/null || die "nmcli not found. Install NetworkManager first: sudo apt-get install -y network-manager && sudo systemctl enable --now NetworkManager — then re-run this script."
 
 # `|| true` on the whole pipeline: under set -e/pipefail, a non-zero nmcli
@@ -705,7 +709,18 @@ _nm_iface_state="$(nmcli -t -f DEVICE,STATE device status 2>/dev/null | awk -F: 
 if [ -z "$_nm_iface_state" ]; then
     die "NetworkManager doesn't see a device named ${STATIC_IFACE} — check 'nmcli device status' and that the service is running ('systemctl status NetworkManager'), then re-run this script."
 elif [ "$_nm_iface_state" == "unmanaged" ]; then
-    die "NetworkManager is installed but ${STATIC_IFACE} is unmanaged — netplan is likely still rendering it via systemd-networkd. Add 'renderer: NetworkManager' to /etc/netplan/*.yaml, run 'sudo netplan apply', then re-run this script."
+    # Detect which mechanism actually owns the interface before prescribing
+    # a remedy — netplan/networkd is Ubuntu's default, ifupdown is Debian's
+    # (including Raspberry Pi OS, this project's primary hardware target),
+    # and the wrong guidance sends the operator chasing a config that isn't
+    # there.
+    if compgen -G "/etc/netplan/*.yaml" > /dev/null 2>&1; then
+        die "NetworkManager is installed but ${STATIC_IFACE} is unmanaged — netplan is likely still rendering it via systemd-networkd. Add 'renderer: NetworkManager' to /etc/netplan/*.yaml, run 'sudo netplan apply', then re-run this script."
+    elif grep -qE "^\s*(auto|allow-hotplug)\s+${STATIC_IFACE}\b" /etc/network/interfaces 2>/dev/null; then
+        die "NetworkManager is installed but ${STATIC_IFACE} is unmanaged — ifupdown (/etc/network/interfaces) owns it instead (this is the common case on Debian/Raspberry Pi OS). Set 'managed=true' under the [ifupdown] section in /etc/NetworkManager/NetworkManager.conf, run 'sudo systemctl restart NetworkManager', then re-run this script."
+    else
+        die "NetworkManager is installed but ${STATIC_IFACE} is unmanaged, and the cause couldn't be auto-detected (no netplan config, no matching /etc/network/interfaces stanza). Check 'cat /etc/NetworkManager/NetworkManager.conf' and 'nmcli device show ${STATIC_IFACE}' for what's excluding it, then re-run this script."
+    fi
 fi
 
 echo ""
