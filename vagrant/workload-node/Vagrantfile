@@ -36,6 +36,10 @@ Vagrant.configure("2") do |config|
   # isn't testing the installer, so the quick path is fine here.
   config.vm.provision "shell", inline: <<-SHELL
     set -euo pipefail
+    if ! command -v curl >/dev/null 2>&1; then
+      apt-get update
+      apt-get install -y curl
+    fi
     if ! command -v docker >/dev/null 2>&1; then
       curl -fsSL https://get.docker.com | sh
     fi

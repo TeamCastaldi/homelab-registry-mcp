@@ -35,6 +35,21 @@ installer-testing VM). You get:
 | `whoami-1` router | `Host(\`whoami1.homelab.test\`)` on port 80 | demo backend #1 |
 | `whoami-2` router | `Host(\`whoami2.homelab.test\`)` on port 80 | demo backend #2 |
 
+The router rules exist so registry-mcp's Traefik discovery has real hostnames
+to reconcile — `whoami1.homelab.test` / `whoami2.homelab.test` don't resolve
+anywhere by default. To actually browse a demo backend, either add them to
+your hosts file:
+
+```
+192.168.56.20  whoami1.homelab.test whoami2.homelab.test
+```
+
+or skip DNS entirely and send the Host header explicitly:
+
+```bash
+curl -H "Host: whoami1.homelab.test" http://192.168.56.20/
+```
+
 Point your `.env` at it:
 
 ```bash
