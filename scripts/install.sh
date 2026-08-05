@@ -226,12 +226,12 @@ echo "back the exact .env lines to add, plus a restart to enable discovery."
 echo ""
 
 # github is the common case, so it's the default on a bare Enter; an
-# operator who wants no write path at all types "skip" (or "none") rather
-# than leaving this blank, since blank now means "accept the default"
-# instead of "skip" -- see the pre-seeding comment on prompt() above for the
-# non-interactive way to skip (GIT_PROVIDER=).
+# operator who wants no write path at all types "skip" rather than leaving
+# this blank, since blank now means "accept the default" instead of "skip"
+# -- see the pre-seeding comment on prompt() above for the non-interactive
+# way to skip (GIT_PROVIDER=).
 prompt GIT_PROVIDER "Git provider for the write path (github/gitea, or 'skip')" "github"
-if [[ "$GIT_PROVIDER" =~ ^(skip|none)$ ]]; then
+if [ "$GIT_PROVIDER" == "skip" ]; then
     GIT_PROVIDER=""
 fi
 if [ -n "${GIT_PROVIDER:-}" ]; then
