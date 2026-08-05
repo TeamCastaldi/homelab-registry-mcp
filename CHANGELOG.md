@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.15.4](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.15.3...v0.15.4) (2026-08-05)
+
+
+### Bug Fixes
+
+* **deps:** patch 8 Dependabot alerts (mcp, cryptography, aiohttp, json-repair) ([e039a13](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/e039a13d86a6ca10e36a536704282d1ec9bcff08))
+* **deps:** patch 8 Dependabot alerts across mcp, cryptography, aiohttp, json-repair ([e9d1b50](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/e9d1b50a7e1c3166964a84c1ac16ee21fad17577))
+
 ## [0.15.3](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.15.2...v0.15.3) (2026-08-05)
 
 
