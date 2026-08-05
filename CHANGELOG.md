@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.15.3](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.15.2...v0.15.3) (2026-08-05)
+
+
+### Bug Fixes
+
+* auto-remediate ifupdown-unmanaged eth0 in bootstrap.sh Phase 6 ([a6c737e](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/a6c737ede7fc4e93cfc79b8ad7a68d02f25344d0))
+* default static IP to the current DHCP lease, not a hardcoded /24 ([1674ef1](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/1674ef1239a986e220e92f375ca3ba629c59564d))
+* don't rely on \s in awk for NetworkManager.conf editing ([f1b2aff](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/f1b2affee0bde051af83c608b5bfe496d7f78787))
+
 ## [0.15.2](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.15.1...v0.15.2) (2026-08-04)
 
 
