@@ -39,3 +39,8 @@ htmlcov/
 # deploy playbook under ansible/roles and ansible/playbooks are tracked)
 .ansible/
 ansible/archive/
+
+# Vagrant local state (vagrant/ — machine-specific: VM UUIDs, private keys,
+# box metadata; created the moment `vagrant up` runs, never portable)
+.vagrant/
+vagrant/.vagrant/
