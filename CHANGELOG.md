@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.16.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.15.4...v0.16.0) (2026-08-05)
+
+
+### Features
+
+* **install:** default git provider to github, reuse Step 2 static IP for Homepage ([b7c0406](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/b7c04064091aef03c1d4bca65c48a9f1d33ec71a))
+
+
+### Bug Fixes
+
+* **bootstrap:** skip re-asking network prompts on --network-only ([19d1927](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/19d1927e88feb173c648352928e3698fb41fca4d))
+* **install:** drop undocumented 'none' synonym for skipping git provider ([9fc420b](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/9fc420b1f9fb519ff57deefd8d102098b3765633))
+
 ## [0.15.4](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.15.3...v0.15.4) (2026-08-05)
 
 
