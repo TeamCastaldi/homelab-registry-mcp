@@ -26,7 +26,7 @@ vagrant up
 ```
 
 This boots a Debian 12 VM at `192.168.56.20`, installs Docker, and brings up
-`docker-compose.yml` (synced from this directory — no reclone, unlike the
+`docker-compose.yml` (rsynced from this directory — no reclone, unlike the
 installer-testing VM). You get:
 
 | Service | URL | Notes |
@@ -62,14 +62,32 @@ pass — `discovery_run_now` or wait for the scheduler — to see the two
 
 ## Editing
 
-Unlike `../slow-loop/Vagrantfile`, this one keeps the synced folder live. Change
-`docker-compose.yml`, then either:
+Unlike `../slow-loop/Vagrantfile`, this one keeps a synced folder — via
+`rsync`, not NFS or 9p, since those need either an NFS server on the host or
+a world-traversable home directory to work under `qemu:///system`, and
+neither is a safe thing to assume or set up on your behalf. rsync runs as
+your own user and just pushes files over SSH, so it needs neither.
+
+The trade-off: it's not continuously live. Change `docker-compose.yml`, then
+either sync once and re-provision:
 
 ```bash
-vagrant provision   # re-runs `docker compose up -d`
+vagrant rsync        # push local changes to the VM
+vagrant provision     # re-runs `docker compose up -d`
 ```
 
-or ssh in and drive Compose by hand:
+or, in a separate terminal, watch for changes and sync automatically while
+you edit:
+
+```bash
+vagrant rsync-auto
+```
+
+(you'll still need `vagrant provision`, or `docker compose up -d` over ssh,
+to actually apply a synced change — `rsync-auto` only keeps `/vagrant`
+current on the guest.)
+
+Or skip the synced folder for a single change and drive Compose by hand:
 
 ```bash
 vagrant ssh

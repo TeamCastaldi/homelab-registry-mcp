@@ -8,9 +8,10 @@
 # discovery/linking/proposal code.
 #
 # Unlike ../slow-loop/Vagrantfile, this one keeps the synced folder enabled:
-# edit docker-compose.yml here, `vagrant provision` (or ssh in and
-# `docker compose up -d`) to apply — no push-and-reclone needed, since
-# there's no installer flow to keep faithful to.
+# edit docker-compose.yml here, `vagrant rsync && vagrant provision` (or run
+# `vagrant rsync-auto` in another terminal for continuous sync) to apply —
+# no push-and-reclone needed, since there's no installer flow to keep
+# faithful to. See README.md's "Editing" section for the full workflow.
 Vagrant.configure("2") do |config|
   # ADR-001 §3.2 workload node OS baseline (Debian 12 / Ubuntu 22.04+).
   # Deliberately a different release than ../slow-loop/Vagrantfile's
@@ -25,14 +26,18 @@ Vagrant.configure("2") do |config|
   # this one directly.
   config.vm.network "private_network", ip: "192.168.56.20"
 
-  # type: "9p" avoids vagrant-libvirt's default NFS synced folder, which
-  # requires an NFS server (nfsd) running on the *host* — not something every
-  # dev machine has, and "It appears your machine doesn't support NFS..." is
-  # a confusing failure for what should be a one-command `vagrant up`. 9p is
-  # a QEMU/KVM-native passthrough the libvirt provider handles directly, no
-  # host-side service required; the guest just needs the 9p kernel modules,
-  # which Debian's stock kernel already ships.
-  config.vm.synced_folder ".", "/vagrant", type: "9p", accessmode: "mapped"
+  # type: "rsync" — avoids vagrant-libvirt's default NFS synced folder
+  # (requires nfsd running on the host) *and* its 9p alternative (under
+  # qemu:///system, qemu-system-x86_64 runs as a dedicated system user, not
+  # your own — it needs read+execute on every host directory from / down to
+  # this one, which fails with "Permission denied" the moment your home
+  # directory isn't world-traversable, which it normally shouldn't be).
+  # rsync runs client-side as *your* user, pushing files to the guest over
+  # SSH, so it never needs another UID to read into your home directory —
+  # no host config changes required. Trade-off: not continuously live; see
+  # README.md's "Editing" section for the sync workflow.
+  config.vm.synced_folder ".", "/vagrant", type: "rsync",
+    rsync__exclude: [".vagrant/"]
 
   config.vm.provider :libvirt do |lv|
     lv.memory = 2048
