@@ -67,7 +67,7 @@ DEFAULT_INSTALL_DIR="${HOME}/homelab-registry-mcp"
 # this, VERSION only controlled which install.sh you ran; every file it went
 # on to clone — bootstrap.sh, scripts/, monitoring/ — still came from main,
 # which silently defeated both release pinning and testing an unmerged
-# branch (e.g. the Vagrant slow loop, see vagrant/README.md).
+# branch (e.g. the Vagrant slow loop, see vagrant/slow-loop/README.md).
 VERSION="${VERSION:-}"
 
 # CI/test-only escape hatch: skips Step 6's static IP application entirely.

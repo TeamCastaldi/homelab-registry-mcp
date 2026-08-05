@@ -1,26 +1,28 @@
 # Disposable "workload node" fixture — runs Traefik plus a couple of demo
 # backend services so a running homelab-registry-mcp has something real to
 # discover, instead of mocks. This is NOT part of the install.sh/bootstrap.sh
-# two-tier validation loop documented in ../README.md and CLAUDE.md's
-# "Installer validation (two-tier)" section — that loop tests the installer;
-# this fixture gives you a live Traefik API to point TRAEFIK_API_URL at
-# (see .env.example) while developing discovery/linking/proposal code.
+# two-tier validation loop documented in ../slow-loop/README.md and
+# CLAUDE.md's "Installer validation (two-tier)" section — that loop tests
+# the installer; this fixture gives you a live Traefik API to point
+# TRAEFIK_API_URL at (see .env.example) while developing
+# discovery/linking/proposal code.
 #
-# Unlike ../Vagrantfile, this one keeps the synced folder enabled: edit
-# docker-compose.yml here, `vagrant provision` (or ssh in and
+# Unlike ../slow-loop/Vagrantfile, this one keeps the synced folder enabled:
+# edit docker-compose.yml here, `vagrant provision` (or ssh in and
 # `docker compose up -d`) to apply — no push-and-reclone needed, since
 # there's no installer flow to keep faithful to.
 Vagrant.configure("2") do |config|
   # ADR-001 §3.2 workload node OS baseline (Debian 12 / Ubuntu 22.04+).
-  # Deliberately a different release than ../Vagrantfile's trixie64 control
-  # plane box, closer to a real mixed-version lab; box downloads are cached
-  # separately per box anyway.
+  # Deliberately a different release than ../slow-loop/Vagrantfile's
+  # trixie64 control plane box, closer to a real mixed-version lab; box
+  # downloads are cached separately per box anyway.
   config.vm.box = "debian/bookworm64"
   config.vm.hostname = "homelab-workload-node"
 
   # Fixed address so TRAEFIK_API_URL doesn't change every time the VM is
-  # recreated. Reachable from the host; add the same line to ../Vagrantfile
-  # if you also want the install-loop VM to reach this one directly.
+  # recreated. Reachable from the host; add the same line to
+  # ../slow-loop/Vagrantfile if you also want the install-loop VM to reach
+  # this one directly.
   config.vm.network "private_network", ip: "192.168.56.20"
 
   config.vm.synced_folder ".", "/vagrant"

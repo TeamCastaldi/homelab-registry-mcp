@@ -103,7 +103,7 @@ not your local working tree.
   Runs non-interactively on a hosted runner in a few minutes; also runs
   automatically on any PR touching `scripts/**`. Catches logic bugs, env-var
   plumbing issues, and container-health regressions.
-- **Slow — [`vagrant/`](../vagrant/README.md)** (Vagrant + libvirt, Debian
+- **Slow — [`vagrant/slow-loop/`](../vagrant/slow-loop/README.md)** (Vagrant + libvirt, Debian
   trixie64). Real systemd, real network-interface ownership, and the only
   place the static-IP step actually runs — the fast loop always skips it.
   Manual and interactive; reach for it when a change needs that fidelity.

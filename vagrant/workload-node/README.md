@@ -2,20 +2,20 @@
 
 A disposable VM running Traefik plus a couple of demo backend services, so a
 running `homelab-registry-mcp` (started via `uv run registry-mcp` on your
-host, or from `../Vagrantfile`'s control-plane VM) has a real Traefik API to
-discover against instead of mocks.
+host, or from `../slow-loop/Vagrantfile`'s control-plane VM) has a real
+Traefik API to discover against instead of mocks.
 
 This is **not** part of the install.sh/bootstrap.sh two-tier validation loop
-— see [`../README.md`](../README.md) and CLAUDE.md's "Installer validation
-(two-tier)" section for that. This fixture is for developing/testing the
-discovery, linking, and proposal code paths (`TRAEFIK_API_URL`,
-`discovery_connect_traefik`, `service_get_full_context`, etc.) against
-something live.
+— see [`../slow-loop/README.md`](../slow-loop/README.md) and CLAUDE.md's
+"Installer validation (two-tier)" section for that. This fixture is for
+developing/testing the discovery, linking, and proposal code paths
+(`TRAEFIK_API_URL`, `discovery_connect_traefik`, `service_get_full_context`,
+etc.) against something live.
 
 ## Prerequisites
 
-Same as `../Vagrantfile`: Vagrant, the `vagrant-libvirt` plugin, and a
-working libvirt/KVM setup (`virt-host-validate qemu`).
+Same as `../slow-loop/Vagrantfile`: Vagrant, the `vagrant-libvirt` plugin,
+and a working libvirt/KVM setup (`virt-host-validate qemu`).
 
 ## Usage
 
@@ -47,7 +47,7 @@ pass — `discovery_run_now` or wait for the scheduler — to see the two
 
 ## Editing
 
-Unlike `../Vagrantfile`, this one keeps the synced folder live. Change
+Unlike `../slow-loop/Vagrantfile`, this one keeps the synced folder live. Change
 `docker-compose.yml`, then either:
 
 ```bash
@@ -74,4 +74,4 @@ vagrant destroy -f
 ```
 
 Nothing here is meant to persist between rounds; treat state as disposable,
-same as `../Vagrantfile`.
+same as `../slow-loop/Vagrantfile`.
