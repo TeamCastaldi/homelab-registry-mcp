@@ -225,7 +225,15 @@ echo "(ask your AI client to run them) — they validate the connection and hand
 echo "back the exact .env lines to add, plus a restart to enable discovery."
 echo ""
 
-prompt GIT_PROVIDER "Git provider for the write path (github/gitea, blank to skip)"
+# github is the common case, so it's the default on a bare Enter; an
+# operator who wants no write path at all types "skip" rather than leaving
+# this blank, since blank now means "accept the default" instead of "skip"
+# -- see the pre-seeding comment on prompt() above for the non-interactive
+# way to skip (GIT_PROVIDER=).
+prompt GIT_PROVIDER "Git provider for the write path (github/gitea, or 'skip')" "github"
+if [ "$GIT_PROVIDER" == "skip" ]; then
+    GIT_PROVIDER=""
+fi
 if [ -n "${GIT_PROVIDER:-}" ]; then
     prompt GIT_REPO "Homelab config repo (owner/name)"
     prompt_secret GIT_TOKEN "Git token (classic: repo scope; fine-grained: Contents + Pull requests, read+write)"
@@ -270,6 +278,23 @@ COMPOSE_PROFILES="${COMPOSE_PROFILES:-}"
 read -rp "Enable the ADR-005 monitoring stack alongside the registry? [y/N]: " enable_monitoring
 if [[ "$enable_monitoring" =~ ^[Yy]$ ]]; then
     COMPOSE_PROFILES="monitoring${COMPOSE_PROFILES:+,${COMPOSE_PROFILES}}"
+    # Step 2 (bootstrap.sh --skip-network) already asked for this node's
+    # static IP and persisted it to NETWORK_STATE_FILE (see bootstrap.sh) --
+    # reuse that answer instead of making the operator retype the same
+    # address for Homepage's links. Only falls back to asking if the state
+    # file is missing (e.g. bootstrap.sh's network prompts were pre-seeded
+    # via env vars and skipped, so nothing was ever written) or the operator
+    # already pre-seeded CONTROL_PLANE_HOST themselves.
+    if [ -z "${CONTROL_PLANE_HOST+set}" ]; then
+        NETWORK_STATE_FILE="${INSTALL_DIR}/ansible/archive/outputs/.bootstrap-network-state"
+        if [ -f "$NETWORK_STATE_FILE" ]; then
+            _saved_ip="$(awk -F= '$1=="SAVED_TARGET_IP" { print $2 }' "$NETWORK_STATE_FILE")"
+            if [ -n "$_saved_ip" ]; then
+                CONTROL_PLANE_HOST="$_saved_ip"
+                info "Using ${CONTROL_PLANE_HOST} (the static IP from Step 2) for Homepage links"
+            fi
+        fi
+    fi
     prompt CONTROL_PLANE_HOST "This node's LAN IP or hostname (for Homepage links)"
     prompt HEALTHCHECKS_PING_URL "Healthchecks.io ping URL (dead man's switch, blank to skip)"
     prompt BESZEL_AGENT_KEY "Beszel hub's agent public key (blank if you haven't set up the hub yet)"

@@ -29,7 +29,9 @@
 # --skip-network runs steps 1-5 only (used by install.sh, which needs Docker
 # etc. installed before it brings the MCP server up — the network swap has
 # to happen last so the SSH session doesn't drop before that).
-# --network-only runs step 6 only, against an already-bootstrapped node.
+# --network-only runs step 6 only, against an already-bootstrapped node,
+# silently reusing the static IP/prefix/gateway/DNS collected during the
+# --skip-network run instead of asking again.
 #
 # After reconnecting (ssh $TARGET_USER@192.168.1.200):
 #   - Start the MCP server
@@ -48,11 +50,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # with --network-only (Phase 6, which actually applies them). Each is a
 # fresh process with no memory of the other, so without this file the
 # second invocation would re-prompt from the hardcoded defaults instead of
-# what was just answered. Written after validation below; read as the
-# prompt defaults here; removed once Phase 6 actually applies the config
-# via nmcli, so a later, unrelated bootstrap run doesn't inherit stale
-# answers. Left in place if the operator declines to apply in Phase 6, so
-# a subsequent --network-only run still remembers the answer.
+# what was just answered. Written after validation below; a --network-only
+# run with all four fields present skips its own prompts entirely and uses
+# these values directly (see NETWORK_STATE_COMPLETE below) rather than just
+# offering them as defaults to re-confirm. Removed once Phase 6 actually
+# applies the config via nmcli, so a later, unrelated bootstrap run doesn't
+# inherit stale answers. Left in place if the operator declines to apply in
+# Phase 6, so a subsequent --network-only run still remembers the answer.
 NETWORK_STATE_FILE="${SCRIPT_DIR}/../ansible/archive/outputs/.bootstrap-network-state"
 
 # The user to reconnect/SSH as and to configure in the Ansible inventory.
@@ -203,6 +207,12 @@ DETECTED_DNS="$(awk '/^nameserver/ && $2 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ { 
 # both the live DHCP detection and the hardcoded fallbacks — this is what
 # lets --network-only reuse what was already typed for --skip-network,
 # instead of prompting from 192.168.1.200 again.
+# NETWORK_STATE_COMPLETE gates the prompt skip below: only a --network-only
+# run following a --skip-network run that collected all four values gets to
+# skip the questions outright. A file with anything missing (hand-edited,
+# truncated, or from before this field was added) falls back to prompting,
+# same as if the file didn't exist.
+NETWORK_STATE_COMPLETE=false
 if [ -f "$NETWORK_STATE_FILE" ]; then
     # Parsed as plain key=value data, not sourced — the file lives in a
     # writable path, and sourcing it would execute its contents as shell.
@@ -218,7 +228,13 @@ if [ -f "$NETWORK_STATE_FILE" ]; then
     DETECTED_PREFIX="${SAVED_TARGET_PREFIX:-$DETECTED_PREFIX}"
     DETECTED_DNS="${SAVED_TARGET_DNS:-$DETECTED_DNS}"
     DETECTED_IP="${SAVED_TARGET_IP:-$DETECTED_IP}"
-    info "Reusing network answers saved from the earlier bootstrap run as the defaults below — press Enter through all four to accept them as-is, or type a new value to change one."
+    if [ -n "${SAVED_TARGET_IP:-}" ] && [ -n "${SAVED_TARGET_PREFIX:-}" ] && \
+       [ -n "${SAVED_TARGET_GATEWAY:-}" ] && [ -n "${SAVED_TARGET_DNS:-}" ]; then
+        NETWORK_STATE_COMPLETE=true
+    fi
+    if [ "$NETWORK_ONLY" != "true" ] || [ "$NETWORK_STATE_COMPLETE" != "true" ]; then
+        info "Reusing network answers saved from the earlier bootstrap run as the defaults below — press Enter through all four to accept them as-is, or type a new value to change one."
+    fi
 fi
 
 # --- VALIDATION HELPERS ---
@@ -286,37 +302,48 @@ else
     echo ""
 fi
 
-# The network config is always collected (facts/inventory in Phase 5 need it
-# whether or not it's applied here) — --skip-network only defers *applying*
-# it to Phase 6. Defaults are the node's live DHCP values where detectable,
-# so a correct answer is usually just pressing Enter through all four
-# prompts — but every value is editable, since the static IP an operator
-# picks may land in a different subnet than the current DHCP lease.
-read -rp "Enter static IP for ${STATIC_IFACE} [${DETECTED_IP:-$DEFAULT_IP}]: " TARGET_IP
-TARGET_IP="${TARGET_IP:-${DETECTED_IP:-$DEFAULT_IP}}"
-valid_ip_format "$TARGET_IP" || die "Invalid IP address: $TARGET_IP"
+if [ "$NETWORK_ONLY" == "true" ] && [ "$NETWORK_STATE_COMPLETE" == "true" ]; then
+    # install.sh's Step 2 (--skip-network) already collected and validated
+    # all four values; asking again here would just be the operator
+    # pressing Enter four times to confirm what they already typed once.
+    TARGET_IP="$SAVED_TARGET_IP"
+    TARGET_PREFIX="$SAVED_TARGET_PREFIX"
+    TARGET_GATEWAY="$SAVED_TARGET_GATEWAY"
+    TARGET_DNS="$SAVED_TARGET_DNS"
+    info "Reusing static IP ${TARGET_IP}/${TARGET_PREFIX} collected earlier — skipping the network prompts."
+else
+    # The network config is always collected (facts/inventory in Phase 5 need it
+    # whether or not it's applied here) — --skip-network only defers *applying*
+    # it to Phase 6. Defaults are the node's live DHCP values where detectable,
+    # so a correct answer is usually just pressing Enter through all four
+    # prompts — but every value is editable, since the static IP an operator
+    # picks may land in a different subnet than the current DHCP lease.
+    read -rp "Enter static IP for ${STATIC_IFACE} [${DETECTED_IP:-$DEFAULT_IP}]: " TARGET_IP
+    TARGET_IP="${TARGET_IP:-${DETECTED_IP:-$DEFAULT_IP}}"
+    valid_ip_format "$TARGET_IP" || die "Invalid IP address: $TARGET_IP"
 
-read -rp "Subnet prefix length (CIDR bits) [${DETECTED_PREFIX:-$DEFAULT_PREFIX}]: " TARGET_PREFIX
-TARGET_PREFIX="${TARGET_PREFIX:-${DETECTED_PREFIX:-$DEFAULT_PREFIX}}"
-[[ "$TARGET_PREFIX" =~ ^[0-9]+$ ]] && [ "$TARGET_PREFIX" -ge 1 ] && [ "$TARGET_PREFIX" -le 32 ] || \
-    die "Invalid subnet prefix: $TARGET_PREFIX (expected 1-32)"
+    read -rp "Subnet prefix length (CIDR bits) [${DETECTED_PREFIX:-$DEFAULT_PREFIX}]: " TARGET_PREFIX
+    TARGET_PREFIX="${TARGET_PREFIX:-${DETECTED_PREFIX:-$DEFAULT_PREFIX}}"
+    [[ "$TARGET_PREFIX" =~ ^[0-9]+$ ]] && [ "$TARGET_PREFIX" -ge 1 ] && [ "$TARGET_PREFIX" -le 32 ] || \
+        die "Invalid subnet prefix: $TARGET_PREFIX (expected 1-32)"
 
-read -rp "Gateway [${DETECTED_GATEWAY:-$GATEWAY}]: " TARGET_GATEWAY
-TARGET_GATEWAY="${TARGET_GATEWAY:-${DETECTED_GATEWAY:-$GATEWAY}}"
-valid_ip_format "$TARGET_GATEWAY" || die "Invalid gateway address: $TARGET_GATEWAY"
+    read -rp "Gateway [${DETECTED_GATEWAY:-$GATEWAY}]: " TARGET_GATEWAY
+    TARGET_GATEWAY="${TARGET_GATEWAY:-${DETECTED_GATEWAY:-$GATEWAY}}"
+    valid_ip_format "$TARGET_GATEWAY" || die "Invalid gateway address: $TARGET_GATEWAY"
 
-read -rp "DNS servers, comma-separated [${DETECTED_DNS:-${DNS_PRIMARY},${DNS_SECONDARY}}]: " TARGET_DNS
-TARGET_DNS="${TARGET_DNS:-${DETECTED_DNS:-${DNS_PRIMARY},${DNS_SECONDARY}}}"
-IFS=',' read -ra _dns_check <<< "$TARGET_DNS"
-for _dns_entry in "${_dns_check[@]}"; do
-    valid_ip_format "$_dns_entry" || die "Invalid DNS server address: $_dns_entry"
-done
+    read -rp "DNS servers, comma-separated [${DETECTED_DNS:-${DNS_PRIMARY},${DNS_SECONDARY}}]: " TARGET_DNS
+    TARGET_DNS="${TARGET_DNS:-${DETECTED_DNS:-${DNS_PRIMARY},${DNS_SECONDARY}}}"
+    IFS=',' read -ra _dns_check <<< "$TARGET_DNS"
+    for _dns_entry in "${_dns_check[@]}"; do
+        valid_ip_format "$_dns_entry" || die "Invalid DNS server address: $_dns_entry"
+    done
 
-# Sanity check: the gateway should live in the same subnet as the chosen
-# static IP. This is exactly the kind of mismatch a hardcoded gateway
-# produces silently — catch it here instead.
-if [ "$(network_addr "$TARGET_IP" "$TARGET_PREFIX")" != "$(network_addr "$TARGET_GATEWAY" "$TARGET_PREFIX")" ]; then
-    warn "Gateway ${TARGET_GATEWAY} does not appear to be in ${TARGET_IP}/${TARGET_PREFIX}'s subnet — double-check before proceeding."
+    # Sanity check: the gateway should live in the same subnet as the chosen
+    # static IP. This is exactly the kind of mismatch a hardcoded gateway
+    # produces silently — catch it here instead.
+    if [ "$(network_addr "$TARGET_IP" "$TARGET_PREFIX")" != "$(network_addr "$TARGET_GATEWAY" "$TARGET_PREFIX")" ]; then
+        warn "Gateway ${TARGET_GATEWAY} does not appear to be in ${TARGET_IP}/${TARGET_PREFIX}'s subnet — double-check before proceeding."
+    fi
 fi
 
 # Persist so a subsequent --network-only invocation (install.sh Step 6)
