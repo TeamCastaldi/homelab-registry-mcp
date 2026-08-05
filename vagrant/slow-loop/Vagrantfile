@@ -1,6 +1,6 @@
 # Slow-loop test VM for scripts/install.sh / scripts/bootstrap.sh — see
-# vagrant/README.md for how to use it and CLAUDE.md's "Installer validation
-# (two-tier)" section for why it exists alongside the fast CI loop
+# README.md (this directory) for how to use it and CLAUDE.md's "Installer
+# validation (two-tier)" section for why it exists alongside the fast CI loop
 # (.github/workflows/install-validation.yml).
 #
 # This VM is disposable by design: `vagrant destroy -f` between runs, since

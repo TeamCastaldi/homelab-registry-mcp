@@ -75,7 +75,7 @@ gh workflow run install-validation.yml --ref your-branch-name
 Push your branch first — `install-validation.yml` also runs automatically
 once you open the PR (it's scoped to `scripts/**` changes via `paths:`), but
 `workflow_dispatch` lets you iterate before that. Reach for the slow loop
-(`vagrant/README.md` — real systemd, real network-interface ownership,
+(`vagrant/slow-loop/README.md` — real systemd, real network-interface ownership,
 actually applying the static IP) only for changes the fast loop structurally
 can't verify.
 

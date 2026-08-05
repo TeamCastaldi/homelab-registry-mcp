@@ -1,0 +1,40 @@
+services:
+  traefik:
+    image: traefik:v3.2
+    container_name: traefik
+    restart: unless-stopped
+    command:
+      # Insecure API/dashboard on :8080 — fine for a disposable, LAN-only
+      # test VM; this is what TRAEFIK_API_URL points at, never do this on
+      # a real workload node.
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  # Two demo backends so discovery has more than one router to reconcile.
+  # Swap these for real services (or add more) as your testing needs grow.
+  whoami-1:
+    image: traefik/whoami
+    container_name: whoami-1
+    restart: unless-stopped
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.whoami-1.rule: "Host(`whoami1.homelab.test`)"
+      traefik.http.routers.whoami-1.entrypoints: "web"
+      traefik.http.services.whoami-1.loadbalancer.server.port: "80"
+
+  whoami-2:
+    image: traefik/whoami
+    container_name: whoami-2
+    restart: unless-stopped
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.whoami-2.rule: "Host(`whoami2.homelab.test`)"
+      traefik.http.routers.whoami-2.entrypoints: "web"
+      traefik.http.services.whoami-2.loadbalancer.server.port: "80"
