@@ -96,3 +96,10 @@ gh workflow run install-validation.yml --ref your-branch-name
 
 Reserve re-running this VM for changes the fast loop can't verify (see
 above).
+
+## Other Vagrant fixtures
+
+[`workload-node/`](workload-node/README.md) is a separate, unrelated VM: a
+live Traefik + demo services fixture for developing/testing discovery and
+linking code against something real, not part of this install-validation
+loop. See its own README.
