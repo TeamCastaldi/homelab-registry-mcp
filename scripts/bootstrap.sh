@@ -178,6 +178,19 @@ NM_CON_NAME="static-${STATIC_IFACE}"
 
 DETECTED_GATEWAY="$(ip route show default 2>/dev/null | \
     awk '/^default/ { print $3; exit }' || true)"
+# DEFAULT_IP above is a last-resort fallback, not a live value -- unlike
+# gateway/prefix/DNS, it was never actually detected, so on any subnet other
+# than 192.168.1.0/24 (this project's fixed-config fallback, not
+# universal — e.g. libvirt's default NAT range, or any home router that
+# isn't 192.168.1.1) pressing Enter through all four prompts silently paired
+# a 192.168.1.x static IP with a same-subnet-as-*this*-DHCP-lease gateway,
+# producing a broken combination the warning below catches but doesn't
+# prevent. Detecting the current lease's own IP and offering it as the
+# default keeps the two in the same subnet by construction — "make my
+# current address static" is also the more sensible default behavior than
+# "assume 192.168.1.200," independent of the mismatch this fixes.
+DETECTED_IP="$(ip -o -f inet addr show dev "$STATIC_IFACE" 2>/dev/null | \
+    awk '{print $4}' | cut -d/ -f1 | head -n1 || true)"
 DETECTED_PREFIX="$(ip -o -f inet addr show dev "$STATIC_IFACE" 2>/dev/null | \
     awk '{print $4}' | cut -d/ -f2 | head -n1 || true)"
 # IPv4 only: an IPv6 nameserver here (common with systemd-resolved) would
@@ -204,7 +217,7 @@ if [ -f "$NETWORK_STATE_FILE" ]; then
     DETECTED_GATEWAY="${SAVED_TARGET_GATEWAY:-$DETECTED_GATEWAY}"
     DETECTED_PREFIX="${SAVED_TARGET_PREFIX:-$DETECTED_PREFIX}"
     DETECTED_DNS="${SAVED_TARGET_DNS:-$DETECTED_DNS}"
-    DEFAULT_IP="${SAVED_TARGET_IP:-$DEFAULT_IP}"
+    DETECTED_IP="${SAVED_TARGET_IP:-$DETECTED_IP}"
     info "Reusing network answers saved from the earlier bootstrap run as the defaults below — press Enter through all four to accept them as-is, or type a new value to change one."
 fi
 
@@ -279,8 +292,8 @@ fi
 # so a correct answer is usually just pressing Enter through all four
 # prompts — but every value is editable, since the static IP an operator
 # picks may land in a different subnet than the current DHCP lease.
-read -rp "Enter static IP for ${STATIC_IFACE} [${DEFAULT_IP}]: " TARGET_IP
-TARGET_IP="${TARGET_IP:-${DEFAULT_IP}}"
+read -rp "Enter static IP for ${STATIC_IFACE} [${DETECTED_IP:-$DEFAULT_IP}]: " TARGET_IP
+TARGET_IP="${TARGET_IP:-${DETECTED_IP:-$DEFAULT_IP}}"
 valid_ip_format "$TARGET_IP" || die "Invalid IP address: $TARGET_IP"
 
 read -rp "Subnet prefix length (CIDR bits) [${DETECTED_PREFIX:-$DEFAULT_PREFIX}]: " TARGET_PREFIX
@@ -485,7 +498,9 @@ fi
 # exist; if netplan/systemd-networkd (Ubuntu) or ifupdown via
 # /etc/network/interfaces (Debian, including Raspberry Pi OS) is still
 # rendering the interface, it may remain unmanaged — Phase 6 checks for
-# that explicitly before using it.
+# that explicitly before using it, and fixes the ifupdown case (the common
+# one on this project's primary hardware target) in place rather than
+# requiring a manual re-run; netplan still needs a manual fix.
 if command -v nmcli &>/dev/null; then
     info "NetworkManager already installed: $(nmcli --version 2>/dev/null | head -n1 || echo installed)"
 else
@@ -717,7 +732,40 @@ elif [ "$_nm_iface_state" == "unmanaged" ]; then
     if compgen -G "/etc/netplan/*.yaml" > /dev/null 2>&1; then
         die "NetworkManager is installed but ${STATIC_IFACE} is unmanaged — netplan is likely still rendering it via systemd-networkd. Add 'renderer: NetworkManager' to /etc/netplan/*.yaml, run 'sudo netplan apply', then re-run this script."
     elif grep -qE "^\s*(auto|allow-hotplug)\s+${STATIC_IFACE}\b" /etc/network/interfaces 2>/dev/null; then
-        die "NetworkManager is installed but ${STATIC_IFACE} is unmanaged — ifupdown (/etc/network/interfaces) owns it instead (this is the common case on Debian/Raspberry Pi OS). Set 'managed=true' under the [ifupdown] section in /etc/NetworkManager/NetworkManager.conf, run 'sudo systemctl restart NetworkManager', then re-run this script."
+        # The common case on Debian/Raspberry Pi OS (this project's primary
+        # hardware target, ADR-001 §3.1): the stock NetworkManager.conf ships
+        # `managed=false` under [ifupdown] specifically to defer to it. Fixed
+        # in place rather than dying — requiring a manual edit + restart +
+        # re-run here would break the "one-shot" promise for the majority of
+        # real installs, not just an edge case. (The netplan branch above
+        # stays manual: a YAML rewrite isn't safe to automate the same way.)
+        action "${STATIC_IFACE} is unmanaged because ifupdown owns it — setting managed=true under [ifupdown] in NetworkManager.conf..."
+        _nm_conf="/etc/NetworkManager/NetworkManager.conf"
+        if sudo grep -q '^\[ifupdown\]' "$_nm_conf" 2>/dev/null; then
+            # Delete-then-insert instead of detect-then-branch: sidesteps
+            # needing to know whether a managed= key already exists (and in
+            # what form — `managed=false`, `managed = false`, indented, ...)
+            # by unconditionally removing any within the [ifupdown] section
+            # (sed's end-of-range address isn't tested against the same line
+            # the range starts on, so this correctly stops at the *next*
+            # section header, or EOF if [ifupdown] is the last one) and
+            # inserting exactly one fresh line. POSIX bracket expressions
+            # ([[:space:]]), not \s — Debian's default /usr/bin/awk (mawk)
+            # doesn't understand \s as whitespace, so relying on it for
+            # detection previously risked silently leaving the original
+            # `managed=false` in place as a duplicate, un-overridden key.
+            sudo sed -i '/^\[ifupdown\]/,/^\[/{/^[[:space:]]*managed[[:space:]]*=/d}' "$_nm_conf"
+            sudo sed -i '/^\[ifupdown\]/a managed=true' "$_nm_conf"
+        else
+            printf '\n[ifupdown]\nmanaged=true\n' | sudo tee -a "$_nm_conf" > /dev/null
+        fi
+        sudo systemctl restart NetworkManager
+        sleep 2
+        _nm_iface_state="$(nmcli -t -f DEVICE,STATE device status 2>/dev/null | awk -F: -v d="$STATIC_IFACE" '$1==d {print $2}' || true)"
+        if [ "$_nm_iface_state" == "unmanaged" ]; then
+            die "Set managed=true under [ifupdown] in ${_nm_conf} and restarted NetworkManager, but ${STATIC_IFACE} is still unmanaged. Check 'cat ${_nm_conf}' and 'nmcli device show ${STATIC_IFACE}' for what else might be excluding it."
+        fi
+        info "${STATIC_IFACE} is now managed by NetworkManager"
     else
         die "NetworkManager is installed but ${STATIC_IFACE} is unmanaged, and the cause couldn't be auto-detected (no netplan config, no matching /etc/network/interfaces stanza). Check 'cat /etc/NetworkManager/NetworkManager.conf' and 'nmcli device show ${STATIC_IFACE}' for what's excluding it, then re-run this script."
     fi
