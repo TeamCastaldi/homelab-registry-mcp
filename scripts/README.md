@@ -44,6 +44,14 @@ below instead.
     username/password are prompted for (blank password also
     auto-generates). See
     [docs/ARDs/ADR-006-Pi-Non-MCP-Services-Komodo-Traefik.md](../docs/ARDs/ADR-006-Pi-Non-MCP-Services-Komodo-Traefik.md).
+  - **Ansible inventory / hardware onboarding prompt**: folded in from
+    `setup-ansible-inventory.sh` below. Only offered when a homelab config
+    repo already exists at `SECRETS_REPO_PATH` (`setup-homelab-repo.sh`
+    creates it — not yet folded into this installer, so a fresh Pi with no
+    such repo skips this prompt and prints how to run it later). When
+    accepted, this node self-onboards into the Ansible inventory the same
+    way any other host would — see that script's own entry for the details,
+    which apply identically here.
 - **`bootstrap.sh`** — prepares a fresh node for the homelab control plane:
   installs Docker, Ansible, `uv`, `git-crypt`, and the GitHub CLI, sets the
   hostname, generates an SSH key, and applies a static IP. Supports Debian and
@@ -86,10 +94,15 @@ below instead.
   the control-plane's own entry — `ssh-keygen` only creates the key pair
   locally, nothing else authorizes it on a target — falling back to
   printing the manual command if that fails or the key's `.pub` file is
-  missing. Commits and pushes when done. Idempotent: safe to re-run
-  any time you want to add hosts; skips any host already present by name and
-  leaves an existing `ansible.cfg` untouched. Run from the control-plane
-  node: `scripts/setup-ansible-inventory.sh`.
+  missing. Commits and pushes when done — a push failure warns rather than
+  aborting, since the local commit is all `hardware-discover-now` actually
+  needs. Idempotent: safe to re-run any time you want to add hosts; skips
+  any host already present by name and leaves an existing `ansible.cfg`
+  untouched. Run from the control-plane node standalone
+  (`scripts/setup-ansible-inventory.sh`), or via `install.sh`'s own Ansible
+  inventory prompt above, which runs this exact logic inline once a homelab
+  config repo exists — this script stays useful on its own for adding hosts
+  later, after the initial install.
 
 ## Testing changes to install.sh/bootstrap.sh
 

@@ -106,11 +106,23 @@ the hood. In order:
    instance elsewhere in your lab. Connect those once they exist (see
    [Connecting Traefik and Authentik later](#connecting-traefik-and-authentik-later)
    below).
-5. **Starts the server**: `docker compose pull && docker compose up -d`, then
-   waits for it to report running. Anything enabled in step 4 (Komodo,
-   Traefik) comes up in this same command, via `COMPOSE_PROFILES` written to
-   `.env`.
-6. **Applies the static IP** last, by handing off to
+5. **Sets up the Ansible inventory, if a homelab config repo already exists**
+   at `SECRETS_REPO_PATH` (`/opt/homelab` by default — created separately by
+   `scripts/setup-homelab-repo.sh`, not yet run by this installer). If it
+   does, and you opt in: writes `ansible.cfg` + `ansible/inventory.yml`,
+   seeds this node into the inventory itself (auto-detects hostname/LAN IP,
+   authorizes its own SSH key over real SSH — not a local connection, so it's
+   reachable the same way any other host is), then prompts for more hosts
+   (blank name to finish). Commits and pushes — a push failure only warns,
+   it doesn't abort the rest of the installer. This is what gives
+   `hardware-discover-now` a real, verified node to fact-gather once the
+   server is up. No homelab repo yet → this step prints how to run it later
+   and skips cleanly; nothing else in the installer depends on it.
+6. **Starts the server**: `docker compose pull && docker compose up -d`, then
+   waits for it to report running. Anything enabled in steps 4–5 (Komodo,
+   Traefik, the Ansible inventory) comes up or takes effect in this same
+   step, via `.env`.
+7. **Applies the static IP** last, by handing off to
    `bootstrap.sh --network-only` — this is deliberately the final step, so the
    server is already up and running by the time this drops your SSH session.
    Reconnect at the new IP afterward: `ssh <user>@<new-ip>`.

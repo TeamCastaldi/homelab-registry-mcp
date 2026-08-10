@@ -34,9 +34,13 @@
 #      SSH key. Deliberately skips the static-IP swap. Every install step
 #      skips cleanly if already present, but still fixes up required state
 #      (Docker group membership, NetworkManager service) even when it does.
-#   4. Prompt for Git/DSPy secrets and opt-in, write .env
-#   5. `docker compose up -d` and confirm the server is running
-#   6. Run `bootstrap.sh --network-only` — applies the static IP last, unless
+#   4. Prompt for Git/DSPy/Komodo/Traefik secrets and opt-in
+#   5. If a homelab config repo already exists (scripts/setup-homelab-repo.sh
+#      — not run by this installer yet): optionally seed this node into the
+#      Ansible inventory hardware-discover-now reads, so hardware onboarding
+#      has a real, verified entry for this Pi from the start
+#   6. Write .env, `docker compose up -d`, and confirm the server is running
+#   7. Run `bootstrap.sh --network-only` — applies the static IP last, unless
 #      INSTALL_SKIP_NETWORK=true (CI/test mode — see below), which skips it
 # ==============================================================================
 
@@ -70,7 +74,7 @@ DEFAULT_INSTALL_DIR="${HOME}/homelab-registry-mcp"
 # branch (e.g. the Vagrant slow loop, see vagrant/slow-loop/README.md).
 VERSION="${VERSION:-}"
 
-# CI/test-only escape hatch: skips Step 6's static IP application entirely.
+# CI/test-only escape hatch: skips Step 7's static IP application entirely.
 # A GitHub Actions runner's own connectivity to the Actions coordinator runs
 # over its network interface, so `nmcli connection up` there could sever that
 # connection mid-job for a reason unrelated to whether install.sh itself is
@@ -207,7 +211,7 @@ cd "$INSTALL_DIR"
 # =============================================================================
 
 header "[STEP 2] OS provisioning"
-info "Handing off to scripts/bootstrap.sh --skip-network (static IP applied last, in Step 6)"
+info "Handing off to scripts/bootstrap.sh --skip-network (static IP applied last, in Step 7)"
 
 bash scripts/bootstrap.sh --skip-network
 
@@ -340,10 +344,191 @@ if [[ "$enable_traefik" =~ ^[Yy]$ ]]; then
 fi
 
 # =============================================================================
-# STEP 4: WRITE .env
+# STEP 4: ANSIBLE INVENTORY (HARDWARE ONBOARDING)
 # =============================================================================
 
-header "[STEP 4] Writing .env"
+header "[STEP 4] Ansible inventory (hardware onboarding)"
+
+# hardware-discover-now and the reusable CD workflow both read
+# ansible.cfg + ansible/inventory.yml from the homelab config repo
+# (SECRETS_REPO_PATH) — neither Ansible nor this project ships one for you.
+# scripts/setup-homelab-repo.sh creates that repo; it isn't folded into this
+# installer yet (see scripts/README.md), so a fresh Pi with no such repo
+# skips this step cleanly rather than blocking everything else on a
+# prerequisite this script doesn't create itself.
+ANSIBLE_INVENTORY_REPO="${SECRETS_REPO_PATH:-/opt/homelab}"
+if [ ! -d "${ANSIBLE_INVENTORY_REPO}/.git" ]; then
+    warn "No homelab config repo found at ${ANSIBLE_INVENTORY_REPO} — skipping."
+    warn "Run scripts/setup-homelab-repo.sh, then scripts/setup-ansible-inventory.sh,"
+    warn "to enable hardware onboarding later."
+else
+    echo "Found a homelab config repo at ${ANSIBLE_INVENTORY_REPO}. Setting this up"
+    echo "seeds this node into the Ansible inventory hardware-discover-now reads,"
+    echo "so the hardware registry gets a real, verified entry for this Pi."
+    echo ""
+    read -rp "Set up the Ansible inventory now? [y/N]: " enable_ansible_inventory
+    if [[ "$enable_ansible_inventory" =~ ^[Yy]$ ]]; then
+        prompt ANSIBLE_SSH_USER "SSH user Ansible should connect as on every host" "$(whoami)"
+        prompt SSH_KEY_PATH "Path to the SSH private key Ansible should use" "${HOME}/.ssh/id_ed25519"
+
+        CAN_AUTHORIZE=true
+        if [ ! -f "${SSH_KEY_PATH}.pub" ]; then
+            warn "${SSH_KEY_PATH}.pub not found — can't auto-authorize this key on new hosts."
+            warn "You'll need to run ssh-copy-id yourself for each host added below."
+            CAN_AUTHORIZE=false
+        fi
+
+        # Authorizes SSH_KEY_PATH on one remote host (ssh-copy-id only copies
+        # the *public* key — never touches the private half). Idempotent:
+        # ssh-copy-id already skips a key that's authorized there. Never
+        # aborts the script — an unreachable host here just means retrying it
+        # manually later.
+        authorize_host() {
+            local ip="$1"
+            if [ "$CAN_AUTHORIZE" != "true" ]; then
+                return
+            fi
+            if ssh-copy-id -i "${SSH_KEY_PATH}.pub" -o StrictHostKeyChecking=accept-new \
+                "${ANSIBLE_SSH_USER}@${ip}" >/dev/null 2>&1; then
+                info "Authorized this key on ${ip}"
+            else
+                warn "Couldn't authorize the key on ${ip} — run manually: ssh-copy-id -i ${SSH_KEY_PATH}.pub ${ANSIBLE_SSH_USER}@${ip}"
+            fi
+        }
+
+        cd "$ANSIBLE_INVENTORY_REPO"
+
+        if [ -f ansible.cfg ]; then
+            info "ansible.cfg already exists — leaving it as-is"
+        else
+            action "Writing ansible.cfg..."
+            # roles_path is intentionally absent: .github/workflows/deploy.yml
+            # sets ANSIBLE_ROLES_PATH itself at invocation time, overriding
+            # whatever's here. host_key_checking=False trades a little safety
+            # for a CD pipeline that can reach a brand-new host
+            # non-interactively — the ad-hoc hardware-discover-now probe
+            # already pins StrictHostKeyChecking=accept-new itself regardless
+            # of this setting. forks=1 avoids a real ansible-core bug (POSIX
+            # fork() of a multithreaded process is undefined behavior — see
+            # ansible/ansible#59642): a homelab inventory is small enough
+            # that serial execution costs nothing worth trading for it.
+            cat > ansible.cfg <<'EOF'
+[defaults]
+inventory = ansible/inventory.yml
+host_key_checking = False
+interpreter_python = auto_silent
+forks = 1
+EOF
+            info "Wrote ansible.cfg"
+        fi
+
+        mkdir -p ansible
+        INVENTORY_FILE="ansible/inventory.yml"
+        if [ ! -f "$INVENTORY_FILE" ]; then
+            action "Creating ${INVENTORY_FILE}..."
+            cat > "$INVENTORY_FILE" <<EOF
+all:
+  hosts:
+  vars:
+    ansible_user: ${ANSIBLE_SSH_USER}
+EOF
+        fi
+
+        # Appends one host under the `  hosts:` key without disturbing the
+        # rest of the file — a full YAML merge would need a real parser, so
+        # this only works because the file's shape is one this script fully
+        # controls (a top-level `all:` with `hosts:`/`vars:` siblings at
+        # 2-space indent). Hand-editing the file is fine as long as that
+        # shape stays intact.
+        add_host() {
+            local name="$1" ip="$2"
+            if grep -q "^    ${name}:\$" "$INVENTORY_FILE"; then
+                warn "${name} is already in the inventory — skipping"
+                return
+            fi
+            awk -v name="$name" -v ip="$ip" '
+                { print }
+                /^  hosts:$/ && !done { print "    " name ":"; print "      ansible_host: " ip; done=1 }
+            ' "$INVENTORY_FILE" > "${INVENTORY_FILE}.tmp"
+            mv "${INVENTORY_FILE}.tmp" "$INVENTORY_FILE"
+            info "Added ${name} (${ip})"
+        }
+
+        # Seed with this node itself, so hardware-discover-now picks up the
+        # box running registry-mcp without a manual prompt for it — over SSH
+        # to its own LAN IP like any other host, not ansible_connection:
+        # local (that would run inside the registry-mcp *container*,
+        # gathering its ephemeral hostname/OS instead of the physical
+        # machine's).
+        CP_HOSTNAME="$(hostname)"
+        CP_IP="$(ip route get 8.8.8.8 2>/dev/null | awk '{print $7; exit}' || true)"
+        if [ -z "$CP_IP" ]; then
+            warn "Couldn't auto-detect this node's IP — enter it manually."
+            # Not prompt(): CP_IP is already "set" (to "") by the failed
+            # auto-detect above, and prompt() treats set-but-empty as
+            # already answered — it would silently skip asking at all, the
+            # same bug shape fixed for CONTROL_PLANE_HOST above. Loop on a
+            # raw read instead until a non-empty value lands.
+            while [ -z "$CP_IP" ]; do
+                read -rp "IP address of ${CP_HOSTNAME} (this node): " CP_IP
+            done
+        fi
+        add_host "$CP_HOSTNAME" "$CP_IP"
+        authorize_host "$CP_IP"
+
+        echo ""
+        echo "Add any other hosts you want in the inventory now (workload nodes,"
+        echo "NAS, etc.) — leave the name blank to finish; you can always add more"
+        echo "later by re-running scripts/setup-ansible-inventory.sh."
+        while true; do
+            echo ""
+            read -rp "Host name (blank to finish): " HOST_NAME
+            [ -z "$HOST_NAME" ] && break
+            read -rp "IP address for ${HOST_NAME}: " HOST_IP
+            if [ -z "$HOST_IP" ]; then
+                warn "No IP given — skipping ${HOST_NAME}"
+                continue
+            fi
+            add_host "$HOST_NAME" "$HOST_IP"
+            authorize_host "$HOST_IP"
+        done
+
+        git add ansible.cfg ansible/inventory.yml
+        if git diff --cached --quiet; then
+            info "Nothing new to commit"
+        else
+            git commit -m "chore: update Ansible inventory"
+            # Not a bare `git push`: this step is now embedded in the middle
+            # of install.sh's larger sequence, not standalone like
+            # setup-ansible-inventory.sh — a transient network/auth failure
+            # here must not, under set -e, take down the rest of the
+            # installer (starting the server, applying the static IP) along
+            # with it. The commit lands locally either way, which is all
+            # ANSIBLE_CFG_PATH below actually needs — the push only matters
+            # for the separate GitHub Actions deploy workflow reading this
+            # same repo, and that's recoverable by hand later.
+            if git push; then
+                info "Committed and pushed"
+            else
+                warn "Committed locally but couldn't push — push manually later:"
+                warn "cd ${ANSIBLE_INVENTORY_REPO} && git push"
+            fi
+        fi
+
+        ANSIBLE_CFG_PATH="${ANSIBLE_INVENTORY_REPO}/ansible.cfg"
+        cd "$INSTALL_DIR"
+
+        if [ "$CAN_AUTHORIZE" != "true" ]; then
+            warn "Some hosts may need ssh-copy-id run manually before hardware-discover-now can reach them."
+        fi
+    fi
+fi
+
+# =============================================================================
+# STEP 5: WRITE .env
+# =============================================================================
+
+header "[STEP 5] Writing .env"
 
 if [ -f .env ]; then
     warn ".env already exists — leaving it untouched. Edit it by hand if these values changed."
@@ -383,14 +568,21 @@ else
     set_env KOMODO_JWT_SECRET "${KOMODO_JWT_SECRET:-}" true
     set_env KOMODO_HOST "${KOMODO_HOST:-}" true
     set_env TRAEFIK_REDIS_PASSWORD "${TRAEFIK_REDIS_PASSWORD:-}" true
+    # Startup health check prerequisites (Phase 2) — unset unless Step 4 ran
+    # and actually set up the inventory. When it did, these are already
+    # present for Step 6's first `docker compose up -d` below, so the server
+    # starts read-write from the very first boot instead of needing a later
+    # restart to pick them up.
+    set_env ANSIBLE_CFG_PATH "${ANSIBLE_CFG_PATH:-}" true
+    set_env SSH_KEY_PATH "${SSH_KEY_PATH:-}" true
     info ".env written"
 fi
 
 # =============================================================================
-# STEP 5: START THE MCP SERVER
+# STEP 6: START THE MCP SERVER
 # =============================================================================
 
-header "[STEP 5] Starting the MCP server"
+header "[STEP 6] Starting the MCP server"
 
 # bootstrap.sh may have just added this user to the docker group in this
 # same run — group membership changes don't apply to an already-open shell
@@ -420,10 +612,10 @@ else
 fi
 
 # =============================================================================
-# STEP 6: NETWORK  ← LAST — DROPS SSH SESSION
+# STEP 7: NETWORK  ← LAST — DROPS SSH SESSION
 # =============================================================================
 
-header "[STEP 6] Network"
+header "[STEP 7] Network"
 
 if [ "$INSTALL_SKIP_NETWORK" == "true" ]; then
     warn "INSTALL_SKIP_NETWORK=true — skipping static IP application (CI/test mode)."
