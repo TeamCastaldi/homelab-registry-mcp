@@ -1,7 +1,10 @@
 # ADR-005: Monitoring, Alerting, Disaster Recovery, and Ingress Architecture
 
 ## Status
-Accepted
+Superseded by [ADR-006](ADR-006-Pi-Non-MCP-Services-Komodo-Traefik.md) (2026-08-10) — kept for
+historical context. The Pi's non-MCP services are now Komodo + Traefik only; the stack described
+below (Beszel, Gatus, Dozzle, WUD, Homepage, Glance, docker-socket-proxy, Autorestic,
+Healthchecks.io) has been removed.
 
 ## Date
 2026-07-31

@@ -2,14 +2,12 @@ name: Install Script Validation
 
 # Fast, non-interactive loop for scripts/install.sh (ADR-001 §5, OOBE
 # prerequisite). Runs the real installer end-to-end on a hosted ubuntu-latest
-# runner and asserts the ADR-005 monitoring stack it can bring up is healthy.
+# runner and asserts the ADR-006 Komodo + Traefik stack it can bring up is
+# healthy.
 #
 # This is the *fast* loop only: catches logic bugs, env-var plumbing issues,
-# and container-health regressions fast, without a merge to main -- including
-# beszel-agent, which must NOT start at all when BESZEL_AGENT_KEY is blank
-# (its own dedicated "beszel-agent" Compose profile, not bundled into "monitoring")
-# rather than crash-looping under restart:unless-stopped the way it used to.
-# It intentionally does NOT catch anything that
+# and container-health regressions fast, without a merge to main. It
+# intentionally does NOT catch anything that
 # depends on real network-interface ownership or a non-netplan init system
 # (e.g. the ifupdown-vs-netplan class of bug) -- ubuntu-latest ships netplan,
 # not ifupdown, so it can't reproduce that. That fidelity is the *slow* loop's
@@ -62,19 +60,15 @@ jobs:
       # this fast loop.
       DSPY_ENABLED: "false"
 
-      # ADR-005 monitoring/alerting/ingress stack -- Gatus, Dozzle, WUD,
-      # Homepage, Glance (plus beszel-agent, gated separately below) -- the
-      # whole point of exercising this in CI. Dead-man's-switch and the
-      # Beszel hub key are both left blank, same as the "second loop"
-      # deferred-config design (no Healthchecks.io check or Beszel hub
-      # exists yet at this point in a real bootstrap either) -- so
-      # beszel-agent's own "beszel-agent" profile never gets added, and the
-      # container correctly never starts (see the Assert step below).
+      # ADR-006 Komodo + Traefik -- the whole point of exercising this in CI.
+      # CONTROL_PLANE_HOST is pre-seeded so install.sh's shared host prompt
+      # is skipped entirely (env-var pre-seeding, not a stdin answer -- see
+      # the printf sequence below). KOMODO_INIT_ADMIN_PASSWORD blank ->
+      # install.sh auto-generates one with `openssl rand -hex 16`, same
+      # pattern as the internal secrets it always auto-generates.
       CONTROL_PLANE_HOST: "127.0.0.1"
-      HEALTHCHECKS_PING_URL: ""
-      BESZEL_AGENT_KEY: ""
-      # Blank -> install.sh auto-generates one with `openssl rand -hex 32`.
-      WUD_WEBHOOK_SECRET: ""
+      KOMODO_INIT_ADMIN_USERNAME: "admin"
+      KOMODO_INIT_ADMIN_PASSWORD: ""
 
     steps:
       # fetch-depth: 0 -- install.sh's own `git clone --filter=blob:none
@@ -94,18 +88,17 @@ jobs:
           # Every prompt covered by an env var above is skipped entirely by
           # install.sh's own prompt()/prompt_secret() helpers -- no stdin
           # needed for those. A handful of prompts in install.sh and
-          # bootstrap.sh are raw `read -rp` yes/no or value gates with no
-          # env-var equivalent to pre-seed (bootstrap.sh's four
-          # network-value prompts + its "Proceed?" confirm, and install.sh's
-          # monitoring/traefik-kop/Autorestic yes-no gates). Those are
-          # answered here via stdin, in the exact order the scripts ask them,
-          # mirroring the manually-validated Vagrant/Debian path:
+          # bootstrap.sh are raw `read -rp` yes/no gates with no env-var
+          # equivalent to pre-seed (bootstrap.sh's four network-value prompts
+          # + its "Proceed?" confirm, and install.sh's Komodo/Traefik
+          # yes-no gates). Those are answered here via stdin, in the exact
+          # order the scripts ask them, mirroring the manually-validated
+          # Vagrant/Debian path:
           #
           #   1-4  bootstrap.sh static IP / prefix / gateway / DNS  -> blank (accept auto-detected defaults)
           #   5    bootstrap.sh "Proceed? [y/N]"                    -> y
-          #   6    install.sh  "Enable the ADR-005 monitoring stack? [y/N]"                            -> y
-          #   7    install.sh  "Also enable cross-node ingress (traefik-kop)...? [y/N]" (no Node B)     -> blank (N)
-          #   8    install.sh  "Also enable scheduled backups (Autorestic)...? [y/N]" (no backup target) -> blank (N)
+          #   6    install.sh  "Enable Komodo ...? [y/N]"           -> y
+          #   7    install.sh  "Enable Traefik ...? [y/N]"          -> y
           #
           # If scripts/install.sh or scripts/bootstrap.sh change how many
           # prompts they ask, or the order, this will fail loudly (a `read`
@@ -124,7 +117,7 @@ jobs:
               "" "" "" "" \
               "y" \
               "y" \
-              "" "" \
+              "y" \
               | bash scripts/install.sh
 
       - name: Assert container health
@@ -133,19 +126,16 @@ jobs:
           set -uo pipefail
           cd "$INSTALL_DIR"
 
-          # The ADR-005 "monitoring" profile set (docker-compose.yml) --
-          # homelab-registry-mcp carries no profile so it's always up;
-          # cross-node-ingress (traefik-kop) and backup (autorestic) were
-          # both declined above, so they're deliberately excluded here.
-          EXPECTED_UP=(homelab-registry-mcp docker-socket-proxy gatus dozzle wud homepage glance healthchecks-ping)
-          # beszel-agent is NOT in EXPECTED_UP: BESZEL_AGENT_KEY is blank in
-          # this job (no Beszel hub set up yet -- the documented first-run
-          # case), and install.sh only adds "beszel-agent" to COMPOSE_PROFILES once
-          # a real key exists, so this container should not be created at
-          # all here. Checked separately below -- its presence in *any*
-          # state (not just a bad one) means that gate regressed and it's
-          # back to crash-looping under restart:unless-stopped.
-          EXPECT_ABSENT=(beszel-agent)
+          # The ADR-006 "komodo" + "traefik" profile sets (docker-compose.yml)
+          # -- homelab-registry-mcp carries no profile so it's always up;
+          # both Komodo and Traefik were accepted above (the printf sequence
+          # answers "y" to both), so all five of their containers are
+          # expected too.
+          EXPECTED_UP=(homelab-registry-mcp komodo-mongo komodo-core komodo-periphery traefik traefik-redis)
+          # No conditionally-absent container in this stack (unlike the old
+          # beszel-agent gate) -- kept as an empty array so the check/summary
+          # loops below don't need a separate no-EXPECT_ABSENT code path.
+          EXPECT_ABSENT=()
 
           check_once() {
               local raw_json
@@ -186,17 +176,18 @@ jobs:
           }
 
           # install.sh's own readiness wait only polls homelab-registry-mcp
-          # itself before returning -- the rest of the monitoring stack
-          # (pulled and started at the same time) may still be settling.
-          # Retry over ~40s before treating a non-running container as a
-          # real failure, rather than flagging normal startup lag; a
-          # genuinely crash-looping container stays non-"running" (or, for
-          # beszel-agent, present at all) across every attempt, so this
-          # doesn't mask the real thing.
-          for attempt in 1 2 3 4; do
+          # itself before returning -- Komodo/Traefik (pulled and started at
+          # the same time) may still be settling. Mongo + Komodo Core's
+          # first-boot keypair generation are heavier than the old stack's
+          # Go binaries, so this retries over ~90s (vs. the previous ~40s)
+          # before treating a non-running container as a real failure,
+          # rather than flagging normal startup lag; a genuinely
+          # crash-looping container stays non-"running" across every
+          # attempt, so this doesn't mask the real thing.
+          for attempt in 1 2 3 4 5 6; do
               check_once
               [ "$FAILED" -eq 0 ] && break
-              [ "$attempt" -lt 4 ] && sleep 10
+              [ "$attempt" -lt 6 ] && sleep 15
           done
 
           {

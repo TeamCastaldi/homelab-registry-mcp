@@ -33,173 +33,158 @@ services:
       - ${SSH_KEY_PATH:-/dev/null}:${SSH_KEY_PATH:-/dev/null}:ro
 
   # =====================================================================
-  # ADR-005 monitoring/alerting/ingress stack. Enabled by adding "monitoring"
-  # to COMPOSE_PROFILES in .env (scripts/install.sh does this when the
-  # relevant prompts aren't skipped) so a bare `docker compose up -d` with no
-  # profile set only brings up homelab-registry-mcp, unchanged from before.
-  # beszel-agent is the one exception: it needs its own "beszel-agent" profile
-  # (see its own comment below) since it can't start without a real hub key.
+  # ADR-006 Pi non-MCP services: Komodo (container management, logs, update
+  # detection for this node) and Traefik (this node's central ingress).
+  # Each is its own Compose profile — add "komodo" and/or "traefik" to
+  # COMPOSE_PROFILES in .env (scripts/install.sh does this when the
+  # relevant prompts aren't skipped) — so a bare `docker compose up -d` with
+  # no profile set only brings up homelab-registry-mcp, unchanged from
+  # before. Supersedes the ADR-005 stack (Beszel, Gatus, Dozzle, WUD,
+  # Homepage, Glance, docker-socket-proxy, traefik-kop, Autorestic,
+  # Healthchecks.io) — see docs/ARDs/ADR-006-Pi-Non-MCP-Services-Komodo-Traefik.md.
   # =====================================================================
 
-  docker-socket-proxy:
-    image: tecnativa/docker-socket-proxy:latest
-    container_name: docker-socket-proxy
+  # Komodo's own datastore — not the registry's SQLite, a separate Mongo
+  # instance Komodo Core owns entirely. The komodo.skip label keeps Komodo's
+  # own "stop all containers" action from stopping its own database.
+  # Pinned to the major version (unlike Komodo's own reference compose,
+  # which uses bare `mongo`) for reproducible installs, consistent with
+  # every other image in this file.
+  # KOMODO_DATABASE_PASSWORD/KOMODO_WEBHOOK_SECRET/KOMODO_JWT_SECRET/
+  # TRAEFIK_REDIS_PASSWORD below default to blank rather than failing via
+  # Compose's `${VAR:?...}` required-variable syntax: Compose interpolates
+  # every service's variables up front regardless of which profiles are
+  # requested, so a `:?` on any of these would break the base, no-profile
+  # `docker compose up -d` for every operator, not just fail closed when
+  # "komodo"/"traefik" is enabled (verified empirically — a minimal
+  # profiled service with a `:?` var fails `compose config` even with no
+  # `--profile` flag passed at all). `install.sh` always generates real
+  # values for these before writing `.env` when the corresponding profile
+  # is enabled — the blank default here only matters for a `.env` hand-
+  # edited outside that flow, same residual risk this file already
+  # accepted for the ADR-005 stack's equivalent secrets.
+  komodo-mongo:
+    image: mongo:7
+    container_name: komodo-mongo
     restart: unless-stopped
-    # Also under "cross-node-ingress": traefik-kop depends on this proxy too,
-    # and that profile can be enabled without "monitoring".
-    profiles: ["monitoring", "cross-node-ingress"]
+    profiles: ["komodo"]
+    labels:
+      komodo.skip: "true"
+    command: --quiet --wiredTigerCacheSizeGB 0.25
     environment:
-      # Read-only, container-list/inspect only — least privilege for the
-      # monitoring stack's three consumers (ADR-005 §4).
-      CONTAINERS: 1
-      IMAGES: 1
-      INFO: 1
-      POST: 0
+      MONGO_INITDB_ROOT_USERNAME: ${KOMODO_DATABASE_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${KOMODO_DATABASE_PASSWORD:-}
+    volumes:
+      - komodo-mongo-data:/data/db
+      - komodo-mongo-config:/data/configdb
+
+  komodo-core:
+    image: ghcr.io/moghtech/komodo-core:${COMPOSE_KOMODO_IMAGE_TAG:-2}
+    container_name: komodo-core
+    init: true
+    restart: unless-stopped
+    profiles: ["komodo"]
+    depends_on:
+      - komodo-mongo
+    ports:
+      - "0.0.0.0:9120:9120"
+    environment:
+      KOMODO_DATABASE_ADDRESS: "komodo-mongo:27017"
+      KOMODO_DATABASE_USERNAME: ${KOMODO_DATABASE_USERNAME:-admin}
+      KOMODO_DATABASE_PASSWORD: ${KOMODO_DATABASE_PASSWORD:-}
+      KOMODO_HOST: ${KOMODO_HOST:-}
+      KOMODO_PERIPHERY_PUBLIC_KEY: "file:/config/keys/periphery.pub"
+      KOMODO_LOCAL_AUTH: "true"
+      KOMODO_INIT_ADMIN_USERNAME: ${KOMODO_INIT_ADMIN_USERNAME:-admin}
+      KOMODO_INIT_ADMIN_PASSWORD: ${KOMODO_INIT_ADMIN_PASSWORD:-}
+      KOMODO_FIRST_SERVER_NAME: ${KOMODO_FIRST_SERVER_NAME:-control-plane}
+      KOMODO_WEBHOOK_SECRET: ${KOMODO_WEBHOOK_SECRET:-}
+      KOMODO_JWT_SECRET: ${KOMODO_JWT_SECRET:-}
+    volumes:
+      # Core/Periphery communication keypair, generated on first boot.
+      - komodo-keys:/config/keys
+      - komodo-backups:/backups
+
+  # Deployed as a container (Core's own supported option) rather than a
+  # systemd binary, consistent with how the rest of this stack runs.
+  # Manages the Pi's own local containers — this is what replaces Beszel/
+  # Dozzle/WUD/Homepage/Glance (ADR-006) rather than living alongside them.
+  komodo-periphery:
+    image: ghcr.io/moghtech/komodo-periphery:${COMPOSE_KOMODO_IMAGE_TAG:-2}
+    container_name: komodo-periphery
+    init: true
+    restart: unless-stopped
+    profiles: ["komodo"]
+    depends_on:
+      - komodo-core
+    environment:
+      PERIPHERY_CORE_ADDRESS: "ws://komodo-core:9120"
+      PERIPHERY_CONNECT_AS: ${KOMODO_FIRST_SERVER_NAME:-control-plane}
+      PERIPHERY_CORE_PUBLIC_KEYS: "file:/config/keys/core.pub"
+      PERIPHERY_ROOT_DIRECTORY: ${PERIPHERY_ROOT_DIRECTORY:-/opt/komodo}
+    volumes:
+      - komodo-keys:/config/keys
+      # Direct socket access, read-write — not the read-only proxy pattern
+      # used elsewhere in this file. Periphery is Komodo's deploy/build
+      # agent: it starts, stops, and builds containers, not just lists them.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /proc:/proc
+      # Must be the same path inside and outside the container (Komodo's
+      # own requirement — see its docs) — same in/out-path pattern this
+      # file already uses for SSH_KEY_PATH above. All Periphery-managed
+      # compose files/repos must live under this directory.
+      - ${PERIPHERY_ROOT_DIRECTORY:-/opt/komodo}:${PERIPHERY_ROOT_DIRECTORY:-/opt/komodo}
+
+  # This node's central ingress (ADR-006). Previously Traefik lived on a
+  # workload node (ADR-001's reference topology); it now runs here instead,
+  # reading local container labels directly off the read-only Docker
+  # socket, the same pattern already used in vagrant/workload-node's
+  # fixture. No docker-socket-proxy in front of it — nothing else on this
+  # node still needs the proxy once WUD/Beszel/Dozzle are gone, and
+  # Komodo Periphery above needs write access to the raw socket anyway.
+  traefik:
+    image: traefik:v3.2
+    container_name: traefik
+    restart: unless-stopped
+    profiles: ["traefik"]
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      # Cross-node routing (ADR-005 §4's traefik-kop + Redis pattern,
+      # re-centered on this node — see ADR-006): traefik-kop instances on
+      # other nodes publish their local container labels here instead of
+      # to a remote Node B.
+      - "--providers.redis=true"
+      - "--providers.redis.endpoints=traefik-redis:6379"
+      - "--providers.redis.password=${TRAEFIK_REDIS_PASSWORD:-}"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      # Dashboard/API — bound to localhost only below, no auth in front of
+      # it (see CLAUDE.md: auth strategy is deferred, server is LAN-only
+      # for now). Reach it via an SSH tunnel, not directly over the LAN.
+      - "--api.insecure=true"
+    ports:
+      - "0.0.0.0:80:80"
+      - "0.0.0.0:443:443"
+      - "127.0.0.1:8080:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    ports:
-      - "127.0.0.1:2375:2375"
 
-  # Own profile, not "monitoring": henrygd/beszel-agent's entrypoint exits
-  # (no shell-guard possible in its minimal image) the instant KEY is unset,
-  # so under restart:unless-stopped it crash-loops forever rather than
-  # degrading gracefully -- unlike healthchecks-ping, which can no-op a blank
-  # URL itself. A first-run operator commonly hasn't set up the Beszel hub
-  # yet (BESZEL_AGENT_KEY is documented as "blank if you haven't set up the
-  # hub yet"), so this container must not start until a real key exists.
-  # scripts/install.sh only adds "beszel-agent" to COMPOSE_PROFILES once
-  # BESZEL_AGENT_KEY is actually non-empty -- same opt-in-once-ready pattern
-  # as "cross-node-ingress"/"backup" below.
-  beszel-agent:
-    image: henrygd/beszel-agent:latest
-    container_name: beszel-agent
+  # Redis backing store for traefik-kop instances on other nodes to publish
+  # dynamic routing rules to (see the `traefik` service comment above).
+  traefik-redis:
+    image: redis:7-alpine
+    container_name: traefik-redis
     restart: unless-stopped
-    profiles: ["beszel-agent"]
-    network_mode: host
-    environment:
-      LISTEN: 45876
-      KEY: ${BESZEL_AGENT_KEY:-}
+    profiles: ["traefik"]
+    command: ["redis-server", "--requirepass", "${TRAEFIK_REDIS_PASSWORD:-}"]
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-
-  gatus:
-    image: twinproduction/gatus:latest
-    container_name: gatus
-    restart: unless-stopped
-    profiles: ["monitoring"]
-    env_file:
-      - .env
-    ports:
-      - "0.0.0.0:8081:8080"
-    volumes:
-      - ./monitoring/gatus/config.yml:/config/config.yaml:ro
-      - gatus-data:/data
-
-  dozzle:
-    image: amir20/dozzle:latest
-    container_name: dozzle
-    restart: unless-stopped
-    profiles: ["monitoring"]
-    environment:
-      DOZZLE_REMOTE_HOST: "tcp://docker-socket-proxy:2375"
-    ports:
-      - "0.0.0.0:8082:8080"
-    depends_on:
-      - docker-socket-proxy
-
-  wud:
-    image: getwud/wud:latest
-    container_name: wud
-    restart: unless-stopped
-    profiles: ["monitoring"]
-    environment:
-      WUD_WATCHER_LOCAL_DOCKER_HOST: "docker-socket-proxy"
-      WUD_WATCHER_LOCAL_DOCKER_PORT: "2375"
-      # HTTP trigger → registry's WUD webhook listener (ADR-005 §5). Must
-      # match WUD_WEBHOOK_PATH / WUD_WEBHOOK_SECRET in .env.
-      WUD_TRIGGER_HTTP_REGISTRY_URL: "http://homelab-registry-mcp:8765${WUD_WEBHOOK_PATH:-/webhooks/wud}"
-      WUD_TRIGGER_HTTP_REGISTRY_AUTH_BEARER_TOKEN: "${WUD_WEBHOOK_SECRET:-}"
-      WUD_TRIGGER_HTTP_REGISTRY_METHOD: POST
-    ports:
-      - "0.0.0.0:3001:3000"
-    volumes:
-      - wud-data:/store
-    depends_on:
-      - docker-socket-proxy
-      - homelab-registry-mcp
-
-  homepage:
-    image: ghcr.io/gethomepage/homepage:latest
-    container_name: homepage
-    restart: unless-stopped
-    profiles: ["monitoring"]
-    environment:
-      HOMEPAGE_VAR_HOST: ${CONTROL_PLANE_HOST:-localhost}
-    ports:
-      - "0.0.0.0:3000:3000"
-    volumes:
-      - ./monitoring/homepage:/app/config:ro
-
-  glance:
-    image: glanceapp/glance:latest
-    container_name: glance
-    restart: unless-stopped
-    profiles: ["monitoring"]
-    ports:
-      - "0.0.0.0:8083:8080"
-    volumes:
-      - ./monitoring/glance/glance.yml:/app/config/glance.yml:ro
-
-  # Out-of-band dead man's switch (ADR-005 §1): a local heartbeat to
-  # Healthchecks.io. A no-op when HEALTHCHECKS_PING_URL is unset.
-  healthchecks-ping:
-    image: busybox:latest
-    container_name: healthchecks-ping
-    restart: unless-stopped
-    profiles: ["monitoring"]
-    environment:
-      HEALTHCHECKS_PING_URL: ${HEALTHCHECKS_PING_URL:-}
-    command:
-      - sh
-      - -c
-      - 'while true; do [ -n "$$HEALTHCHECKS_PING_URL" ] && wget -q -T 10 -O- "$$HEALTHCHECKS_PING_URL" >/dev/null 2>&1; sleep 300; done'
-
-  # Cross-node ingress (ADR-005 §4). Requires Node B's Traefik/Redis details —
-  # opt in separately via the "cross-node-ingress" profile so a first install
-  # isn't blocked on a second node existing yet.
-  traefik-kop:
-    image: ghcr.io/jittering/traefik-kop:latest
-    container_name: traefik-kop
-    restart: unless-stopped
-    profiles: ["cross-node-ingress"]
-    environment:
-      DOCKER_HOST: "tcp://docker-socket-proxy:2375"
-      REDIS_ADDR: ${TRAEFIK_KOP_REDIS_HOST:-}
-      REDIS_PASSWORD: ${TRAEFIK_KOP_REDIS_PASSWORD:-}
-      TRAEFIK_KOP_HOST_IP: ${CONTROL_PLANE_HOST:-}
-    depends_on:
-      - docker-socket-proxy
-
-  # Disaster recovery (ADR-005 §2). Requires a backup target — opt in
-  # separately via the "backup" profile.
-  autorestic:
-    image: cupcakearmy/autorestic:latest
-    container_name: autorestic
-    restart: unless-stopped
-    profiles: ["backup"]
-    environment:
-      AUTORESTIC_BACKUP_TARGET: ${AUTORESTIC_BACKUP_TARGET:-}
-    volumes:
-      - /opt/homelab:/data/homelab:ro
-      - registry-data:/data/registry-data:ro
-      - autorestic-config:/root/.autorestic
-    command:
-      - sh
-      - -c
-      - "while true; do autorestic backup -a --ci; sleep 86400; done"
+      - traefik-redis-data:/data
 
 volumes:
   registry-data:
-  gatus-data:
-  wud-data:
-  autorestic-config:
+  komodo-mongo-data:
+  komodo-mongo-config:
+  komodo-keys:
+  komodo-backups:
+  traefik-redis-data:
