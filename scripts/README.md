@@ -14,12 +14,11 @@ below instead.
 
 - **`install.sh`** — the recommended one-shot entry point for a fresh control-plane
   node: sparse-clones root-level files (`docker-compose.yml`, `.env.example`, etc.)
-  plus `scripts/` and `monitoring/` (config for the ADR-005 stack below),
-  skipping `src/`, `ansible/`, `tests/`, and other build/CI-time
+  plus `scripts/`, skipping `src/`, `ansible/`, `tests/`, and other build/CI-time
   directories (the app runs from the GHCR image, not a source checkout), runs
   `bootstrap.sh --skip-network`,
-  prompts for the Git secrets, an optional DSPy opt-in, and an optional
-  ADR-005 monitoring stack, writes `.env`, brings everything enabled up
+  prompts for the Git secrets, an optional DSPy opt-in, and the ADR-006
+  Komodo/Traefik prompts below, writes `.env`, brings everything enabled up
   together with `docker compose up -d`, and only then applies the
   static IP (`bootstrap.sh --network-only`) so the server is already running
   when the SSH session drops. Designed to be run via
@@ -29,21 +28,22 @@ below instead.
   `install.sh`'s own internal clone checks out — pointing both at the same
   branch/tag, not just the top-level `install.sh` you initially fetched.
   Assumes a greenfield setup — it deliberately doesn't ask about Traefik or
-  Authentik, since a fresh homelab won't have those yet. Connect them later via
-  the `discovery_connect_traefik` / `discovery_connect_authentik` MCP tools.
-  - **ADR-005 monitoring stack prompt**: opting in adds `monitoring` to
-    `COMPOSE_PROFILES` in `.env`, which is what actually turns on the extra
-    services in `docker-compose.yml` (Beszel, Gatus, Dozzle, WUD,
-    `docker-socket-proxy`, Homepage, Glance) — `docker compose up -d` reads
-    `COMPOSE_PROFILES` from the same `.env` automatically. A random
-    `WUD_WEBHOOK_SECRET` is generated if you leave it blank, since WUD needs
-    it to call back into `homelab-registry-mcp`'s `/webhooks/wud` route.
-    Cross-node ingress (`traefik-kop`) and scheduled backups (`autorestic`)
-    are separate follow-up prompts behind their own `cross-node-ingress` /
-    `backup` profiles, since both need details (a second node, a backup
-    target) a first install on a single Pi won't have yet — safe to skip and
-    re-run `install.sh` later once you do (re-running against an existing
-    `.env` leaves it untouched; edit it by hand to add these afterward).
+  Authentik discovery, since a fresh homelab won't have those yet. Connect
+  the read-only discovery integrations later via the
+  `discovery_connect_traefik` / `discovery_connect_authentik` MCP tools.
+  - **ADR-006 Komodo/Traefik prompts**: two independent yes/no gates. Komodo
+    adds `komodo` to `COMPOSE_PROFILES` in `.env` (turns on `komodo-mongo`,
+    `komodo-core`, `komodo-periphery` in `docker-compose.yml` — container
+    management, logs, and update detection for this node); Traefik adds
+    `traefik` (turns on `traefik` + `traefik-redis` — this node's central
+    ingress; other nodes' `traefik-kop` instances publish routes to
+    `traefik-redis` here). `docker compose up -d` reads `COMPOSE_PROFILES`
+    from the same `.env` automatically. All of Komodo's internal secrets
+    (database password, Core↔Periphery webhook/JWT secrets) and Traefik's
+    Redis password are always auto-generated — only the Komodo admin
+    username/password are prompted for (blank password also
+    auto-generates). See
+    [docs/ARDs/ADR-006-Pi-Non-MCP-Services-Komodo-Traefik.md](../docs/ARDs/ADR-006-Pi-Non-MCP-Services-Komodo-Traefik.md).
 - **`bootstrap.sh`** — prepares a fresh node for the homelab control plane:
   installs Docker, Ansible, `uv`, `git-crypt`, and the GitHub CLI, sets the
   hostname, generates an SSH key, and applies a static IP. Supports Debian and

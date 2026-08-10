@@ -74,10 +74,6 @@ class GenerateRemediationPatch(dspy.Signature):
     is correct and complete, say so with a low confidence score rather than
     guessing.
 
-    For an `image_update` finding, `context` gives the exact image and
-    current/new tag to bump to — apply that literal change to the file's
-    image reference and do not otherwise second-guess the tag.
-
     IMPORTANT: Never include real credentials, tokens, or secrets in the
     patch output. Use descriptive placeholders for any secret values.
     Prefer reusing existing shared middlewares over adding new containers
@@ -94,8 +90,7 @@ class GenerateRemediationPatch(dspy.Signature):
         default="",
     )
     context: str = dspy.InputField(
-        desc="Extra structured context specific to this finding_type (e.g. "
-        "current/new image tag for image_update). Empty string if none.",
+        desc="Extra structured context specific to this finding_type. Empty string if none.",
         default="",
     )
 

@@ -139,15 +139,6 @@ class Settings(BaseSettings):
     secrets_key_path: str | None = Field(default=None)
     secrets_git_crypt_key: str | None = Field(default=None)
 
-    # WUD webhook listener (ADR-005) — opt-in. Receives What's Up Docker's HTTP
-    # trigger payload on upstream image updates and opens an image_update
-    # proposal via the existing proposal engine. Fail-closed: an unset secret
-    # means the route always rejects, same convention as
-    # proposal_comment_allowed_users above.
-    wud_webhook_enabled: bool = Field(default=False)
-    wud_webhook_path: str = Field(default="/webhooks/wud")
-    wud_webhook_secret: str | None = Field(default=None)
-
     # Startup health checks (Phase 2) — control-plane provisioning prerequisites
     # for the GitOps/Ansible write path. Absolute paths only: pydantic-settings
     # reads these as literal strings, so `~`/`$HOME` are not expanded.

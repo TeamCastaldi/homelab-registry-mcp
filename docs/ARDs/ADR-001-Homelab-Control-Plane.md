@@ -89,7 +89,7 @@ Reference topology (node names and IPs are user-defined):
 | Node (example name) | Role | Responsibilities |
 |---|---|---|
 | `control-node` | Control Plane | registry-mcp, Ansible. Raspberry Pi. |
-| `workload-01` | Workload | General services (Traefik, Authentik, applications) |
+| `workload-01` | Workload | General services (Authentik, applications) — Traefik moved to `control-node` per [ADR-006](ADR-006-Pi-Non-MCP-Services-Komodo-Traefik.md) |
 | `workload-02` | Workload | Specialised services (e.g. media server with GPU) |
 | `nas` | Storage (optional) | NFS shares for app data and media |
 | `dev-node` | Dev (optional) | Scratch / test environment. Added to Ansible inventory when available. |
@@ -237,6 +237,10 @@ All services should be protected regardless of which node they run on. The recom
 | Homelab repo secrets | git-crypt | `.env` files encrypted at rest on GitHub. Key stored in operator's password manager. |
 
 ### 6.2 Ingress — Dual Access Path
+
+> **AMENDED by [ADR-006](ADR-006-Pi-Non-MCP-Services-Komodo-Traefik.md) (2026-08-10)** — the
+> control plane now does run its own Traefik instance, which has become the lab's central ingress.
+> The rest of this section is historical: it describes the topology before that change.
 
 Control plane services are accessible via two paths. The control plane node does not run its own Traefik instance — routing all lab traffic through the Pi would create a bottleneck and defeat the purpose of a dedicated control plane.
 
