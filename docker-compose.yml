@@ -47,13 +47,29 @@ services:
   # Komodo's own datastore — not the registry's SQLite, a separate Mongo
   # instance Komodo Core owns entirely. The komodo.skip label keeps Komodo's
   # own "stop all containers" action from stopping its own database.
+  # Pinned to the major version (unlike Komodo's own reference compose,
+  # which uses bare `mongo`) for reproducible installs, consistent with
+  # every other image in this file.
+  # KOMODO_DATABASE_PASSWORD/KOMODO_WEBHOOK_SECRET/KOMODO_JWT_SECRET/
+  # TRAEFIK_REDIS_PASSWORD below default to blank rather than failing via
+  # Compose's `${VAR:?...}` required-variable syntax: Compose interpolates
+  # every service's variables up front regardless of which profiles are
+  # requested, so a `:?` on any of these would break the base, no-profile
+  # `docker compose up -d` for every operator, not just fail closed when
+  # "komodo"/"traefik" is enabled (verified empirically — a minimal
+  # profiled service with a `:?` var fails `compose config` even with no
+  # `--profile` flag passed at all). `install.sh` always generates real
+  # values for these before writing `.env` when the corresponding profile
+  # is enabled — the blank default here only matters for a `.env` hand-
+  # edited outside that flow, same residual risk this file already
+  # accepted for the ADR-005 stack's equivalent secrets.
   komodo-mongo:
-    image: mongo
+    image: mongo:7
     container_name: komodo-mongo
     restart: unless-stopped
     profiles: ["komodo"]
     labels:
-      komodo.skip:
+      komodo.skip: "true"
     command: --quiet --wiredTigerCacheSizeGB 0.25
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${KOMODO_DATABASE_USERNAME:-admin}

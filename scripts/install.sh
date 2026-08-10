@@ -299,7 +299,17 @@ if [[ "$enable_komodo" =~ ^[Yy]$ ]] || [[ "$enable_traefik" =~ ^[Yy]$ ]]; then
             fi
         fi
     fi
-    prompt CONTROL_PLANE_HOST "This node's LAN IP or hostname"
+    # Unlike every other prompt in this script, an empty value here isn't a
+    # valid "skip" — Komodo/Traefik being enabled means KOMODO_HOST and the
+    # traefik-kop instructions need a real host, or they render broken
+    # (http://:9120). So this deliberately doesn't use the prompt() helper:
+    # prompt() only asks once the var is entirely unset and, on a blank
+    # answer, sets it to "" — which counts as "set" on the next check, so a
+    # naive `while ...; do prompt ...; done` around it would never actually
+    # re-ask. Loop on a raw `read` instead until a non-empty value lands.
+    while [ -z "${CONTROL_PLANE_HOST:-}" ]; do
+        read -rp "This node's LAN IP or hostname (required for Komodo/Traefik): " CONTROL_PLANE_HOST
+    done
 fi
 
 if [[ "$enable_komodo" =~ ^[Yy]$ ]]; then
