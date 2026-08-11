@@ -393,7 +393,15 @@ else
             info "${FULL_REPO} already exists — skipping creation."
         else
             action "Creating private GitHub repo ${FULL_REPO}..."
-            gh repo create "$FULL_REPO" --private --description "Homelab configuration (git-crypt encrypted)"
+            # Not a bare statement: a typo'd owner (gh repo create requires
+            # it to be your own account or an org you belong to) returns a
+            # 404 from gh with no other output -- under set -e that silently
+            # kills the entire installer right here, with nothing to explain
+            # why. Nothing has been created or written yet at this point
+            # (the whole point of failing loudly instead), so re-running
+            # install.sh after fixing the owner is always safe.
+            gh repo create "$FULL_REPO" --private --description "Homelab configuration (git-crypt encrypted)" \
+                || die "Couldn't create ${FULL_REPO} -- check the owner is your account or an org you belong to (a typo there returns 404), then re-run install.sh."
             info "Created."
         fi
 
@@ -415,10 +423,27 @@ else
                 sudo mkdir -p "$SECRETS_REPO_PATH"
                 sudo chown "$(id -u):$(id -g)" "$SECRETS_REPO_PATH"
             fi
-            gh repo clone "$FULL_REPO" "$SECRETS_REPO_PATH"
+            # Same reasoning as gh repo create above -- fail loudly instead
+            # of a silent set -e death with no explanation.
+            gh repo clone "$FULL_REPO" "$SECRETS_REPO_PATH" \
+                || die "Couldn't clone ${FULL_REPO} to ${SECRETS_REPO_PATH} -- check network access and that the repo actually exists (${FULL_REPO} on GitHub), then re-run install.sh."
         fi
 
         cd "$SECRETS_REPO_PATH"
+
+        # A fresh machine commonly has no global git identity configured --
+        # git commit below would otherwise fail with "Please tell me who you
+        # are", the same silent-death shape as the two gh calls above. Scoped
+        # to just this repo (no --global), so it never overrides anything
+        # already configured elsewhere -- `git config user.email` already
+        # resolves the effective value including any global config, so this
+        # only fills the gap when nothing is set at any level.
+        if [ -z "$(git config user.email 2>/dev/null)" ]; then
+            git config user.email "${GITHUB_USER}@users.noreply.github.com"
+        fi
+        if [ -z "$(git config user.name 2>/dev/null)" ]; then
+            git config user.name "$GITHUB_USER"
+        fi
 
         if [ -d .git/git-crypt ]; then
             info "git-crypt already initialised — skipping."
