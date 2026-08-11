@@ -99,6 +99,17 @@ jobs:
           #   5    bootstrap.sh "Proceed? [y/N]"                    -> y
           #   6    install.sh  "Enable Komodo ...? [y/N]"           -> y
           #   7    install.sh  "Enable Traefik ...? [y/N]"          -> y
+          #   8    install.sh  "Create/use a private homelab config repo now? [y/N]"
+          #                    -> n (defensive; this gate is only even reached if
+          #                    both gh and git-crypt are on PATH *and* `gh auth
+          #                    status` succeeds -- bootstrap.sh does install gh/
+          #                    git-crypt on this runner, but nothing in this job
+          #                    sets GH_TOKEN/GITHUB_TOKEN as a raw env var, so `gh
+          #                    auth status` should already fail on its own. This
+          #                    answer exists so a real `gh repo create` can never
+          #                    fire here even if that assumption ever stops
+          #                    holding -- not because the gate is expected to be
+          #                    reached today.)
           #
           # If scripts/install.sh or scripts/bootstrap.sh change how many
           # prompts they ask, or the order, this will fail loudly (a `read`
@@ -118,6 +129,7 @@ jobs:
               "y" \
               "y" \
               "y" \
+              "n" \
               | bash scripts/install.sh
 
       - name: Assert container health

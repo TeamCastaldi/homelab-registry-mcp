@@ -106,23 +106,37 @@ the hood. In order:
    instance elsewhere in your lab. Connect those once they exist (see
    [Connecting Traefik and Authentik later](#connecting-traefik-and-authentik-later)
    below).
-5. **Sets up the Ansible inventory, if a homelab config repo already exists**
-   at `SECRETS_REPO_PATH` (`/opt/homelab` by default — created separately by
-   `scripts/setup-homelab-repo.sh`, not yet run by this installer). If it
-   does, and you opt in: writes `ansible.cfg` + `ansible/inventory.yml`,
-   seeds this node into the inventory itself (auto-detects hostname/LAN IP,
-   authorizes its own SSH key over real SSH — not a local connection, so it's
-   reachable the same way any other host is), then prompts for more hosts
-   (blank name to finish). Commits and pushes — a push failure only warns,
-   it doesn't abort the rest of the installer. This is what gives
-   `hardware-discover-now` a real, verified node to fact-gather once the
-   server is up. No homelab repo yet → this step prints how to run it later
-   and skips cleanly; nothing else in the installer depends on it.
-6. **Starts the server**: `docker compose pull && docker compose up -d`, then
-   waits for it to report running. Anything enabled in steps 4–5 (Komodo,
-   Traefik, the Ansible inventory) comes up or takes effect in this same
-   step, via `.env`.
-7. **Applies the static IP** last, by handing off to
+5. **Optionally creates your private homelab config repo** — the same one
+   `scripts/setup-homelab-repo.sh` creates standalone, folded in here.
+   Requires `gh auth login` to already be done (a one-time device-code login,
+   safe to run over SSH); `gh`/`git-crypt` not being on `PATH`, or `gh` not
+   being authenticated, skips this step with instructions rather than
+   blocking the rest of the install. If you already answered the Git
+   provider prompt in step 4 with `github`, this reuses that same
+   `owner/name` instead of asking again — otherwise it asks for a repo name
+   and creates it under your account. Clones it, initialises `git-crypt`,
+   writes `.gitattributes` (encrypts `**/.env`), scaffolds `nodes/`, exports
+   the git-crypt key, commits, and pushes — a push failure only warns, it
+   doesn't abort the rest of the installer. **Back up the printed key to
+   your password manager before doing anything else** — it's the only way
+   to decrypt secrets if this node is lost.
+6. **Sets up the Ansible inventory, if a homelab config repo now exists** at
+   `SECRETS_REPO_PATH` (`/opt/homelab` by default — either just created in
+   step 5, or one you already had). If it does, and you opt in: writes
+   `ansible.cfg` + `ansible/inventory.yml`, seeds this node into the
+   inventory itself (auto-detects hostname/LAN IP, authorizes its own SSH
+   key over real SSH — not a local connection, so it's reachable the same
+   way any other host is), then prompts for more hosts (blank name to
+   finish). Commits and pushes — a push failure only warns, it doesn't abort
+   the rest of the installer. This is what gives `hardware-discover-now` a
+   real, verified node to fact-gather once the server is up. No homelab repo
+   at all → this step prints how to run it later and skips cleanly; nothing
+   else in the installer depends on it.
+7. **Starts the server**: `docker compose pull && docker compose up -d`, then
+   waits for it to report running. Anything enabled in steps 4–6 (Komodo,
+   Traefik, the homelab repo, the Ansible inventory) comes up or takes
+   effect in this same step, via `.env`.
+8. **Applies the static IP** last, by handing off to
    `bootstrap.sh --network-only` — this is deliberately the final step, so the
    server is already up and running by the time this drops your SSH session.
    Reconnect at the new IP afterward: `ssh <user>@<new-ip>`.
