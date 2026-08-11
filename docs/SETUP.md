@@ -58,7 +58,12 @@ silently falls back to `main`.
 The command runs `scripts/install.sh`, which drives `scripts/bootstrap.sh` under
 the hood. Numbered here exactly as install.sh's own `[STEP N]` output numbers
 them — including starting at 0 — so this list, the script's log output, and
-its own top-of-file comment never drift out of sync with each other:
+its own top-of-file comment never drift out of sync with each other. Each step
+is also its own self-contained script under `scripts/phases/install/` (and
+each `bootstrap.sh` phase under `scripts/phases/bootstrap/`) — see
+[scripts/README.md](../scripts/README.md#modular-phase-scripts) if you want to
+re-run just one of them (e.g. re-writing `.env`, or re-applying the static IP)
+instead of the whole installer:
 
 0. **Installs `git`** if it isn't already present (needed to clone the repo).
 1. **Sparse-clones this repository** to `~/homelab-registry-mcp` (or a directory

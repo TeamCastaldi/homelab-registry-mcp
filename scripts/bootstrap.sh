@@ -8,6 +8,14 @@
 # once after imaging/installing the OS. Leaves the node OOBE-ready for the
 # MCP server.
 #
+# This script is an orchestrator: arg parsing, OS/network detection, and the
+# interactive "what am I about to do" confirmation live here; the actual work
+# happens in scripts/phases/bootstrap/*.sh, six self-contained phase scripts
+# invoked below in order. Each one is independently runnable too — see its
+# own header comment — which is the easiest way to debug or re-apply just
+# one phase (e.g. `bash scripts/phases/bootstrap/06-static-ip.sh` after an
+# nmcli failure) instead of re-running everything.
+#
 # Workflow:
 #   Flash SD (Pi) or install the OS (VM) → boot → SSH in via DHCP IP → run
 #   this script → all packages installed → static IP applied to the detected
@@ -20,16 +28,18 @@
 #   1. Collect target static IP/prefix/gateway/DNS (prompted; defaults are
 #      auto-detected from the node's current DHCP lease, so a correct answer
 #      usually just means hitting Enter four times)
-#   2. Set hostname to "homelab-control-plane"
-#   3. Install Docker, Ansible + ansible-lint, uv, git-crypt, gh CLI
-#   4. Generate ED25519 SSH key (skips if one already exists)
-#   5. Validate installs
-#   6. Apply static IP to the detected interface via nmcli  ← drops SSH session
+#   2. Set hostname to "homelab-control-plane"                      [phases/bootstrap/01-hostname.sh]
+#   3. Install Docker, Ansible + ansible-lint, uv, git-crypt, gh CLI [phases/bootstrap/02-packages.sh]
+#   4. Generate ED25519 SSH key (skips if one already exists)       [phases/bootstrap/03-ssh-key.sh]
+#   5. Validate installs                                            [phases/bootstrap/04-validation.sh]
+#   6. Record a hardware-facts snapshot + inventory stub             [phases/bootstrap/05-hardware-fingerprint.sh]
+#   7. Apply static IP to the detected interface via nmcli  ← drops SSH session
+#                                                                     [phases/bootstrap/06-static-ip.sh]
 #
-# --skip-network runs steps 1-5 only (used by install.sh, which needs Docker
+# --skip-network runs steps 2-6 only (used by install.sh, which needs Docker
 # etc. installed before it brings the MCP server up — the network swap has
 # to happen last so the SSH session doesn't drop before that).
-# --network-only runs step 6 only, against an already-bootstrapped node,
+# --network-only runs step 7 only, against an already-bootstrapped node,
 # silently reusing the static IP/prefix/gateway/DNS collected during the
 # --skip-network run instead of asking again.
 #
@@ -42,21 +52,20 @@
 set -euo pipefail
 
 VERSION="4.3.0"
-TIMESTAMP=$(date +%Y%m%dT%H%M%S)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PHASES_DIR="${SCRIPT_DIR}/phases/bootstrap"
+
+# shellcheck source=lib/common.sh
+source "${SCRIPT_DIR}/lib/common.sh"
 
 # install.sh invokes this script twice as separate processes — once with
 # --skip-network (where the operator answers the network prompts) and once
-# with --network-only (Phase 6, which actually applies them). Each is a
+# with --network-only (Phase 7, which actually applies them). Each is a
 # fresh process with no memory of the other, so without this file the
 # second invocation would re-prompt from the hardcoded defaults instead of
-# what was just answered. Written after validation below; a --network-only
-# run with all four fields present skips its own prompts entirely and uses
-# these values directly (see NETWORK_STATE_COMPLETE below) rather than just
-# offering them as defaults to re-confirm. Removed once Phase 6 actually
-# applies the config via nmcli, so a later, unrelated bootstrap run doesn't
-# inherit stale answers. Left in place if the operator declines to apply in
-# Phase 6, so a subsequent --network-only run still remembers the answer.
+# what was just answered. The phase scripts under scripts/phases/bootstrap/
+# read/write it too (via collect_network_config in lib/common.sh), which is
+# what makes each of them independently re-runnable days later.
 NETWORK_STATE_FILE="${SCRIPT_DIR}/../ansible/archive/outputs/.bootstrap-network-state"
 
 # The user to reconnect/SSH as and to configure in the Ansible inventory.
@@ -65,40 +74,15 @@ TARGET_USER="${SUDO_USER:-$USER}"
 
 # --- FIXED CONFIGURATION ---
 # Fallback defaults, only used when the node's current network can't be
-# auto-detected (see DETECT CURRENT NETWORK below). Every value here is
-# prompted for and overridable at runtime.
+# auto-detected (see collect_network_config in lib/common.sh). Every value
+# here is prompted for and overridable at runtime.
 
 HOSTNAME="homelab-control-plane"
-STATIC_IFACE="eth0"
 GATEWAY="192.168.1.1"
 DNS_PRIMARY="192.168.1.1"
 DNS_SECONDARY="8.8.8.8"
 DEFAULT_IP="192.168.1.200"
 DEFAULT_PREFIX="24"
-
-# --- HELPERS ---
-
-info()    { echo "  [✓] $*"; }
-action()  { echo "  [⚙] $*"; }
-warn()    { echo "  [!] $*"; }
-header()  { echo ""; echo "$*"; echo "---"; }
-die()     { echo ""; echo "ERROR: $*" >&2; exit 1; }
-
-require_root_or_sudo() {
-    if ! sudo -n true 2>/dev/null; then
-        die "This script requires sudo. Run as a user with sudo access."
-    fi
-}
-
-# True when running inside a container (LXC, systemd-nspawn, etc.) rather than
-# on bare metal or a VM. Matters for Phase 6: an LXC guest's IP is normally
-# assigned by the host (e.g. Proxmox's own network config for the container),
-# so applying a static IP with nmcli inside the guest is redundant at best and
-# fights the host's own addressing at worst — unlike a VM, where the guest OS
-# genuinely owns its own network stack.
-is_container() {
-    systemd-detect-virt --container --quiet 2>/dev/null
-}
 
 # --- ARGUMENT PARSING ---
 
@@ -140,136 +124,14 @@ echo ""
 
 require_root_or_sudo
 
-# --- DETECT OS / DOCKER REPO / INTERFACE / HARDWARE ---
-# Supports Debian and Ubuntu (ADR-001 §3.1) on any hardware — Pi or x86_64/
-# ARM64 VM. Detected dynamically so a new Debian/Ubuntu release works without
-# a script change; anything else fails clearly rather than guessing.
+# --- DETECT OS / INTERFACE / HARDWARE ---
+# Supports Debian and Ubuntu on any hardware — Pi or x86_64/ARM64 VM.
+# Detected dynamically so a new Debian/Ubuntu release works without a
+# script change; anything else fails clearly rather than guessing.
 
-# shellcheck source=/dev/null
-. /etc/os-release
-case "$ID" in
-    debian)
-        DOCKER_REPO_OS="debian"
-        # Docker has not published a repo for Debian releases newer than
-        # bookworm (e.g. trixie) as of this writing — bookworm is ABI-compatible
-        # and is the documented workaround. Update this if Docker ships one.
-        DOCKER_REPO_CODENAME="bookworm"
-        ;;
-    ubuntu)
-        DOCKER_REPO_OS="ubuntu"
-        DOCKER_REPO_CODENAME="$VERSION_CODENAME"
-        ;;
-    *)
-        die "Unsupported OS: ${PRETTY_NAME:-$ID}. This script supports Debian and Ubuntu only (ADR-001 §3.1)."
-        ;;
-esac
-
-# Default network interface: whatever currently carries the default route.
-# Interface names vary a lot across hardware/hypervisors (eth0 on Raspberry Pi
-# OS, enp0s3/ens18/etc. on most VMs) — detect it instead of assuming eth0.
-# Falls back to the FIXED CONFIGURATION default above if detection fails.
-DETECTED_IFACE="$(ip route show default 2>/dev/null | \
-    awk '/^default/ { for (i=1; i<=NF; i++) if ($i == "dev") { print $(i+1); exit } }' || true)"
-STATIC_IFACE="${DETECTED_IFACE:-$STATIC_IFACE}"
-NM_CON_NAME="static-${STATIC_IFACE}"
-
-# --- DETECT CURRENT NETWORK (gateway/prefix/DNS) ---
-# The node is still on its DHCP lease at this point, so its current gateway,
-# subnet prefix, and DNS servers are real, live values for this network —
-# far more reliable than a hardcoded /24 + 192.168.1.1 that silently
-# mismatches whatever subnet the operator actually types for TARGET_IP.
-# These become the prompt defaults below; nothing here is applied yet.
-
-DETECTED_GATEWAY="$(ip route show default 2>/dev/null | \
-    awk '/^default/ { print $3; exit }' || true)"
-# DEFAULT_IP above is a last-resort fallback, not a live value -- unlike
-# gateway/prefix/DNS, it was never actually detected, so on any subnet other
-# than 192.168.1.0/24 (this project's fixed-config fallback, not
-# universal — e.g. libvirt's default NAT range, or any home router that
-# isn't 192.168.1.1) pressing Enter through all four prompts silently paired
-# a 192.168.1.x static IP with a same-subnet-as-*this*-DHCP-lease gateway,
-# producing a broken combination the warning below catches but doesn't
-# prevent. Detecting the current lease's own IP and offering it as the
-# default keeps the two in the same subnet by construction — "make my
-# current address static" is also the more sensible default behavior than
-# "assume 192.168.1.200," independent of the mismatch this fixes.
-DETECTED_IP="$(ip -o -f inet addr show dev "$STATIC_IFACE" 2>/dev/null | \
-    awk '{print $4}' | cut -d/ -f1 | head -n1 || true)"
-DETECTED_PREFIX="$(ip -o -f inet addr show dev "$STATIC_IFACE" 2>/dev/null | \
-    awk '{print $4}' | cut -d/ -f2 | head -n1 || true)"
-# IPv4 only: an IPv6 nameserver here (common with systemd-resolved) would
-# sail past this as a detected default, then fail valid_ip_format the moment
-# the operator just presses Enter to accept it.
-DETECTED_DNS="$(awk '/^nameserver/ && $2 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ { print $2 }' \
-    /etc/resolv.conf 2>/dev/null | paste -sd',' - || true)"
-
-# A prior invocation's saved answers (see NETWORK_STATE_FILE above) win over
-# both the live DHCP detection and the hardcoded fallbacks — this is what
-# lets --network-only reuse what was already typed for --skip-network,
-# instead of prompting from 192.168.1.200 again.
-# NETWORK_STATE_COMPLETE gates the prompt skip below: only a --network-only
-# run following a --skip-network run that collected all four values gets to
-# skip the questions outright. A file with anything missing (hand-edited,
-# truncated, or from before this field was added) falls back to prompting,
-# same as if the file didn't exist.
-NETWORK_STATE_COMPLETE=false
-if [ -f "$NETWORK_STATE_FILE" ]; then
-    # Parsed as plain key=value data, not sourced — the file lives in a
-    # writable path, and sourcing it would execute its contents as shell.
-    while IFS='=' read -r _state_key _state_value; do
-        case "$_state_key" in
-            SAVED_TARGET_IP) SAVED_TARGET_IP="$_state_value" ;;
-            SAVED_TARGET_PREFIX) SAVED_TARGET_PREFIX="$_state_value" ;;
-            SAVED_TARGET_GATEWAY) SAVED_TARGET_GATEWAY="$_state_value" ;;
-            SAVED_TARGET_DNS) SAVED_TARGET_DNS="$_state_value" ;;
-        esac
-    done < "$NETWORK_STATE_FILE"
-    DETECTED_GATEWAY="${SAVED_TARGET_GATEWAY:-$DETECTED_GATEWAY}"
-    DETECTED_PREFIX="${SAVED_TARGET_PREFIX:-$DETECTED_PREFIX}"
-    DETECTED_DNS="${SAVED_TARGET_DNS:-$DETECTED_DNS}"
-    DETECTED_IP="${SAVED_TARGET_IP:-$DETECTED_IP}"
-    if [ -n "${SAVED_TARGET_IP:-}" ] && [ -n "${SAVED_TARGET_PREFIX:-}" ] && \
-       [ -n "${SAVED_TARGET_GATEWAY:-}" ] && [ -n "${SAVED_TARGET_DNS:-}" ]; then
-        NETWORK_STATE_COMPLETE=true
-    fi
-    if [ "$NETWORK_ONLY" != "true" ] || [ "$NETWORK_STATE_COMPLETE" != "true" ]; then
-        info "Reusing network answers saved from the earlier bootstrap run as the defaults below — press Enter through all four to accept them as-is, or type a new value to change one."
-    fi
-fi
-
-# --- VALIDATION HELPERS ---
-
-valid_ip_format() {
-    # Dotted-quad shape check only (not full octet-range validation) —
-    # matches the leniency of the pre-existing TARGET_IP check.
-    [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
-}
-
-ip_to_int() {
-    local a b c d
-    IFS=. read -r a b c d <<< "$1"
-    echo $(( (a << 24) + (b << 16) + (c << 8) + d ))
-}
-
-network_addr() {
-    local ip="$1" prefix="$2" mask
-    if [ "$prefix" -eq 0 ]; then
-        mask=0
-    else
-        mask=$(( (0xFFFFFFFF << (32 - prefix)) & 0xFFFFFFFF ))
-    fi
-    echo $(( $(ip_to_int "$ip") & mask ))
-}
-
-# Hardware label for the fingerprint YAML — Raspberry Pi's device-tree model
-# file is the reliable signal; anything else is reported by architecture.
-if [ -f /proc/device-tree/model ] && grep -qi "raspberry pi" /proc/device-tree/model 2>/dev/null; then
-    HARDWARE_LABEL="raspberry-pi"
-else
-    HARDWARE_LABEL="$(uname -m)"
-fi
-
-# --- COLLECT STATIC IP UPFRONT ---
+detect_docker_repo_os
+detect_static_iface
+detect_hardware_label
 
 if [ "$SKIP_NETWORK" == "true" ]; then
     echo "This script will (--skip-network: static IP application deferred):"
@@ -302,59 +164,13 @@ else
     echo ""
 fi
 
-if [ "$NETWORK_ONLY" == "true" ] && [ "$NETWORK_STATE_COMPLETE" == "true" ]; then
-    # install.sh's Step 2 (--skip-network) already collected and validated
-    # all four values; asking again here would just be the operator
-    # pressing Enter four times to confirm what they already typed once.
-    TARGET_IP="$SAVED_TARGET_IP"
-    TARGET_PREFIX="$SAVED_TARGET_PREFIX"
-    TARGET_GATEWAY="$SAVED_TARGET_GATEWAY"
-    TARGET_DNS="$SAVED_TARGET_DNS"
-    info "Reusing static IP ${TARGET_IP}/${TARGET_PREFIX} collected earlier — skipping the network prompts."
-else
-    # The network config is always collected (facts/inventory in Phase 5 need it
-    # whether or not it's applied here) — --skip-network only defers *applying*
-    # it to Phase 6. Defaults are the node's live DHCP values where detectable,
-    # so a correct answer is usually just pressing Enter through all four
-    # prompts — but every value is editable, since the static IP an operator
-    # picks may land in a different subnet than the current DHCP lease.
-    read -rp "Enter static IP for ${STATIC_IFACE} [${DETECTED_IP:-$DEFAULT_IP}]: " TARGET_IP
-    TARGET_IP="${TARGET_IP:-${DETECTED_IP:-$DEFAULT_IP}}"
-    valid_ip_format "$TARGET_IP" || die "Invalid IP address: $TARGET_IP"
-
-    read -rp "Subnet prefix length (CIDR bits) [${DETECTED_PREFIX:-$DEFAULT_PREFIX}]: " TARGET_PREFIX
-    TARGET_PREFIX="${TARGET_PREFIX:-${DETECTED_PREFIX:-$DEFAULT_PREFIX}}"
-    [[ "$TARGET_PREFIX" =~ ^[0-9]+$ ]] && [ "$TARGET_PREFIX" -ge 1 ] && [ "$TARGET_PREFIX" -le 32 ] || \
-        die "Invalid subnet prefix: $TARGET_PREFIX (expected 1-32)"
-
-    read -rp "Gateway [${DETECTED_GATEWAY:-$GATEWAY}]: " TARGET_GATEWAY
-    TARGET_GATEWAY="${TARGET_GATEWAY:-${DETECTED_GATEWAY:-$GATEWAY}}"
-    valid_ip_format "$TARGET_GATEWAY" || die "Invalid gateway address: $TARGET_GATEWAY"
-
-    read -rp "DNS servers, comma-separated [${DETECTED_DNS:-${DNS_PRIMARY},${DNS_SECONDARY}}]: " TARGET_DNS
-    TARGET_DNS="${TARGET_DNS:-${DETECTED_DNS:-${DNS_PRIMARY},${DNS_SECONDARY}}}"
-    IFS=',' read -ra _dns_check <<< "$TARGET_DNS"
-    for _dns_entry in "${_dns_check[@]}"; do
-        valid_ip_format "$_dns_entry" || die "Invalid DNS server address: $_dns_entry"
-    done
-
-    # Sanity check: the gateway should live in the same subnet as the chosen
-    # static IP. This is exactly the kind of mismatch a hardcoded gateway
-    # produces silently — catch it here instead.
-    if [ "$(network_addr "$TARGET_IP" "$TARGET_PREFIX")" != "$(network_addr "$TARGET_GATEWAY" "$TARGET_PREFIX")" ]; then
-        warn "Gateway ${TARGET_GATEWAY} does not appear to be in ${TARGET_IP}/${TARGET_PREFIX}'s subnet — double-check before proceeding."
-    fi
-fi
-
-# Persist so a subsequent --network-only invocation (install.sh Step 6)
-# reuses these instead of re-prompting from the hardcoded defaults.
-mkdir -p "$(dirname "$NETWORK_STATE_FILE")"
-cat > "$NETWORK_STATE_FILE" << STATE
-SAVED_TARGET_IP=${TARGET_IP}
-SAVED_TARGET_PREFIX=${TARGET_PREFIX}
-SAVED_TARGET_GATEWAY=${TARGET_GATEWAY}
-SAVED_TARGET_DNS=${TARGET_DNS}
-STATE
+# The network config is always collected (facts/inventory in Phase 5 need it
+# whether or not it's applied in Phase 6) — --skip-network only defers
+# *applying* it. Only a --network-only run reuses a complete prior answer
+# silently; every other mode always asks (with live-detected defaults, so a
+# correct answer is usually just pressing Enter four times).
+NETWORK_REUSE_IF_COMPLETE="$NETWORK_ONLY"
+collect_network_config "$NETWORK_STATE_FILE"
 
 echo ""
 echo "Configuration:"
@@ -400,474 +216,13 @@ read -rp "Proceed? [y/N]: " confirm
 [[ "$confirm" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 0; }
 
 if [ "$NETWORK_ONLY" != "true" ]; then
-
-# =============================================================================
-# PHASE 1: HOSTNAME
-# =============================================================================
-
-header "[PHASE 1] Hostname"
-
-CURRENT_HOSTNAME=$(hostname)
-if [ "$CURRENT_HOSTNAME" == "$HOSTNAME" ]; then
-    info "Hostname already set to: ${HOSTNAME}"
-else
-    action "Setting hostname to: ${HOSTNAME}"
-    sudo hostnamectl set-hostname "$HOSTNAME"
-    # Update /etc/hosts
-    if grep -q "127.0.1.1" /etc/hosts; then
-        sudo sed -i "s/127.0.1.1.*/127.0.1.1\t${HOSTNAME}/" /etc/hosts
-    else
-        echo -e "127.0.1.1\t${HOSTNAME}" | sudo tee -a /etc/hosts > /dev/null
-    fi
-    info "Hostname set to: ${HOSTNAME}"
+    bash "${PHASES_DIR}/01-hostname.sh"
+    bash "${PHASES_DIR}/02-packages.sh"
+    bash "${PHASES_DIR}/03-ssh-key.sh"
+    bash "${PHASES_DIR}/04-validation.sh"
+    bash "${PHASES_DIR}/05-hardware-fingerprint.sh"
 fi
-
-# =============================================================================
-# PHASE 2: PACKAGE INSTALLATION
-# =============================================================================
-
-header "[PHASE 2] Package Installation"
-
-# Base update
-action "Updating package lists..."
-sudo apt-get update -qq
-
-action "Installing prerequisites..."
-sudo apt-get install -y -qq ca-certificates curl gnupg lsb-release
-
-# --- DOCKER ---
-
-if command -v docker &>/dev/null; then
-    info "Docker already installed: $(docker --version)"
-else
-    action "Installing Docker (repo: ${DOCKER_REPO_OS}/${DOCKER_REPO_CODENAME})..."
-
-    sudo rm -f /etc/apt/sources.list.d/docker.list
-    sudo mkdir -p /etc/apt/keyrings
-    curl -fsSL "https://download.docker.com/linux/${DOCKER_REPO_OS}/gpg" | \
-        sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg --yes
-
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
-https://download.docker.com/linux/${DOCKER_REPO_OS} ${DOCKER_REPO_CODENAME} stable" | \
-        sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-    sudo apt-get update -qq
-    sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
-
-    info "Docker installed: $(docker --version)"
-fi
-
-# Runs regardless of whether Docker was just installed or already present —
-# a box with Docker pre-installed but the invoking user never added to the
-# group would otherwise never get fixed on rerun. Uses TARGET_USER (not
-# $USER) since bootstrap.sh is commonly invoked via sudo, where $USER is root.
-if groups "$TARGET_USER" | grep -qw docker; then
-    info "${TARGET_USER} already in the docker group"
-else
-    sudo usermod -aG docker "$TARGET_USER"
-    warn "Docker group added — run 'newgrp docker' or log out/in before using 'docker ps'"
-fi
-
-# --- ANSIBLE ---
-
-if command -v ansible &>/dev/null; then
-    info "Ansible already installed: $(ansible --version | head -n1)"
-else
-    action "Installing Ansible + ansible-lint..."
-    sudo apt-get install -y -qq ansible ansible-lint
-    info "Ansible installed: $(ansible --version | head -n1)"
-fi
-
-if ! command -v ansible-lint &>/dev/null; then
-    action "Installing ansible-lint..."
-    sudo apt-get install -y -qq ansible-lint
-fi
-info "ansible-lint: $(ansible-lint --version 2>/dev/null | head -n1 || echo 'installed')"
-
-# --- UV ---
-
-if command -v uv &>/dev/null; then
-    info "uv already installed: $(uv --version)"
-else
-    action "Installing uv (Python package manager for registry-mcp)..."
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    export PATH="$HOME/.local/bin:$PATH"
-    info "uv installed: $(uv --version 2>/dev/null || echo 'installed — reload shell to activate')"
-fi
-
-# --- GIT-CRYPT ---
-
-if command -v git-crypt &>/dev/null; then
-    info "git-crypt already installed: $(git-crypt --version 2>/dev/null || echo 'installed')"
-else
-    action "Installing git-crypt (Phase C prerequisite)..."
-    sudo apt-get install -y -qq git-crypt
-    info "git-crypt installed: $(git-crypt --version 2>/dev/null || echo 'installed')"
-fi
-
-# --- GITHUB CLI ---
-
-if command -v gh &>/dev/null; then
-    info "gh already installed: $(gh --version | head -n1)"
-else
-    action "Installing GitHub CLI (gh)..."
-    sudo apt-get install -y -qq gh
-    info "gh installed: $(gh --version | head -n1)"
-fi
-
-# --- NETWORKMANAGER ---
-# Phase 6 applies the static IP via nmcli. Raspberry Pi OS (Bookworm+) ships
-# NetworkManager by default, so this was never missing there — but Ubuntu
-# Server defaults to netplan + systemd-networkd with no NetworkManager at
-# all, so nmcli isn't guaranteed on every OS this script supports. Installed
-# here so it's ready before Phase 6 runs, whether in this same invocation or
-# a later --network-only one. This only guarantees the binary + service
-# exist; if netplan/systemd-networkd (Ubuntu) or ifupdown via
-# /etc/network/interfaces (Debian, including Raspberry Pi OS) is still
-# rendering the interface, it may remain unmanaged — Phase 6 checks for
-# that explicitly before using it, and fixes the ifupdown case (the common
-# one on this project's primary hardware target) in place rather than
-# requiring a manual re-run; netplan still needs a manual fix.
-if command -v nmcli &>/dev/null; then
-    info "NetworkManager already installed: $(nmcli --version 2>/dev/null | head -n1 || echo installed)"
-else
-    action "Installing NetworkManager (required for the Phase 6 static IP step)..."
-    sudo apt-get install -y -qq network-manager
-fi
-
-# Runs regardless of whether NetworkManager was just installed or already
-# present — a box with the package pre-installed but the service disabled
-# would otherwise only surface as a cryptic nmcli failure in Phase 6.
-if systemctl is-active --quiet NetworkManager; then
-    info "NetworkManager service is running"
-elif sudo systemctl enable --now NetworkManager >/dev/null 2>&1; then
-    info "NetworkManager service enabled and started"
-else
-    warn "NetworkManager installed but the service could not be enabled/started — check 'systemctl status NetworkManager' before Phase 6"
-fi
-
-# --- UTILITY PACKAGES ---
-
-action "Installing utility packages..."
-sudo apt-get install -y -qq git vim htop curl wget nfs-common net-tools dnsutils
-info "Utility packages installed"
-
-# --- MOUNT POINT STUBS ---
-
-action "Creating NFS mount point stubs..."
-sudo mkdir -p /mnt/appdata /mnt/media
-info "/mnt/appdata and /mnt/media ready (OOBE step 5 will wire fstab)"
-
-# =============================================================================
-# PHASE 3: SSH KEY
-# =============================================================================
-
-header "[PHASE 3] SSH Key"
-
-SSH_KEY="$HOME/.ssh/id_ed25519"
-
-if [ -f "$SSH_KEY" ]; then
-    info "ED25519 key already exists: ${SSH_KEY}"
-else
-    action "Generating ED25519 key pair..."
-    mkdir -p "$HOME/.ssh"
-    chmod 700 "$HOME/.ssh"
-    ssh-keygen -t ed25519 -f "$SSH_KEY" -N "" -C "${TARGET_USER}@${HOSTNAME}-$(date +%Y%m%d)"
-    info "SSH key generated: ${SSH_KEY}"
-fi
-
-echo ""
-echo "  Public key (add to GitHub → Settings → SSH Keys if not already done):"
-echo "  ---"
-cat "${SSH_KEY}.pub"
-echo "  ---"
-
-# =============================================================================
-# PHASE 4: VALIDATION
-# =============================================================================
-
-header "[PHASE 4] Validation"
-
-VALIDATION_PASSED=true
-
-check() {
-    local label="$1"
-    local cmd="$2"
-    if eval "$cmd" &>/dev/null; then
-        info "${label}: OK"
-    else
-        warn "${label}: FAILED"
-        VALIDATION_PASSED=false
-    fi
-}
-
-check "Docker daemon"    "sudo docker info"
-check "Docker CLI"       "docker --version"
-check "Ansible"          "ansible --version"
-check "ansible-lint"     "ansible-lint --version"
-check "uv"               "uv --version"
-check "git-crypt"        "git-crypt --version"
-check "gh CLI"           "gh --version"
-check "git"              "git --version"
-check "nfs-common"       "dpkg -s nfs-common"
-check "/mnt/appdata"     "[ -d /mnt/appdata ]"
-check "/mnt/media"       "[ -d /mnt/media ]"
-check "SSH key"          "[ -f ${SSH_KEY} ]"
-check "Hostname"         "[ \"\$(hostname)\" = \"${HOSTNAME}\" ]"
-
-echo ""
-if [ "$VALIDATION_PASSED" == "true" ]; then
-    info "All checks passed — node is OOBE-ready"
-else
-    warn "Some checks failed — review above before proceeding"
-    warn "You can still apply the static IP, but fix failures before starting the MCP"
-fi
-
-# Save validation log
-LOG_DIR="${SCRIPT_DIR}/../ansible/archive/outputs"
-mkdir -p "$LOG_DIR"
-LOG_FILE="${LOG_DIR}/bootstrap-validation-${HOSTNAME}-${TIMESTAMP}.log"
-{
-    echo "Bootstrap validation — ${HOSTNAME} — $(date -u)"
-    echo "Version: ${VERSION}"
-    echo "Target IP: ${TARGET_IP}"
-    echo ""
-    echo "Validation: $([ "$VALIDATION_PASSED" == "true" ] && echo PASSED || echo FAILED)"
-} > "$LOG_FILE"
-info "Log saved: ${LOG_FILE}"
-
-# =============================================================================
-# PHASE 5: HARDWARE FINGERPRINT
-# =============================================================================
-
-header "[PHASE 5] Hardware Fingerprint"
-
-FACTS_DIR="${SCRIPT_DIR}/../ansible/archive/outputs"
-FACTS_FILE="${FACTS_DIR}/hardware-facts-${HOSTNAME}-${TIMESTAMP}.yml"
-mkdir -p "$FACTS_DIR"
-
-# Joined (not trailing-newline-terminated) so it drops into the heredoc as
-# its own line(s) without producing a blank line before the next key.
-DNS_YAML_LIST=""
-IFS=',' read -ra _dns_facts <<< "$TARGET_DNS"
-for _dns_entry in "${_dns_facts[@]}"; do
-    if [ -n "$DNS_YAML_LIST" ]; then
-        DNS_YAML_LIST="${DNS_YAML_LIST}"$'\n'"  - ${_dns_entry}"
-    else
-        DNS_YAML_LIST="  - ${_dns_entry}"
-    fi
-done
-
-cat > "$FACTS_FILE" << YAML
----
-# Hardware facts — generated by bootstrap.sh v${VERSION}
-# $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-
-hostname: ${HOSTNAME}
-role: control-plane
-hardware: ${HARDWARE_LABEL}
-os: ${PRETTY_NAME}
-arch: $(uname -m)
-target_ip: ${TARGET_IP}
-prefix: ${TARGET_PREFIX}
-gateway: ${TARGET_GATEWAY}
-dns:
-${DNS_YAML_LIST}
-interface: ${STATIC_IFACE}
-ssh_key: ${SSH_KEY}.pub
-bootstrapped_at: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
-bootstrap_version: ${VERSION}
-YAML
-
-info "Hardware facts saved: ${FACTS_FILE}"
-
-# Inventory stub
-INVENTORY_DIR="${SCRIPT_DIR}/../ansible/archive/inventory"
-mkdir -p "$INVENTORY_DIR"
-INVENTORY_FILE="${INVENTORY_DIR}/discovered-hosts.yml"
-
-if ! grep -q "$HOSTNAME" "$INVENTORY_FILE" 2>/dev/null; then
-    cat >> "$INVENTORY_FILE" << YAML
-
-# Added by bootstrap.sh — $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-# OOBE step 7 (oobe_setup_ansible) will write the full ansible.cfg + inventory
-all:
-  hosts:
-    ${HOSTNAME}:
-      ansible_host: ${TARGET_IP}
-      ansible_user: ${TARGET_USER}
-      role: control-plane
-YAML
-    info "Inventory stub written: ${INVENTORY_FILE}"
-else
-    info "Inventory stub already contains ${HOSTNAME} — skipped"
-fi
-
-fi # NETWORK_ONLY
 
 if [ "$SKIP_NETWORK" != "true" ]; then
-
-# =============================================================================
-# PHASE 6: STATIC IP  ← LAST — DROPS SSH SESSION
-# =============================================================================
-
-header "[PHASE 6] Static IP (${STATIC_IFACE})"
-
-if is_container; then
-    info "Running inside a container ($(systemd-detect-virt --container 2>/dev/null || echo 'lxc')) — network addressing is normally owned by the host, not this guest (e.g. a Proxmox LXC gets its IP from the container's net0 config on the host)."
-    info "Skipping the in-guest static IP step. If this container should have a different address, set it via the host, not nmcli inside the guest."
-    rm -f "$NETWORK_STATE_FILE" 2>/dev/null || true
-
-    echo ""
-    echo "======================================="
-    echo "  BOOTSTRAP COMPLETE (network owned by host)"
-    echo "======================================="
-    echo ""
-    echo "  Hostname:   ${HOSTNAME}"
-    echo "  Network:    unchanged — set this container's static IP via the host"
-    echo "              (e.g. 'pct set <vmid> -net0 ...,ip=${TARGET_IP}/${TARGET_PREFIX},gw=${TARGET_GATEWAY}' on Proxmox)"
-    echo ""
-    echo "  OOBE handoff (ADR-001 §5.1):"
-    echo "    Start the MCP server, then run: oobe_status"
-    echo "    The OOBE will guide you through steps 1-15."
-    echo ""
-
-    exit 0
+    bash "${PHASES_DIR}/06-static-ip.sh"
 fi
-
-# Fail clearly here rather than mid-way through nmcli — e.g. this node was
-# bootstrapped by an older script version before NetworkManager install was
-# added above, or something else still owns the interface: netplan still
-# rendering it via systemd-networkd (Ubuntu's default), or ifupdown via
-# /etc/network/interfaces (Debian's default, including Raspberry Pi OS) —
-# installing the NetworkManager package alone doesn't hand control of the
-# device to it either way.
-command -v nmcli &>/dev/null || die "nmcli not found. Install NetworkManager first: sudo apt-get install -y network-manager && sudo systemctl enable --now NetworkManager — then re-run this script."
-
-# `|| true` on the whole pipeline: under set -e/pipefail, a non-zero nmcli
-# (e.g. the service isn't actually running) would otherwise abort via the
-# generic ERR trap instead of the specific die() messages below.
-_nm_iface_state="$(nmcli -t -f DEVICE,STATE device status 2>/dev/null | awk -F: -v d="$STATIC_IFACE" '$1==d {print $2}' || true)"
-if [ -z "$_nm_iface_state" ]; then
-    die "NetworkManager doesn't see a device named ${STATIC_IFACE} — check 'nmcli device status' and that the service is running ('systemctl status NetworkManager'), then re-run this script."
-elif [ "$_nm_iface_state" == "unmanaged" ]; then
-    # Detect which mechanism actually owns the interface before prescribing
-    # a remedy — netplan/networkd is Ubuntu's default, ifupdown is Debian's
-    # (including Raspberry Pi OS, this project's primary hardware target),
-    # and the wrong guidance sends the operator chasing a config that isn't
-    # there.
-    if compgen -G "/etc/netplan/*.yaml" > /dev/null 2>&1; then
-        die "NetworkManager is installed but ${STATIC_IFACE} is unmanaged — netplan is likely still rendering it via systemd-networkd. Add 'renderer: NetworkManager' to /etc/netplan/*.yaml, run 'sudo netplan apply', then re-run this script."
-    elif grep -qE "^\s*(auto|allow-hotplug)\s+${STATIC_IFACE}\b" /etc/network/interfaces 2>/dev/null; then
-        # The common case on Debian/Raspberry Pi OS (this project's primary
-        # hardware target, ADR-001 §3.1): the stock NetworkManager.conf ships
-        # `managed=false` under [ifupdown] specifically to defer to it. Fixed
-        # in place rather than dying — requiring a manual edit + restart +
-        # re-run here would break the "one-shot" promise for the majority of
-        # real installs, not just an edge case. (The netplan branch above
-        # stays manual: a YAML rewrite isn't safe to automate the same way.)
-        action "${STATIC_IFACE} is unmanaged because ifupdown owns it — setting managed=true under [ifupdown] in NetworkManager.conf..."
-        _nm_conf="/etc/NetworkManager/NetworkManager.conf"
-        if sudo grep -q '^\[ifupdown\]' "$_nm_conf" 2>/dev/null; then
-            # Delete-then-insert instead of detect-then-branch: sidesteps
-            # needing to know whether a managed= key already exists (and in
-            # what form — `managed=false`, `managed = false`, indented, ...)
-            # by unconditionally removing any within the [ifupdown] section
-            # (sed's end-of-range address isn't tested against the same line
-            # the range starts on, so this correctly stops at the *next*
-            # section header, or EOF if [ifupdown] is the last one) and
-            # inserting exactly one fresh line. POSIX bracket expressions
-            # ([[:space:]]), not \s — Debian's default /usr/bin/awk (mawk)
-            # doesn't understand \s as whitespace, so relying on it for
-            # detection previously risked silently leaving the original
-            # `managed=false` in place as a duplicate, un-overridden key.
-            sudo sed -i '/^\[ifupdown\]/,/^\[/{/^[[:space:]]*managed[[:space:]]*=/d}' "$_nm_conf"
-            sudo sed -i '/^\[ifupdown\]/a managed=true' "$_nm_conf"
-        else
-            printf '\n[ifupdown]\nmanaged=true\n' | sudo tee -a "$_nm_conf" > /dev/null
-        fi
-        sudo systemctl restart NetworkManager
-        sleep 2
-        _nm_iface_state="$(nmcli -t -f DEVICE,STATE device status 2>/dev/null | awk -F: -v d="$STATIC_IFACE" '$1==d {print $2}' || true)"
-        if [ "$_nm_iface_state" == "unmanaged" ]; then
-            die "Set managed=true under [ifupdown] in ${_nm_conf} and restarted NetworkManager, but ${STATIC_IFACE} is still unmanaged. Check 'cat ${_nm_conf}' and 'nmcli device show ${STATIC_IFACE}' for what else might be excluding it."
-        fi
-        info "${STATIC_IFACE} is now managed by NetworkManager"
-    else
-        die "NetworkManager is installed but ${STATIC_IFACE} is unmanaged, and the cause couldn't be auto-detected (no netplan config, no matching /etc/network/interfaces stanza). Check 'cat /etc/NetworkManager/NetworkManager.conf' and 'nmcli device show ${STATIC_IFACE}' for what's excluding it, then re-run this script."
-    fi
-fi
-
-echo ""
-warn "This is the final step. It will apply the static IP and drop your SSH session."
-warn "Reconnect after: ssh ${TARGET_USER}@${TARGET_IP}"
-echo ""
-read -rp "  Apply static IP ${TARGET_IP}/${TARGET_PREFIX} to ${STATIC_IFACE} now? [y/N]: " apply_ip
-
-if [[ "$apply_ip" =~ ^[Yy]$ ]]; then
-
-    echo ""
-    echo "======================================="
-    echo "  BOOTSTRAP COMPLETE"
-    echo "======================================="
-    echo ""
-    echo "  Hostname:   ${HOSTNAME}"
-    echo "  Static IP:  ${TARGET_IP}/${TARGET_PREFIX}"
-    echo "  Gateway:    ${TARGET_GATEWAY}"
-    echo "  DNS:        ${TARGET_DNS}"
-    echo ""
-    echo "  After reconnecting:"
-    echo "    ssh ${TARGET_USER}@${TARGET_IP}"
-    echo ""
-    echo "  OOBE handoff (ADR-001 §5.1):"
-    echo "    Start the MCP server, then run: oobe_status"
-    echo "    The OOBE will guide you through steps 1-15."
-    echo ""
-    echo "  Applying network config in 3 seconds..."
-    sleep 3
-
-    # Remove any existing static-eth0 connection
-    sudo nmcli connection delete "$NM_CON_NAME" 2>/dev/null || true
-
-    # Create new static connection
-    sudo nmcli connection add \
-        type ethernet \
-        con-name "$NM_CON_NAME" \
-        ifname "$STATIC_IFACE" \
-        ipv4.method manual \
-        ipv4.addresses "${TARGET_IP}/${TARGET_PREFIX}" \
-        ipv4.gateway "$TARGET_GATEWAY" \
-        ipv4.dns "${TARGET_DNS}" \
-        connection.autoconnect yes
-
-    # Config is being applied now — clear the saved answers so a future,
-    # unrelated bootstrap run doesn't inherit them. Done before "up" since
-    # that drops the SSH session and nothing after it is guaranteed to run.
-    rm -f "$NETWORK_STATE_FILE" 2>/dev/null || true
-
-    # Bring it up — this will drop the SSH session
-    sudo nmcli connection up "$NM_CON_NAME"
-
-else
-    echo ""
-    echo "======================================="
-    echo "  BOOTSTRAP COMPLETE (network skipped)"
-    echo "======================================="
-    echo ""
-    echo "  Hostname:   ${HOSTNAME}"
-    echo "  Network:    not changed — still on DHCP"
-    echo ""
-    echo "  To apply the static IP later:"
-    echo "    sudo nmcli connection add type ethernet con-name ${NM_CON_NAME} \\"
-    echo "      ifname ${STATIC_IFACE} ipv4.method manual \\"
-    echo "      ipv4.addresses ${TARGET_IP}/${TARGET_PREFIX} ipv4.gateway ${TARGET_GATEWAY} \\"
-    echo "      ipv4.dns ${TARGET_DNS} connection.autoconnect yes"
-    echo "    sudo nmcli connection up ${NM_CON_NAME}"
-    echo ""
-    echo "  OOBE handoff (ADR-001 §5.1):"
-    echo "    Start the MCP server, then run: oobe_status"
-    echo "    The OOBE will guide you through steps 1-15."
-    echo ""
-fi
-
-fi # SKIP_NETWORK
