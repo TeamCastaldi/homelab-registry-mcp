@@ -26,24 +26,27 @@
 # doesn't ask about them. Connect those once they exist via the
 # discovery_connect_traefik / discovery_connect_authentik MCP tools.
 #
-# What it does:
-#   1. Install git if missing
-#   2. Sparse-clone (or update) root-level files + scripts/, skipping src/,
+# What it does (numbered to match this script's own [STEP N] output exactly
+# — including Step 0 — so log output, this list, and the docs never drift
+# out of sync with each other the way a human-friendly "1. ..." list would):
+#   0. Install git if missing
+#   1. Sparse-clone (or update) root-level files + scripts/, skipping src/,
 #      ansible/, tests/, and other build/CI-time directories
-#   3. Run `bootstrap.sh --skip-network` — Docker, Ansible, uv, git-crypt, gh,
+#   2. Run `bootstrap.sh --skip-network` — Docker, Ansible, uv, git-crypt, gh,
 #      SSH key. Deliberately skips the static-IP swap. Every install step
 #      skips cleanly if already present, but still fixes up required state
 #      (Docker group membership, NetworkManager service) even when it does.
-#   4. Prompt for Git/DSPy/Komodo/Traefik secrets and opt-in
-#   5. Optionally create the private homelab config repo (git-crypt-encrypted
+#   3. Prompt for Git/DSPy/Komodo/Traefik secrets and opt-in
+#   4. Optionally create the private homelab config repo (git-crypt-encrypted
 #      secrets, Ansible inventory, nodes/ compose files) — requires `gh auth
-#      login` to already be done; reuses the Git repo from step 4 if it was
+#      login` to already be done; reuses the Git repo from step 3 if it was
 #      given there and points at GitHub
-#   6. If that repo exists (from step 5, or one you already had): optionally
+#   5. If that repo exists (from step 4, or one you already had): optionally
 #      seed this node into the Ansible inventory hardware-discover-now reads,
 #      so hardware onboarding has a real, verified entry for this Pi from
 #      the start
-#   7. Write .env, `docker compose up -d`, and confirm the server is running
+#   6. Write .env
+#   7. `docker compose up -d` and confirm the server is running
 #   8. Run `bootstrap.sh --network-only` — applies the static IP last, unless
 #      INSTALL_SKIP_NETWORK=true (CI/test mode — see below), which skips it
 # ==============================================================================
@@ -398,7 +401,20 @@ else
             info "Already cloned at ${SECRETS_REPO_PATH} — skipping clone."
         else
             action "Cloning ${FULL_REPO} -> ${SECRETS_REPO_PATH}..."
-            mkdir -p "$(dirname "${SECRETS_REPO_PATH}")"
+            # The /opt default (like /opt itself) is root-owned on a stock
+            # Debian/Ubuntu system -- a non-root operator (the common case:
+            # a sudo-capable user, not a root login) can't create a new
+            # directory under it, and gh repo clone creating SECRETS_REPO_PATH
+            # itself would otherwise fail here and abort the rest of the
+            # installer under set -e. Try as this user first (handles a
+            # writable parent, e.g. a custom path under $HOME); only reach
+            # for sudo, and only chown the leaf directory (not its parent),
+            # if that fails.
+            if ! mkdir -p "$SECRETS_REPO_PATH" 2>/dev/null; then
+                warn "Can't create ${SECRETS_REPO_PATH} as $(whoami) — retrying with sudo."
+                sudo mkdir -p "$SECRETS_REPO_PATH"
+                sudo chown "$(id -u):$(id -g)" "$SECRETS_REPO_PATH"
+            fi
             gh repo clone "$FULL_REPO" "$SECRETS_REPO_PATH"
         fi
 
@@ -419,6 +435,25 @@ else
 **/.env filter=git-crypt diff=git-crypt
 EOF
         fi
+
+        # If the key export below lands inside this repo's own working tree
+        # (the /opt default does: SECRETS_REPO_PATH/.git-crypt.key), make
+        # sure a later careless `git add -A` can never commit the plaintext
+        # key that decrypts everything git-crypt is protecting here --
+        # .gitattributes only tells git-crypt to encrypt **/.env, it has no
+        # opinion on the key file itself. A key stored outside the repo
+        # (SECRETS_KEY_PATH pointed elsewhere) has nothing to ignore.
+        GIT_ADD_PATHS=(.gitattributes nodes/)
+        case "$SECRETS_KEY_PATH" in
+            "${SECRETS_REPO_PATH}"/*)
+                KEY_REL_PATH="${SECRETS_KEY_PATH#"${SECRETS_REPO_PATH}"/}"
+                if [ ! -f .gitignore ] || ! grep -qF "$KEY_REL_PATH" .gitignore; then
+                    action "Adding ${KEY_REL_PATH} to .gitignore..."
+                    echo "$KEY_REL_PATH" >> .gitignore
+                fi
+                GIT_ADD_PATHS+=(.gitignore)
+                ;;
+        esac
 
         # nodes/ skeleton -- WORKLOAD_NODES is env-var-only (not prompted):
         # the Ansible inventory step right after this one already asks for
@@ -445,7 +480,7 @@ EOF
         warn "Back this up to your password manager NOW — it's the only way to"
         warn "decrypt secrets if this node is lost. base64 \"${SECRETS_KEY_PATH}\" | tr -d '\\n'"
 
-        git add .gitattributes nodes/
+        git add "${GIT_ADD_PATHS[@]}"
         if git diff --cached --quiet; then
             info "Nothing new to commit"
         else

@@ -305,8 +305,8 @@ container management, logs, and update detection for this node) and Traefik
 `traefik-kop` instances publish routes to `traefik-redis`), each gated behind
 its own `komodo` / `traefik` Compose profile. `install.sh` prompts for both
 independently during Step 3 and writes `COMPOSE_PROFILES` to `.env`, so
-`docker compose up -d` in Step 5 brings the whole enabled set up together,
-before the network swap in Step 6. Komodo's internal secrets (database
+`docker compose up -d` in Step 7 brings the whole enabled set up together,
+before the network swap in Step 8. Komodo's internal secrets (database
 password, Core↔Periphery webhook/JWT secrets) and Traefik's Redis password
 are always auto-generated; only the Komodo admin username/password are
 prompted for. ADR-006 supersedes the ADR-005 monitoring/ingress stack (Beszel,

@@ -56,16 +56,18 @@ silently falls back to `main`.
 ### What it does
 
 The command runs `scripts/install.sh`, which drives `scripts/bootstrap.sh` under
-the hood. In order:
+the hood. Numbered here exactly as install.sh's own `[STEP N]` output numbers
+them — including starting at 0 — so this list, the script's log output, and
+its own top-of-file comment never drift out of sync with each other:
 
-1. **Installs `git`** if it isn't already present (needed to clone the repo).
-2. **Sparse-clones this repository** to `~/homelab-registry-mcp` (or a directory
+0. **Installs `git`** if it isn't already present (needed to clone the repo).
+1. **Sparse-clones this repository** to `~/homelab-registry-mcp` (or a directory
    you choose when prompted) — root-level files (`docker-compose.yml`,
    `.env.example`, etc.) plus `scripts/`, skipping `src/`, `ansible/`, `tests/`,
    and other build/CI-time directories, since the app runs from the GHCR image
    rather than a source checkout. Re-running against an existing checkout pulls
    latest instead of re-cloning.
-3. **Provisions the OS** by handing off to `bootstrap.sh --skip-network`, which
+2. **Provisions the OS** by handing off to `bootstrap.sh --skip-network`, which
    installs:
    - **Docker** (`docker-ce`, `docker-ce-cli`, `containerd.io`,
      `docker-compose-plugin`) — runs the MCP server and any services it manages
@@ -75,7 +77,8 @@ the hood. In order:
      manager `registry-mcp` itself uses
    - **`git-crypt`** — encrypts secrets (`.env` files) committed to your
      private homelab repo
-   - **`gh`** (GitHub CLI) — used by the write path when `GIT_PROVIDER=github`
+   - **`gh`** (GitHub CLI) — used by the write path when `GIT_PROVIDER=github`,
+     and by step 4 below to create your homelab config repo
    - **NetworkManager** (if missing) — needed to apply the static IP in the
      last step
    - a handful of utility packages (`vim`, `htop`, `wget`, `nfs-common`,
@@ -85,8 +88,8 @@ the hood. In order:
    SSH key at `~/.ssh/id_ed25519` if one doesn't already exist (printing the
    public key so you can add it to GitHub), and creates `/mnt/appdata` and
    `/mnt/media` mount-point stubs. The static IP is *collected* here but not
-   yet applied — see step 6.
-4. **Prompts you for configuration** and writes `.env`:
+   yet applied — see step 8.
+3. **Prompts you for configuration**:
    - Git provider for the write path (`github` or `gitea`, or blank to skip
      entirely — you can enable this later by hand)
    - If a provider is set: the repo (`owner/name`), a Git token, and the Git
@@ -106,23 +109,27 @@ the hood. In order:
    instance elsewhere in your lab. Connect those once they exist (see
    [Connecting Traefik and Authentik later](#connecting-traefik-and-authentik-later)
    below).
-5. **Optionally creates your private homelab config repo** — the same one
+4. **Optionally creates your private homelab config repo** — the same one
    `scripts/setup-homelab-repo.sh` creates standalone, folded in here.
    Requires `gh auth login` to already be done (a one-time device-code login,
    safe to run over SSH); `gh`/`git-crypt` not being on `PATH`, or `gh` not
    being authenticated, skips this step with instructions rather than
    blocking the rest of the install. If you already answered the Git
-   provider prompt in step 4 with `github`, this reuses that same
+   provider prompt in step 3 with `github`, this reuses that same
    `owner/name` instead of asking again — otherwise it asks for a repo name
-   and creates it under your account. Clones it, initialises `git-crypt`,
-   writes `.gitattributes` (encrypts `**/.env`), scaffolds `nodes/`, exports
-   the git-crypt key, commits, and pushes — a push failure only warns, it
-   doesn't abort the rest of the installer. **Back up the printed key to
-   your password manager before doing anything else** — it's the only way
-   to decrypt secrets if this node is lost.
-6. **Sets up the Ansible inventory, if a homelab config repo now exists** at
+   and creates it under your account. Creates the target directory with
+   `sudo` first if it isn't writable by your user (the `/opt` default
+   commonly isn't, for a non-root operator). Clones it, initialises
+   `git-crypt`, writes `.gitattributes` (encrypts `**/.env`) and a
+   `.gitignore` entry for the exported key if it lands inside the repo (the
+   Pi default does), scaffolds `nodes/`, exports the git-crypt key, commits,
+   and pushes — a push failure only warns, it doesn't abort the rest of the
+   installer. **Back up the printed key to your password manager before
+   doing anything else** — it's the only way to decrypt secrets if this node
+   is lost.
+5. **Sets up the Ansible inventory, if a homelab config repo now exists** at
    `SECRETS_REPO_PATH` (`/opt/homelab` by default — either just created in
-   step 5, or one you already had). If it does, and you opt in: writes
+   step 4, or one you already had). If it does, and you opt in: writes
    `ansible.cfg` + `ansible/inventory.yml`, seeds this node into the
    inventory itself (auto-detects hostname/LAN IP, authorizes its own SSH
    key over real SSH — not a local connection, so it's reachable the same
@@ -132,10 +139,11 @@ the hood. In order:
    real, verified node to fact-gather once the server is up. No homelab repo
    at all → this step prints how to run it later and skips cleanly; nothing
    else in the installer depends on it.
+6. **Writes `.env`** from everything collected in steps 3–5.
 7. **Starts the server**: `docker compose pull && docker compose up -d`, then
-   waits for it to report running. Anything enabled in steps 4–6 (Komodo,
-   Traefik, the homelab repo, the Ansible inventory) comes up or takes
-   effect in this same step, via `.env`.
+   waits for it to report running. Anything enabled above (Komodo, Traefik,
+   the homelab repo, the Ansible inventory) comes up or takes effect in this
+   same step, via the `.env` step 6 just wrote.
 8. **Applies the static IP** last, by handing off to
    `bootstrap.sh --network-only` — this is deliberately the final step, so the
    server is already up and running by the time this drops your SSH session.
@@ -337,7 +345,7 @@ no access to the host's `.env`) and never starts discovery immediately.
 - **`docker compose ps` never shows the container running** — check
   `docker compose logs homelab-registry-mcp` for a startup error; a missing or
   malformed `.env` value is the most common cause.
-- **Lost the SSH session after step 6 (Option A) and can't reconnect** — the
+- **Lost the SSH session after step 8 (Option A) and can't reconnect** — the
   static IP may not match what you entered, or the gateway/subnet was wrong.
   Reconnect via console/serial if available and re-run
   `bash scripts/bootstrap.sh --network-only`.
@@ -353,11 +361,11 @@ no access to the host's `.env`) and never starts discovery immediately.
   doesn't apply to you — see below.
 - **Running Option A inside an LXC container (e.g. a Proxmox community-scripts
   Ubuntu template)** — `bootstrap.sh` detects this and automatically skips the
-  step 6 static-IP application, since a container's address is normally owned
+  step 8 static-IP application, since a container's address is normally owned
   by the host (Proxmox's own `net0` config for that container), not the guest.
   You'll see a "network owned by host" completion message instead of an SSH
   drop. If the earlier install already errored out before this detection was
-  added, that's fine — steps 1-5 (packages, `.env`, the running server) still
+  added, that's fine — steps 0-7 (packages, `.env`, the running server) still
   completed; only the redundant network step failed, and you can ignore it.
 - **Re-running `install.sh`** is safe — it skips already-installed packages,
   pulls latest instead of re-cloning, and leaves an existing `.env` untouched
