@@ -14,7 +14,7 @@ can't reproduce on a hosted `ubuntu-latest` runner:
   motivated this: `ubuntu-latest` ships netplan, not ifupdown, so it can't
   reproduce a Debian/Raspberry-Pi-OS-specific `bootstrap.sh` Phase 6 bug)
 - Actually applying the static IP (`bootstrap.sh --network-only` / `install.sh`
-  Step 6) — the fast loop always sets `INSTALL_SKIP_NETWORK=true` and never
+  Step 8) — the fast loop always sets `INSTALL_SKIP_NETWORK=true` and never
   exercises this at all
 - Anything you want to watch happen interactively, prompt by prompt
 
@@ -66,8 +66,8 @@ falls back to `main`.
 
 `VERSION` here does double duty: it picks which revision of `install.sh` the
 `curl` fetches *and* which ref `install.sh` itself then clones for
-everything else (`bootstrap.sh`, `scripts/`, `monitoring/`) — so this
-actually tests your branch end-to-end, not just its top-level `install.sh`.
+everything else (`bootstrap.sh`, `scripts/`) — so this actually tests your
+branch end-to-end, not just its top-level `install.sh`.
 
 Answer the prompts by hand — that's the point of this loop. Every prompt can
 still be pre-seeded via an environment variable of the same name if you only
@@ -76,6 +76,14 @@ comment). Never set `INSTALL_SKIP_NETWORK=true` here — that's a CI-only
 escape hatch (see its comment in `scripts/install.sh`); skipping it defeats
 the point of this loop, since the static-IP step is exactly the kind of thing
 it exists to exercise.
+
+A fresh VM has never authenticated `gh`, so Step 4 (homelab config repo) will
+offer to run `gh auth login` right there (device-code flow, safe over SSH —
+it prints a URL and code you open on any device's browser); accept it to
+exercise Step 4 for real. Declining it, or running `gh auth login` yourself
+beforehand and skipping that offer, both work too. Step 5 (Ansible inventory)
+only prompts once a homelab config repo exists, so it follows from whatever
+you chose at Step 4.
 
 When you're done with a round:
 

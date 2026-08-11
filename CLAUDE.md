@@ -278,13 +278,17 @@ Both loops are required for full confidence; neither replaces the other.
 **Fresh control-plane node**: `curl -fsSL .../scripts/install.sh | bash` — clones
 the repo, provisions the OS (`scripts/bootstrap.sh --skip-network`: Docker,
 Ansible, `uv`, `git-crypt`, `gh`, SSH key), prompts for Git config and a DSPy
-opt-in, and — if a homelab config repo already exists at `SECRETS_REPO_PATH`
-— optionally seeds this node into the Ansible inventory `hardware-discover-now`
+opt-in, then optionally creates the private homelab config repo itself
+(folded in from `scripts/setup-homelab-repo.sh`; offers to run the one-time
+`gh auth login` device-code flow right there if needed, reuses the
+`owner/name` from the Git config prompt when it was answered `github`, skips
+cleanly with guidance if `gh`/`git-crypt` aren't available or the login isn't
+completed) — and if that repo now exists,
+optionally seeds this node into the Ansible inventory `hardware-discover-now`
 reads (folded in from `scripts/setup-ansible-inventory.sh`; skips cleanly with
-guidance if that repo doesn't exist yet, since `scripts/setup-homelab-repo.sh`
-isn't folded in). Writes `.env`, brings the server up, then applies the static
-IP last (`bootstrap.sh --network-only`) so the server is already running when
-the SSH session drops. See `scripts/README.md`.
+guidance if no repo exists at all). Writes `.env`, brings the server up, then
+applies the static IP last (`bootstrap.sh --network-only`) so the server is
+already running when the SSH session drops. See `scripts/README.md`.
 
 Assumes a **greenfield** setup — no Traefik or Authentik yet, so `install.sh`
 doesn't ask about them. Once those exist, connect them via the
@@ -302,8 +306,8 @@ container management, logs, and update detection for this node) and Traefik
 `traefik-kop` instances publish routes to `traefik-redis`), each gated behind
 its own `komodo` / `traefik` Compose profile. `install.sh` prompts for both
 independently during Step 3 and writes `COMPOSE_PROFILES` to `.env`, so
-`docker compose up -d` in Step 5 brings the whole enabled set up together,
-before the network swap in Step 6. Komodo's internal secrets (database
+`docker compose up -d` in Step 7 brings the whole enabled set up together,
+before the network swap in Step 8. Komodo's internal secrets (database
 password, Core↔Periphery webhook/JWT secrets) and Traefik's Redis password
 are always auto-generated; only the Komodo admin username/password are
 prompted for. ADR-006 supersedes the ADR-005 monitoring/ingress stack (Beszel,
@@ -360,7 +364,7 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
 - **Phase 8 in progress**: security write path landed — `GenerateRemediationPatch`, Gitea + Ntfy/Smtp/Null providers, `Proposal` model/store, proposal engine (create + verification sweep), and the `proposal_*` tools. Off by default (`GIT_*` unset, `PROPOSAL_AUTO_CREATE=false`); see ADR-002.
 - **Phase 8 remaining**: normalization path (`NormalizeConfigFile`, yamllint, `proposal_normalize`); flipping `PROPOSAL_DRY_RUN=false` against the homelab repo (a deliberate human step); runbooks, cold-restore testing, Ansible provisioning. (GitHub provider landed — `GitHubGitProvider` alongside Gitea, selected via `GIT_PROVIDER=github`.)
 - **Phase 9a-9b complete**: hardware node registry — `HardwareNode` model + `HardwareStore` + 11 MCP tools registered in `server.py`; `hardware-discover-now` runs a live Ansible `setup` fact-gather against `ANSIBLE_CFG_PATH`'s inventory and upserts provenance fields (curated fields untouched). `scripts/setup-ansible-inventory.sh` bootstraps the `ansible.cfg`/inventory prerequisite itself (seeds the control-plane node, then prompts for more hosts) until the OOBE CLI replaces it — also folded inline into `scripts/install.sh` (opt-in, only offered when a homelab config repo already exists) so hardware onboarding can start from a fresh install rather than a separate manual step; the standalone script remains the way to add more hosts later.
-- **Phase C complete**: git-crypt secrets integration — 6 `secrets_*` MCP tools, `scripts/setup-homelab-repo.sh` bootstrap, `git-crypt` in Dockerfile. Path validation hardened against arbitrary file read/write via absolute paths (`check_path` in `gitcrypt.py`, shared with Phase 7 adoption); `setup-homelab-repo.sh` and `.env.example` work cross-platform (macOS/Linux/WSL), defaulting to `$HOME`-relative paths instead of `/opt/homelab`
+- **Phase C complete**: git-crypt secrets integration — 6 `secrets_*` MCP tools, `scripts/setup-homelab-repo.sh` bootstrap, `git-crypt` in Dockerfile. Path validation hardened against arbitrary file read/write via absolute paths (`check_path` in `gitcrypt.py`, shared with Phase 7 adoption); `setup-homelab-repo.sh` and `.env.example` work cross-platform (macOS/Linux/WSL), defaulting to `$HOME`-relative paths instead of `/opt/homelab` — also folded inline into `scripts/install.sh` (Pi defaults there) so a fresh install can create the repo without a separate manual step; `setup-homelab-repo.sh` remains the standalone/cross-platform path
 - **Phase D complete**: migrated registry-mcp off the workload node onto the dedicated control-plane node; Traefik static backend routes `registry-mcp.<your-domain>` → the control-plane node; GitHub Actions self-hosted runner operational; first automated CD deploy proven end-to-end; `docker-compose.yml` binds `0.0.0.0:8765`
 - **`docs/plans/updated-phases.md` Phases 1-6 complete** (separate numbering from the phases above): `scripts/install.sh` one-shot installer for a fresh control-plane node (Phase 1); `health.py` startup checks (Git repo/`ansible.cfg`/SSH key) + always-on `system_health_check` tool + read-only degradation of the GitOps write tools when unhealthy (Phase 2); conversational GitOps loop — `poll_pr_comments`/`apply_review_feedback` push a DSPy-generated revision commit in response to a trusted PR comment, gated by a fail-closed `PROPOSAL_COMMENT_ALLOWED_USERS` allowlist and the same confidence/YAML gates as initial patch generation (Phase 3); `ansible/roles/docker-stack-deploy` + reusable `.github/workflows/deploy.yml` — the deploy *action* ships here, each operator's private homelab repo supplies only the *config* and a thin caller workflow (Phase 4); `SmtpNotificationProvider` — templated HTML proposal email (PR summary, diff, Approve/Request Changes/View Diff buttons) via stdlib `smtplib`, validated against SMTP2GO, `NOTIFICATION_PROVIDER=smtp` (Phase 5); public release scrub — removed an accidentally-committed operator-specific `nodes/` config and genericized real hostnames/IPs/personal identifiers across scripts and docs (Phase 6)
 - **`docs/plans/updated-phases.md` Phase 7 complete** (brownfield adoption & secret interception — the final phase in that plan): `proposal_adopt_service`/`_finalize`/`_cancel`/`_get` tools, `AdoptionDraft` model/store, `DetectHardcodedSecrets` DSPy signature, and the shared `gitcrypt.py` module (extracted from `tools/secrets.py` so both features encrypt through the same local-clone path rather than the remote Git API, which bypasses git-crypt's filter). Off by default (`ADOPTION_ENABLED=false`).

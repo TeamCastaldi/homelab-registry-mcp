@@ -44,14 +44,23 @@ below instead.
     username/password are prompted for (blank password also
     auto-generates). See
     [docs/ARDs/ADR-006-Pi-Non-MCP-Services-Komodo-Traefik.md](../docs/ARDs/ADR-006-Pi-Non-MCP-Services-Komodo-Traefik.md).
+  - **Homelab config repo prompt**: folded in from `setup-homelab-repo.sh`
+    below. `gh`/`git-crypt` missing from `PATH` skips this prompt with
+    instructions rather than blocking the rest of the install (bootstrap.sh
+    should have installed both). If `gh` isn't authenticated yet, install.sh
+    offers to run the one-time `gh auth login` device-code flow right there
+    (declining, or the login not completing, skips the same way) instead of
+    requiring a separate manual step beforehand. Reuses the `owner/name`
+    already given to the Git provider prompt above when it was answered
+    `github`, instead of asking for a repo name twice — see that script's own
+    entry for the rest of the details, which apply identically here.
   - **Ansible inventory / hardware onboarding prompt**: folded in from
     `setup-ansible-inventory.sh` below. Only offered when a homelab config
-    repo already exists at `SECRETS_REPO_PATH` (`setup-homelab-repo.sh`
-    creates it — not yet folded into this installer, so a fresh Pi with no
-    such repo skips this prompt and prints how to run it later). When
-    accepted, this node self-onboards into the Ansible inventory the same
-    way any other host would — see that script's own entry for the details,
-    which apply identically here.
+    repo now exists at `SECRETS_REPO_PATH` — either just created by the
+    prompt above, or one you already had. No repo at all skips this prompt
+    and prints how to run it later. When accepted, this node self-onboards
+    into the Ansible inventory the same way any other host would — see that
+    script's own entry for the details, which apply identically here.
 - **`bootstrap.sh`** — prepares a fresh node for the homelab control plane:
   installs Docker, Ansible, `uv`, `git-crypt`, and the GitHub CLI, sets the
   hostname, generates an SSH key, and applies a static IP. Supports Debian and
@@ -80,6 +89,10 @@ below instead.
   defaults to `$HOME`-relative paths (`$HOME/homelab`,
   `$HOME/.config/homelab/git-crypt.key`) so it runs without root on a laptop —
   override via `SECRETS_REPO_PATH` / `SECRETS_KEY_PATH` for the Pi (`/opt/homelab`).
+  Also folded inline into `install.sh`'s own homelab-config-repo prompt above
+  (Pi defaults there instead — `/opt/homelab` and
+  `/opt/homelab/.git-crypt.key`); this script remains the way to set one up
+  standalone, or on a non-Pi/cross-platform machine.
 - **`setup-ansible-inventory.sh`** — bootstraps (or extends) `ansible.cfg` +
   `ansible/inventory.yml` inside your homelab config repo (Phase 9b): both the
   reusable `.github/workflows/deploy.yml` and the `hardware-discover-now` MCP
