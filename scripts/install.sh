@@ -66,21 +66,78 @@
 
 set -euo pipefail
 
+# --- CURL-PIPE BOOTSTRAP ---
+# `curl -fsSL .../install.sh | bash` (or `bash -c "$(curl ...)"`, this
+# project's documented one-liner) hands bash this script's *text*, not a
+# file — there is no on-disk path for it, so ${BASH_SOURCE[0]} is unset and
+# the SCRIPT_DIR-relative `source`/phase-script invocations below (which
+# every phase script also needs to find scripts/lib/common.sh) have nothing
+# to resolve against. `${BASH_SOURCE[0]+set}` tests *set-ness*, not value,
+# so it's safe under `set -u` even when BASH_SOURCE[0] flat-out doesn't
+# exist — exactly the case here.
+#
+# When that happens, this block does the absolute minimum to get a real,
+# disk-resident copy of this repo — install git, clone/update it — then
+# `exec`s the on-disk scripts/install.sh in its place. That second
+# invocation runs as a normal file (`bash /path/to/install.sh`), so
+# BASH_SOURCE[0] is set correctly and everything below proceeds exactly as
+# it would for a plain `bash scripts/install.sh` from an existing checkout —
+# including Steps 0-1 below running again, which is instant and harmless
+# (git already installed; INSTALL_DIR already cloned, so it's just a
+# fast-forward `pull`) since `exec`ing exports INSTALL_DIR into the new
+# process, and prompt() (used by Step 1) skips re-asking anything already
+# set in the environment.
+if [ -z "${BASH_SOURCE[0]+set}" ]; then
+    if [ ! -t 0 ] && [ -e /dev/tty ]; then
+        exec < /dev/tty 2>/dev/null || true
+    fi
+
+    if ! command -v git &>/dev/null; then
+        echo "  [⚙] Installing git..."
+        if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+            apt-get update -qq && apt-get install -y -qq git
+        else
+            sudo apt-get update -qq && sudo apt-get install -y -qq git
+        fi
+    fi
+
+    REPO_URL="${REPO_URL:-https://github.com/TeamCastaldi/homelab-registry-mcp.git}"
+    VERSION="${VERSION:-}"
+    if [ -z "${INSTALL_DIR+set}" ]; then
+        read -rp "Install directory [${HOME}/homelab-registry-mcp]: " INSTALL_DIR
+        INSTALL_DIR="${INSTALL_DIR:-${HOME}/homelab-registry-mcp}"
+    fi
+    export INSTALL_DIR
+
+    if [ -d "${INSTALL_DIR}/.git" ]; then
+        git -C "$INSTALL_DIR" pull --ff-only
+    else
+        if [ -n "$VERSION" ] && [ "$VERSION" != "main" ]; then
+            git clone --filter=blob:none --sparse --branch "$VERSION" "$REPO_URL" "$INSTALL_DIR"
+        else
+            git clone --filter=blob:none --sparse "$REPO_URL" "$INSTALL_DIR"
+        fi
+        git -C "$INSTALL_DIR" sparse-checkout set scripts
+    fi
+
+    [ -f "${INSTALL_DIR}/scripts/install.sh" ] || {
+        echo "" >&2
+        echo "ERROR: scripts/install.sh not found in ${INSTALL_DIR} — is this the right repo?" >&2
+        exit 1
+    }
+    exec bash "${INSTALL_DIR}/scripts/install.sh"
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PHASES_DIR="${SCRIPT_DIR}/phases/install"
 
 # shellcheck source=lib/common.sh
 source "${SCRIPT_DIR}/lib/common.sh"
 
-# When piped via `curl ... | bash`, stdin is the script itself, not the
-# terminal — reopen it from the tty so every prompt below (in this process
-# and in every phase script it invokes as a child `bash` process, which
-# inherits this redirected stdin) works interactively. /dev/tty existing as
-# a device node doesn't mean it's openable: a CI runner (or any process with
-# no controlling terminal) has no tty to reopen from — `|| true` lets that
-# fail quietly and fall through to whatever stdin already is (piped answers,
-# or a prompt() env var skipping the read entirely), instead of aborting
-# the whole script under `set -e` before Step 0 even runs.
+# Reopens stdin from the tty for this (now file-backed) invocation too — the
+# bootstrap block above only covers the curl-pipe process before it exec'd
+# into this one; a plain `bash scripts/install.sh < file` or similar still
+# wants this same fallback for every prompt below.
 if [ ! -t 0 ] && [ -e /dev/tty ]; then
     exec < /dev/tty 2>/dev/null || true
 fi
