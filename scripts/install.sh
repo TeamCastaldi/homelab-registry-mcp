@@ -417,9 +417,20 @@ else
             # installer under set -e. Try as this user first (handles a
             # writable parent, e.g. a custom path under $HOME); only reach
             # for sudo, and only chown the leaf directory (not its parent),
-            # if that fails.
-            if ! mkdir -p "$SECRETS_REPO_PATH" 2>/dev/null; then
-                warn "Can't create ${SECRETS_REPO_PATH} as $(whoami) — retrying with sudo."
+            # if that's not enough.
+            #
+            # Deliberately NOT gated on mkdir -p's own exit code: mkdir -p
+            # returns success when the target already exists, regardless of
+            # whether the current user can write into it -- e.g. a stale
+            # root-owned /opt/homelab left over from an earlier attempt. That
+            # left the sudo fallback below unreachable and gh repo clone
+            # failed deeper in, on creating .git, with a confusing
+            # "Permission denied" instead of a clean fallback. Testing
+            # writability directly after the mkdir -p attempt catches both
+            # "couldn't create it" and "it already exists but isn't mine".
+            mkdir -p "$SECRETS_REPO_PATH" 2>/dev/null
+            if [ ! -w "$SECRETS_REPO_PATH" ]; then
+                warn "Can't write to ${SECRETS_REPO_PATH} as $(whoami) — retrying with sudo."
                 sudo mkdir -p "$SECRETS_REPO_PATH"
                 sudo chown "$(id -u):$(id -g)" "$SECRETS_REPO_PATH"
             fi
