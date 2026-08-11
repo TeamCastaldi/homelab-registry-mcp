@@ -10,13 +10,80 @@ exactly what gets installed and what you'll be prompted for — see
 [Testing changes to install.sh/bootstrap.sh](#testing-changes-to-installshbootstrapsh)
 below instead.
 
+## Modular phase scripts
+
+`install.sh` and `bootstrap.sh` are thin orchestrators — arg parsing, prompts for
+"what am I about to do", and calling things in order. The actual work each
+numbered `[STEP N]` / `[PHASE N]` does lives in its own self-contained script
+under `scripts/phases/`:
+
+```
+scripts/
+├── lib/
+│   └── common.sh              # shared helpers: prompt/set_env/state_*/detect_*
+├── phases/
+│   ├── install/                # install.sh's 9 steps, one file each
+│   │   ├── 00-prereqs.sh
+│   │   ├── 01-clone.sh
+│   │   ├── 02-os-provision.sh
+│   │   ├── 03-configure.sh
+│   │   ├── 04-homelab-repo.sh
+│   │   ├── 05-ansible-inventory.sh
+│   │   ├── 06-write-env.sh
+│   │   ├── 07-start-server.sh
+│   │   └── 08-network.sh
+│   └── bootstrap/               # bootstrap.sh's 6 phases, one file each
+│       ├── 01-hostname.sh
+│       ├── 02-packages.sh
+│       ├── 03-ssh-key.sh
+│       ├── 04-validation.sh
+│       ├── 05-hardware-fingerprint.sh
+│       └── 06-static-ip.sh
+├── install.sh
+└── bootstrap.sh
+```
+
+Every phase file is independently runnable, not just a step the orchestrator
+happens to call — this is what makes debugging and brownfield/greenfield reruns
+practical without re-driving the whole installer:
+
+```bash
+# Re-write .env after tweaking a Git token, without repeating Steps 0-5:
+bash scripts/phases/install/06-write-env.sh
+
+# Re-apply the static IP after an nmcli failure, without touching packages/SSH/hostname:
+sudo -v && bash scripts/phases/bootstrap/06-static-ip.sh
+
+# Re-run just the hardware-facts snapshot:
+bash scripts/phases/bootstrap/05-hardware-fingerprint.sh
+```
+
+Each phase resolves what it needs the same way install.sh/bootstrap.sh already
+document for every prompt: a real environment variable of the same name always
+wins (so `INSTALL_DIR=... bash scripts/phases/install/0X-*.sh` and every other
+documented pre-seeding trick still works one file at a time), falling back to a
+small state file another phase in the same run — or an earlier standalone
+invocation — left behind (`~/.homelab-registry-mcp/install-state.env` for
+`install.sh`'s steps; `ansible/archive/outputs/.bootstrap-network-state` for
+`bootstrap.sh`'s network answers, unchanged from before this split), and only
+then to auto-detection or an interactive prompt. `install.sh` clears its state
+file at the start of every orchestrated run (and again on exit) so a prior
+run's answers — or an option you declined this time — can never leak into the
+next one; a human stepping through phases by hand relies on that same file
+persisting between invocations, so standalone runs never clear it themselves.
+
+Changing what one step does means editing exactly one file in `scripts/phases/`
+— `install.sh`/`bootstrap.sh` themselves should rarely need to change at all.
+
 ## What's here
 
 - **`install.sh`** — the recommended one-shot entry point for a fresh control-plane
-  node: sparse-clones root-level files (`docker-compose.yml`, `.env.example`, etc.)
-  plus `scripts/`, skipping `src/`, `ansible/`, `tests/`, and other build/CI-time
-  directories (the app runs from the GHCR image, not a source checkout), runs
-  `bootstrap.sh --skip-network`,
+  node. An orchestrator over its own numbered steps under
+  [`scripts/phases/install/`](#modular-phase-scripts) — see that section for how
+  to run one step standalone. Sparse-clones root-level files (`docker-compose.yml`,
+  `.env.example`, etc.) plus `scripts/`, skipping `src/`, `ansible/`, `tests/`, and
+  other build/CI-time directories (the app runs from the GHCR image, not a source
+  checkout), runs `bootstrap.sh --skip-network`,
   prompts for the Git secrets, an optional DSPy opt-in, and the ADR-006
   Komodo/Traefik prompts below, writes `.env`, brings everything enabled up
   together with `docker compose up -d`, and only then applies the
@@ -63,11 +130,14 @@ below instead.
     script's own entry for the details, which apply identically here.
 - **`bootstrap.sh`** — prepares a fresh node for the homelab control plane:
   installs Docker, Ansible, `uv`, `git-crypt`, and the GitHub CLI, sets the
-  hostname, generates an SSH key, and applies a static IP. Supports Debian and
-  Ubuntu (ADR-001 §3.1) on any hardware — Raspberry Pi or an x86_64/ARM64 VM —
-  detecting the OS, Docker apt repo, network interface, and hardware type at
-  runtime rather than assuming a Pi. Run directly for a bare provisioning pass,
-  or let `install.sh` drive it —
+  hostname, generates an SSH key, records a hardware-facts snapshot, and applies
+  a static IP. Also an orchestrator over its own numbered phases under
+  [`scripts/phases/bootstrap/`](#modular-phase-scripts) — see that section for
+  how to run one phase standalone (e.g. re-applying just the static IP after an
+  `nmcli` failure). Supports Debian and Ubuntu (ADR-001 §3.1) on any hardware —
+  Raspberry Pi or an x86_64/ARM64 VM — detecting the OS, Docker apt repo, network
+  interface, and hardware type at runtime rather than assuming a Pi. Run directly
+  for a bare provisioning pass, or let `install.sh` drive it —
   `bash scripts/bootstrap.sh [--dry-run] [--skip-network] [--network-only]`.
 - **`reset-node.sh`** — factory-resets a control-plane node previously set up by
   `install.sh`/`bootstrap.sh`, without re-flashing the SD card: stops containers
