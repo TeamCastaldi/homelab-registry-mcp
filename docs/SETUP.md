@@ -111,10 +111,13 @@ its own top-of-file comment never drift out of sync with each other:
    below).
 4. **Optionally creates your private homelab config repo** — the same one
    `scripts/setup-homelab-repo.sh` creates standalone, folded in here.
-   Requires `gh auth login` to already be done (a one-time device-code login,
-   safe to run over SSH); `gh`/`git-crypt` not being on `PATH`, or `gh` not
-   being authenticated, skips this step with instructions rather than
-   blocking the rest of the install. If you already answered the Git
+   `gh`/`git-crypt` not being on `PATH` skips this step with instructions
+   rather than blocking the rest of the install (bootstrap.sh should have
+   installed both). If `gh` isn't authenticated yet, this step offers to run
+   the one-time `gh auth login` device-code login right here (safe over SSH —
+   it prints a URL and code you open on any device's browser); declining, or
+   the login not completing, skips the rest of this step the same way. If you
+   already answered the Git
    provider prompt in step 3 with `github`, this reuses that same
    `owner/name` instead of asking again — otherwise it asks for a repo name
    and creates it under your account. Creates the target directory with

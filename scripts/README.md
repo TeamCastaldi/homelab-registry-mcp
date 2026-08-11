@@ -45,13 +45,15 @@ below instead.
     auto-generates). See
     [docs/ARDs/ADR-006-Pi-Non-MCP-Services-Komodo-Traefik.md](../docs/ARDs/ADR-006-Pi-Non-MCP-Services-Komodo-Traefik.md).
   - **Homelab config repo prompt**: folded in from `setup-homelab-repo.sh`
-    below. Requires `gh auth login` to already be done — `gh`/`git-crypt`
-    missing from `PATH`, or `gh` not authenticated, skips this prompt with
-    instructions rather than blocking the rest of the install. Reuses the
-    `owner/name` already given to the Git provider prompt above when it was
-    answered `github`, instead of asking for a repo name twice — see that
-    script's own entry for the rest of the details, which apply identically
-    here.
+    below. `gh`/`git-crypt` missing from `PATH` skips this prompt with
+    instructions rather than blocking the rest of the install (bootstrap.sh
+    should have installed both). If `gh` isn't authenticated yet, install.sh
+    offers to run the one-time `gh auth login` device-code flow right there
+    (declining, or the login not completing, skips the same way) instead of
+    requiring a separate manual step beforehand. Reuses the `owner/name`
+    already given to the Git provider prompt above when it was answered
+    `github`, instead of asking for a repo name twice — see that script's own
+    entry for the rest of the details, which apply identically here.
   - **Ansible inventory / hardware onboarding prompt**: folded in from
     `setup-ansible-inventory.sh` below. Only offered when a homelab config
     repo now exists at `SECRETS_REPO_PATH` — either just created by the

@@ -77,10 +77,13 @@ escape hatch (see its comment in `scripts/install.sh`); skipping it defeats
 the point of this loop, since the static-IP step is exactly the kind of thing
 it exists to exercise.
 
-To exercise Step 4 (homelab config repo) and Step 5 (Ansible inventory)
-beyond their skip paths, run `gh auth login` inside the VM first (device-code
-flow, safe over SSH) — a fresh VM has never authenticated `gh`, so both steps
-otherwise print a short warning and skip rather than prompt for real.
+A fresh VM has never authenticated `gh`, so Step 4 (homelab config repo) will
+offer to run `gh auth login` right there (device-code flow, safe over SSH —
+it prints a URL and code you open on any device's browser); accept it to
+exercise Step 4 for real. Declining it, or running `gh auth login` yourself
+beforehand and skipping that offer, both work too. Step 5 (Ansible inventory)
+only prompts once a homelab config repo exists, so it follows from whatever
+you chose at Step 4.
 
 When you're done with a round:
 

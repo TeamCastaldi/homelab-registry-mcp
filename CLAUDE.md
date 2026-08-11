@@ -279,10 +279,11 @@ Both loops are required for full confidence; neither replaces the other.
 the repo, provisions the OS (`scripts/bootstrap.sh --skip-network`: Docker,
 Ansible, `uv`, `git-crypt`, `gh`, SSH key), prompts for Git config and a DSPy
 opt-in, then optionally creates the private homelab config repo itself
-(folded in from `scripts/setup-homelab-repo.sh`; requires `gh auth login`
-already done, reuses the `owner/name` from the Git config prompt when it was
-answered `github`, skips cleanly with guidance if `gh`/`git-crypt` aren't
-available or `gh` isn't authenticated) — and if that repo now exists,
+(folded in from `scripts/setup-homelab-repo.sh`; offers to run the one-time
+`gh auth login` device-code flow right there if needed, reuses the
+`owner/name` from the Git config prompt when it was answered `github`, skips
+cleanly with guidance if `gh`/`git-crypt` aren't available or the login isn't
+completed) — and if that repo now exists,
 optionally seeds this node into the Ansible inventory `hardware-discover-now`
 reads (folded in from `scripts/setup-ansible-inventory.sh`; skips cleanly with
 guidance if no repo exists at all). Writes `.env`, brings the server up, then

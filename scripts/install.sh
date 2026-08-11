@@ -367,10 +367,30 @@ if ! command -v gh &>/dev/null || ! command -v git-crypt &>/dev/null; then
     warn "gh and/or git-crypt not found — scripts/bootstrap.sh should have installed"
     warn "both. Skipping; run scripts/setup-homelab-repo.sh once they're available."
 elif ! gh auth status &>/dev/null; then
-    warn "gh is not authenticated — this needs a one-time 'gh auth login' first"
-    warn "(device-code flow, safe to run over SSH). Skipping for now; run"
-    warn "'gh auth login' then scripts/setup-homelab-repo.sh (or re-run install.sh)."
-else
+    # Previously this just skipped with instructions to run 'gh auth login'
+    # manually and re-run install.sh -- but the whole point of install.sh is
+    # to be the one script an operator runs, so make the one-time device-code
+    # login part of this step instead of a separate manual prerequisite. No
+    # env-var pre-seed for this gate, same as the Komodo/Traefik yes/no
+    # prompts below -- gh auth login's own device-code flow can't be
+    # meaningfully pre-answered anyway. In CI, gh auth status already fails
+    # (no GH_TOKEN/GITHUB_TOKEN in this job's env) and the printf answer
+    # already queued for the "Create/use..." prompt below lands on this one
+    # instead, declining it -- gh auth login is never invoked non-interactively.
+    read -rp "gh isn't authenticated yet — run 'gh auth login' now? [Y/n]: " run_gh_auth_login
+    if [[ ! "$run_gh_auth_login" =~ ^[Nn]$ ]]; then
+        echo "Recommended: GitHub.com -> HTTPS -> Login with a web browser -> yes to"
+        echo "'Authenticate Git with your GitHub credentials?' (lets plain git push/"
+        echo "clone work too, not just gh-mediated calls)."
+        gh auth login || true
+    fi
+    if ! gh auth status &>/dev/null; then
+        warn "gh still isn't authenticated — skipping the homelab config repo prompt."
+        warn "Run 'gh auth login' then scripts/setup-homelab-repo.sh (or re-run install.sh)."
+    fi
+fi
+
+if command -v gh &>/dev/null && command -v git-crypt &>/dev/null && gh auth status &>/dev/null; then
     read -rp "Create/use a private homelab config repo now? [y/N]: " enable_homelab_repo
     if [[ "$enable_homelab_repo" =~ ^[Yy]$ ]]; then
         GITHUB_USER="$(gh api user --jq '.login')"
