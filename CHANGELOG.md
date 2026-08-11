@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.17.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.16.0...v0.17.0) (2026-08-11)
+
+
+### Features
+
+* **install:** fold Ansible inventory setup into install.sh ([7c01eab](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/7c01eab8fb430061632f021ac3204e7e06cfb512))
+* **install:** fold homelab config repo creation into install.sh ([d92db0a](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/d92db0aeb582caf2be03be540093e97487d02eae))
+* **install:** offer gh auth login inline instead of skip-with-instructions ([d57c327](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/d57c3270280671006550e7d8c1fe282b45344512))
+* replace ADR-005 monitoring stack with Komodo + Traefik on the Pi (ADR-006) ([5036267](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/5036267c922238549763b02c1642ed129085e801))
+
+
+### Bug Fixes
+
+* pin komodo-mongo image, explicit label value, require CONTROL_PLANE_HOST ([281c7b2](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/281c7b25a7e2e1ddacd057114bb8d5e85f76d070))
+* silent set -e death on gh repo create/clone failure, missing git identity ([e8797e5](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/e8797e57efc87dc37c6e23f6bfa9767c8d1e7b4d))
+* step-number drift, non-root /opt/homelab, unignored git-crypt key ([dfa67f3](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/dfa67f37399e14e8123962389fe2841e35fbf621))
+* sudo fallback for homelab-repo clone dir missed stale unwritable dirs ([7afe084](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/7afe0847844bdebd422bffb9e03051694c29c9a6))
+
+
+### Documentation
+
+* **vagrant:** fix stale step number and monitoring/ reference ([bb27b4d](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/bb27b4d6e73b2e0365aaec3bdd442ee34c274025))
+
 ## [0.16.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.15.4...v0.16.0) (2026-08-05)
 
 
