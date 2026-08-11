@@ -52,9 +52,15 @@ if [ -n "${GIT_PROVIDER:-}" ]; then
         # No default exists for a self-hosted instance, and leaving this
         # blank would silently disable the write path the operator just
         # asked for (the provider factory requires git_base_url) — keep
-        # asking until they give a real host.
+        # asking until they give a real host. Deliberately not prompt():
+        # prompt() only asks once the var is entirely unset and, on a blank
+        # answer, sets it to "" — which counts as "set" on the next check,
+        # so a naive `while ...; do prompt ...; done` around it never
+        # actually re-asks once a set-but-empty value (e.g. a pre-seeded
+        # `GIT_BASE_URL=`) is in play — see CONTROL_PLANE_HOST below for the
+        # same fix. Loop on a raw read instead until a non-empty value lands.
         while [ -z "${GIT_BASE_URL:-}" ]; do
-            prompt GIT_BASE_URL "Git base URL (your Gitea/Forgejo instance, e.g. https://gitea.example.com — required)"
+            read -rp "Git base URL (your Gitea/Forgejo instance, e.g. https://gitea.example.com — required): " GIT_BASE_URL
         done
     fi
 fi

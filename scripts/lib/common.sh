@@ -157,7 +157,10 @@ state_clear() {
 # --- SHARED CHECKS ---
 
 require_root_or_sudo() {
-    if ! sudo -n true 2>/dev/null; then
+    # sudo -v prompts for a password if needed (unlike `sudo -n true`, which
+    # fails immediately for any user without an already-cached timestamp) —
+    # same pattern as reset-node.sh's own require_root_or_sudo.
+    if ! sudo -v; then
         die "This script requires sudo. Run as a user with sudo access."
     fi
 }
