@@ -1,5 +1,13 @@
 # Phase D — Service Migration
 
+## Status
+
+Historical — the migration itself (registry-mcp onto the dedicated control-plane node) is complete
+and unchanged. The routing mechanism described in Part 1/2 below (Traefik static backend, because
+Traefik lived on a separate workload node at the time) is superseded: Traefik now runs co-located
+on this same node (ADR-006/ADR-007), so `docker-compose.yml` carries standard Traefik Docker labels
+and joins the external `traefik` network instead — see CLAUDE.md's Docker/Homelab Deploy section.
+
 ## Context
 
 Phase D moves registry-mcp from the workload node to the dedicated control-plane node (`<control-plane-ip>`). Traefik stays on the workload node and routes `registry-mcp.<your-domain>` to the control-plane node via a static backend — no Docker label magic, just an IP:port pointer. The prior orchestration tool is left running and untouched.
