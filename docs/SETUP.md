@@ -107,7 +107,7 @@ instead of the whole installer:
    here. Deploy them instead as ordinary `nodes/<node>/<service>/compose.yaml`
    entries in your private homelab repo, through the same GitOps pipeline
    described in [`ansible/README.md`](../ansible/README.md) — see
-   [ADR-006](ARDs/ADR-006-Pi-Non-MCP-Services-Komodo-Traefik.md) for why they
+   [ADR-007](ARDs/ADR-007-Komodo-Traefik-Move-To-GitOps.md) for why they
    were pulled out of this repo's compose file.
 
    This installer assumes a **greenfield** setup — no Traefik discovery or

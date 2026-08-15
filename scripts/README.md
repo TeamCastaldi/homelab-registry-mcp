@@ -102,7 +102,7 @@ Changing what one step does means editing exactly one file in `scripts/phases/`
   them as ordinary `nodes/<node>/<service>/compose.yaml` entries in your
   private homelab repo instead, through the same GitOps pipeline described in
   [`ansible/README.md`](../ansible/README.md) — see
-  [docs/ARDs/ADR-006-Pi-Non-MCP-Services-Komodo-Traefik.md](../docs/ARDs/ADR-006-Pi-Non-MCP-Services-Komodo-Traefik.md)
+  [docs/ARDs/ADR-007-Komodo-Traefik-Move-To-GitOps.md](../docs/ARDs/ADR-007-Komodo-Traefik-Move-To-GitOps.md)
   for why they were removed from this repo's compose file.
   - **Homelab config repo prompt**: folded in from `setup-homelab-repo.sh`
     below. `gh`/`git-crypt` missing from `PATH` skips this prompt with
