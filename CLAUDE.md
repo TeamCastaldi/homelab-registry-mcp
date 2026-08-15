@@ -1,6 +1,6 @@
 # homelab-registry-mcp
 
-Python MCP server that is the authoritative service catalog for a homelab. It discovers services from Traefik, Docker, and Authentik; maintains a curated SQLite registry; and exposes the data as MCP tools, resources, and prompts for AI agents.
+Python MCP server that is the authoritative service catalog for a homelab. It discovers services from Traefik, Docker, and Authentik; maintains a curated SQLite registry; and exposes the data — plus read-only Komodo stack/service queries — as MCP tools, resources, and prompts for AI agents.
 
 ## Commands
 
@@ -56,7 +56,8 @@ src/registry_mcp/
 │   └── notification/      # NotificationProvider protocol + Ntfy/Smtp/Null + factory
 ├── integrations/
 │   ├── traefik/           # httpx client + 7 MCP tools + resource + prompt
-│   └── authentik/         # httpx client + 8 MCP tools + resource + prompt
+│   ├── authentik/         # httpx client + 8 MCP tools + resource + prompt
+│   └── komodo/            # httpx client (Basic Auth) + 7 MCP tools + resource + prompt, read-only
 ├── tools/
 │   ├── registry.py        # CRUD: add/get/list/update/delete service
 │   ├── events.py          # query change + discovery logs
@@ -182,6 +183,11 @@ GitOps-managed) under management without leaking its hardcoded secrets. Off by d
 | `AUTHENTIK_TOKEN` | unset | **Read-only service-account token only** (never admin) |
 | `AUTHENTIK_TIMEOUT_SECONDS` | `10` | |
 | `AUTHENTIK_RETRIES` | `3` | |
+| `KOMODO_API_URL` | unset | Enables read-only Komodo stack/service tools; e.g. `https://komodo.lan` |
+| `KOMODO_API_KEY` | unset | Paired with `KOMODO_API_SECRET` for Basic Auth against the Komodo API |
+| `KOMODO_API_SECRET` | unset | |
+| `KOMODO_TIMEOUT_SECONDS` | `10` | |
+| `KOMODO_RETRIES` | `3` | |
 | `DOCKER_BASE_URL` | unset | Enables Docker discovery; e.g. `unix:///var/run/docker.sock` |
 | `REGISTRY_DB_PATH` | `/data/registry.db` | SQLite location |
 | `REGISTRY_LOG_PATH` | `/data/events.log` | JSON event log |
