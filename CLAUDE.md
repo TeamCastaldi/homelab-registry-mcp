@@ -270,7 +270,7 @@ Fixtures live in `tests/conftest.py` (IsolatedSettings, in-memory store).
 
 `scripts/install.sh` / `scripts/bootstrap.sh` have two separate test loops, each catching a different class of bug. Run the fast one first; reach for the slow one only when a change needs fidelity the fast one structurally can't provide.
 
-- **Fast loop — `.github/workflows/install-validation.yml`** (GitHub Actions, `ubuntu-latest`). Runs `install.sh` non-interactively — every prompt pre-seeded via env vars of the same name, `INSTALL_SKIP_NETWORK=true` skips the static-IP swap (which would otherwise risk severing the runner's own network connectivity mid-job) — and asserts the ADR-006 Komodo + Traefik stack comes up healthy. Triggers on `workflow_dispatch` (`gh workflow run install-validation.yml --ref <branch>` — test a change without opening a PR) and on `pull_request` touching `scripts/**`. Catches logic bugs, env-var plumbing issues, and container-health regressions in minutes, without a merge to `main`.
+- **Fast loop — `.github/workflows/install-validation.yml`** (GitHub Actions, `ubuntu-latest`). Runs `install.sh` non-interactively — every prompt pre-seeded via env vars of the same name, `INSTALL_SKIP_NETWORK=true` skips the static-IP swap (which would otherwise risk severing the runner's own network connectivity mid-job) — and asserts the `homelab-registry-mcp` container comes up healthy. Triggers on `workflow_dispatch` (`gh workflow run install-validation.yml --ref <branch>` — test a change without opening a PR) and on `pull_request` touching `scripts/**`. Catches logic bugs, env-var plumbing issues, and container-health regressions in minutes, without a merge to `main`.
 - **Slow loop — `vagrant/slow-loop/` (Vagrant + libvirt, Debian trixie64)**. `cd vagrant/slow-loop && vagrant up && vagrant ssh`, then run the installer by hand inside — see `vagrant/slow-loop/README.md` for the full walkthrough. Real systemd and real network-interface ownership catch what the fast loop structurally can't — e.g. the ifupdown-vs-netplan detection bug: `ubuntu-latest` ships netplan, not ifupdown, so only a real Debian VM reproduces that class of failure — and it's the only place the static-IP step (`bootstrap.sh` Phase 6) actually runs at all, since the fast loop always skips it. `vagrant destroy -f` between rounds; both scripts assume a genuinely fresh node.
 
 Both loops clone from GitHub rather than a local working tree, so push your branch before testing either one. `install.sh` honors `VERSION` (the same variable the documented `curl -fsSL .../${VERSION}/scripts/install.sh` one-liner already uses) for its own internal clone too — `export VERSION=your-branch-name` first (must be exported, not just assigned, or the `bash -c` subprocess running `install.sh` never sees it) and both loops test that branch end-to-end (`bootstrap.sh`, `scripts/`, `monitoring/` included), not just main with a different `install.sh` grafted on top.
@@ -305,21 +305,20 @@ container has no filesystem access to the host's `.env`) and never start
 discovery immediately (`Settings` and the scheduler are only read/built at
 server startup).
 
-**Pi non-MCP services — Komodo + Traefik (ADR-006, opt-in)**: `docker-compose.yml`
-also carries Komodo (`komodo-mongo` + `komodo-core` + `komodo-periphery` —
-container management, logs, and update detection for this node) and Traefik
-(`traefik` + `traefik-redis` — this node's central ingress; other nodes'
-`traefik-kop` instances publish routes to `traefik-redis`), each gated behind
-its own `komodo` / `traefik` Compose profile. `install.sh` prompts for both
-independently during Step 3 and writes `COMPOSE_PROFILES` to `.env`, so
-`docker compose up -d` in Step 7 brings the whole enabled set up together,
-before the network swap in Step 8. Komodo's internal secrets (database
-password, Core↔Periphery webhook/JWT secrets) and Traefik's Redis password
-are always auto-generated; only the Komodo admin username/password are
-prompted for. ADR-006 supersedes the ADR-005 monitoring/ingress stack (Beszel,
-Gatus, Dozzle, WUD, Homepage, Glance, `docker-socket-proxy`, Autorestic,
-Healthchecks.io) — none of it remains, including the `/webhooks/wud` →
-`image_update` proposal flow WUD used to drive.
+**Pi non-MCP services — Komodo + Traefik (ADR-006, now GitOps-managed per ADR-007)**:
+`docker-compose.yml` in this repo defines only `homelab-registry-mcp` — Komodo
+(container management, logs, update detection) and Traefik (this node's
+central ingress; other nodes' `traefik-kop` instances publish routes to its
+Redis) are no longer bundled into this repo's compose file or `install.sh`.
+They're deployed instead as ordinary `nodes/<node>/<service>/compose.yaml`
+entries in the operator's private homelab repo, through the same Ansible +
+GitHub Actions GitOps pipeline (Phase 4/ADR-001) every other node service
+uses — see ADR-007. ADR-006's standing choice of *which* tools (Komodo +
+Traefik, supersedes the ADR-005 monitoring/ingress stack — Beszel, Gatus,
+Dozzle, WUD, Homepage, Glance, `docker-socket-proxy`, Autorestic,
+Healthchecks.io — none of which remains, including the `/webhooks/wud` →
+`image_update` proposal flow WUD used to drive) is unchanged; only the deploy
+mechanism moved.
 
 **Existing Docker host**:
 
@@ -376,7 +375,7 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
 - **`docs/plans/updated-phases.md` Phases 1-6 complete** (separate numbering from the phases above): `scripts/install.sh` one-shot installer for a fresh control-plane node (Phase 1); `health.py` startup checks (Git repo/`ansible.cfg`/SSH key) + always-on `system_health_check` tool + read-only degradation of the GitOps write tools when unhealthy (Phase 2); conversational GitOps loop — `poll_pr_comments`/`apply_review_feedback` push a DSPy-generated revision commit in response to a trusted PR comment, gated by a fail-closed `PROPOSAL_COMMENT_ALLOWED_USERS` allowlist and the same confidence/YAML gates as initial patch generation (Phase 3); `ansible/roles/docker-stack-deploy` + reusable `.github/workflows/deploy.yml` — the deploy *action* ships here, each operator's private homelab repo supplies only the *config* and a thin caller workflow (Phase 4); `SmtpNotificationProvider` — templated HTML proposal email (PR summary, diff, Approve/Request Changes/View Diff buttons) via stdlib `smtplib`, validated against SMTP2GO, `NOTIFICATION_PROVIDER=smtp` (Phase 5); public release scrub — removed an accidentally-committed operator-specific `nodes/` config and genericized real hostnames/IPs/personal identifiers across scripts and docs (Phase 6)
 - **`docs/plans/updated-phases.md` Phase 7 complete** (brownfield adoption & secret interception — the final phase in that plan): `proposal_adopt_service`/`_finalize`/`_cancel`/`_get` tools, `AdoptionDraft` model/store, `DetectHardcodedSecrets` DSPy signature, and the shared `gitcrypt.py` module (extracted from `tools/secrets.py` so both features encrypt through the same local-clone path rather than the remote Git API, which bypasses git-crypt's filter). Off by default (`ADOPTION_ENABLED=false`).
 - **ADR-005 superseded by ADR-006**: the monitoring/ingress stack ADR-005 introduced (Beszel, Gatus, Dozzle, WUD, docker-socket-proxy, Homepage, Glance, traefik-kop, Autorestic, Healthchecks.io heartbeat) has been fully removed, including the WUD-driven `/webhooks/wud` → `image_update` proposal flow (`FindingType.image_update`, `ProposalEngine.create_for_image_update`) — no replacement for that update-triggered proposal path exists yet (see ADR-006's Open Items).
-- **ADR-006 complete**: the Pi's only non-MCP services are now Komodo (`komodo-mongo`/`komodo-core`/`komodo-periphery` — container management, logs, update detection) and Traefik (`traefik`/`traefik-redis` — this node's central ingress, moved from a workload node; other nodes' `traefik-kop` instances now publish to `traefik-redis` here), each its own Compose profile (`komodo`/`traefik`) wired into `scripts/install.sh` Step 3. Komodo is reintroduced for operational visibility only — the Ansible + GitHub Actions GitOps pipeline (Phase 4/ADR-001) remains the only path for MCP-proposed changes, on the Pi or any other node.
+- **ADR-006 complete, deploy mechanism superseded by ADR-007**: the Pi's only non-MCP services are Komodo (container management, logs, update detection) and Traefik (this node's central ingress, moved from a workload node; other nodes' `traefik-kop` instances publish to its Redis). Komodo is operational visibility only — the Ansible + GitHub Actions GitOps pipeline (Phase 4/ADR-001) remains the only path for MCP-proposed changes, on the Pi or any other node. Per ADR-007, both are now deployed as ordinary `nodes/<node>/<service>/compose.yaml` entries in the operator's private homelab repo through that same GitOps pipeline, rather than bundled into this repo's `docker-compose.yml`/`scripts/install.sh` as Compose profiles.
 - **ARD-004 proposed**: upstream version detection — `HomelabrepoDiscoverySource`, `UpstreamRegistrySource`, `ResolveLatestTag` DSPy module — would need its own `FindingType` now that ADR-006 removed the `image_update` one WUD used; the polling-based discovery source itself is not yet implemented
 - **OOBE CLI** (ARD-003): fully documented but not yet implemented; currently a manual process
 - **Deferred**: network probe discovery (`DISCOVERY_NETWORK_ENABLED=false`), real auth (Bearer/mTLS), multi-node Ansible bootstrap (Phase E)

@@ -43,9 +43,8 @@ elif ! gh auth status &>/dev/null; then
     # manually and re-run install.sh -- but the whole point of install.sh is
     # to be the one script an operator runs, so make the one-time device-code
     # login part of this step instead of a separate manual prerequisite. No
-    # env-var pre-seed for this gate, same as the Komodo/Traefik yes/no
-    # prompts in Step 3 -- gh auth login's own device-code flow can't be
-    # meaningfully pre-answered anyway. In CI, gh auth status already fails
+    # env-var pre-seed for this gate -- gh auth login's own device-code flow
+    # can't be meaningfully pre-answered anyway. In CI, gh auth status already fails
     # (no GH_TOKEN/GITHUB_TOKEN in this job's env) and the printf answer
     # already queued for the "Create/use..." prompt below lands on this one
     # instead, declining it -- gh auth login is never invoked non-interactively.

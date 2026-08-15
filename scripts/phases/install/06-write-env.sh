@@ -32,15 +32,6 @@ else
     GIT_BASE_URL="$(resolve_var GIT_BASE_URL "")"
     DSPY_ENABLED="$(resolve_var DSPY_ENABLED "false")"
     ANTHROPIC_API_KEY="$(resolve_var ANTHROPIC_API_KEY "")"
-    COMPOSE_PROFILES="$(resolve_var COMPOSE_PROFILES "")"
-    CONTROL_PLANE_HOST="$(resolve_var CONTROL_PLANE_HOST "")"
-    KOMODO_INIT_ADMIN_USERNAME="$(resolve_var KOMODO_INIT_ADMIN_USERNAME "")"
-    KOMODO_INIT_ADMIN_PASSWORD="$(resolve_var KOMODO_INIT_ADMIN_PASSWORD "")"
-    KOMODO_DATABASE_PASSWORD="$(resolve_var KOMODO_DATABASE_PASSWORD "")"
-    KOMODO_WEBHOOK_SECRET="$(resolve_var KOMODO_WEBHOOK_SECRET "")"
-    KOMODO_JWT_SECRET="$(resolve_var KOMODO_JWT_SECRET "")"
-    KOMODO_HOST="$(resolve_var KOMODO_HOST "")"
-    TRAEFIK_REDIS_PASSWORD="$(resolve_var TRAEFIK_REDIS_PASSWORD "")"
     SECRETS_REPO_PATH="$(resolve_var SECRETS_REPO_PATH "")"
     SECRETS_KEY_PATH="$(resolve_var SECRETS_KEY_PATH "")"
     ANSIBLE_CFG_PATH="$(resolve_var ANSIBLE_CFG_PATH "")"
@@ -72,15 +63,6 @@ else
     set_env GIT_BASE_URL "${GIT_BASE_URL:-}" true
     set_env DSPY_ENABLED "${DSPY_ENABLED}"
     set_env ANTHROPIC_API_KEY "${ANTHROPIC_API_KEY:-}" true
-    set_env COMPOSE_PROFILES "${COMPOSE_PROFILES:-}" true
-    set_env CONTROL_PLANE_HOST "${CONTROL_PLANE_HOST:-}" true
-    set_env KOMODO_INIT_ADMIN_USERNAME "${KOMODO_INIT_ADMIN_USERNAME:-}" true
-    set_env KOMODO_INIT_ADMIN_PASSWORD "${KOMODO_INIT_ADMIN_PASSWORD:-}" true
-    set_env KOMODO_DATABASE_PASSWORD "${KOMODO_DATABASE_PASSWORD:-}" true
-    set_env KOMODO_WEBHOOK_SECRET "${KOMODO_WEBHOOK_SECRET:-}" true
-    set_env KOMODO_JWT_SECRET "${KOMODO_JWT_SECRET:-}" true
-    set_env KOMODO_HOST "${KOMODO_HOST:-}" true
-    set_env TRAEFIK_REDIS_PASSWORD "${TRAEFIK_REDIS_PASSWORD:-}" true
     # Not allow_empty=true: .env.example already ships a real, correct
     # default (/opt/homelab) for this one, unlike the optional-integration
     # fields above -- if Step 4 was skipped, that default must survive

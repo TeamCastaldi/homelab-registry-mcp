@@ -4,8 +4,7 @@
 # INSTALL STEP 7 — START THE MCP SERVER
 # ==============================================================================
 # `docker compose pull && docker compose up -d`, then waits for
-# homelab-registry-mcp to report running. Anything enabled in Step 3
-# (Komodo, Traefik) comes up in this same step, via the .env Step 6 wrote.
+# homelab-registry-mcp to report running.
 #
 # Invoked by scripts/install.sh. Also fully self-contained:
 #   INSTALL_DIR=~/homelab-registry-mcp bash scripts/phases/install/07-start-server.sh

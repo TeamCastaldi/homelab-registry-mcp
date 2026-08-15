@@ -84,11 +84,10 @@ Changing what one step does means editing exactly one file in `scripts/phases/`
   `.env.example`, etc.) plus `scripts/`, skipping `src/`, `ansible/`, `tests/`, and
   other build/CI-time directories (the app runs from the GHCR image, not a source
   checkout), runs `bootstrap.sh --skip-network`,
-  prompts for the Git secrets, an optional DSPy opt-in, and the ADR-006
-  Komodo/Traefik prompts below, writes `.env`, brings everything enabled up
-  together with `docker compose up -d`, and only then applies the
-  static IP (`bootstrap.sh --network-only`) so the server is already running
-  when the SSH session drops. Designed to be run via
+  prompts for the Git secrets and an optional DSPy opt-in, writes `.env`,
+  brings the MCP server up with `docker compose up -d`, and only then applies
+  the static IP (`bootstrap.sh --network-only`) so the server is already
+  running when the SSH session drops. Designed to be run via
   `curl -fsSL <raw-url>/scripts/install.sh | bash`; every prompt can be pre-seeded
   with an environment variable of the same name for non-interactive use.
   `VERSION` (as used in that `curl` URL) also controls which ref
@@ -98,19 +97,13 @@ Changing what one step does means editing exactly one file in `scripts/phases/`
   Authentik discovery, since a fresh homelab won't have those yet. Connect
   the read-only discovery integrations later via the
   `discovery_connect_traefik` / `discovery_connect_authentik` MCP tools.
-  - **ADR-006 Komodo/Traefik prompts**: two independent yes/no gates. Komodo
-    adds `komodo` to `COMPOSE_PROFILES` in `.env` (turns on `komodo-mongo`,
-    `komodo-core`, `komodo-periphery` in `docker-compose.yml` — container
-    management, logs, and update detection for this node); Traefik adds
-    `traefik` (turns on `traefik` + `traefik-redis` — this node's central
-    ingress; other nodes' `traefik-kop` instances publish routes to
-    `traefik-redis` here). `docker compose up -d` reads `COMPOSE_PROFILES`
-    from the same `.env` automatically. All of Komodo's internal secrets
-    (database password, Core↔Periphery webhook/JWT secrets) and Traefik's
-    Redis password are always auto-generated — only the Komodo admin
-    username/password are prompted for (blank password also
-    auto-generates). See
-    [docs/ARDs/ADR-006-Pi-Non-MCP-Services-Komodo-Traefik.md](../docs/ARDs/ADR-006-Pi-Non-MCP-Services-Komodo-Traefik.md).
+  `docker-compose.yml` runs only `homelab-registry-mcp` — Komodo and Traefik
+  (formerly ADR-006's Pi non-MCP services) are no longer bundled here; deploy
+  them as ordinary `nodes/<node>/<service>/compose.yaml` entries in your
+  private homelab repo instead, through the same GitOps pipeline described in
+  [`ansible/README.md`](../ansible/README.md) — see
+  [docs/ARDs/ADR-007-Komodo-Traefik-Move-To-GitOps.md](../docs/ARDs/ADR-007-Komodo-Traefik-Move-To-GitOps.md)
+  for why they were removed from this repo's compose file.
   - **Homelab config repo prompt**: folded in from `setup-homelab-repo.sh`
     below. `gh`/`git-crypt` missing from `PATH` skips this prompt with
     instructions rather than blocking the rest of the install (bootstrap.sh

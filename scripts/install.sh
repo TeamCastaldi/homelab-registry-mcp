@@ -18,8 +18,8 @@
 # Every one of those is independently runnable too — see its own header
 # comment — which is the easiest way to debug or re-run just one step (e.g.
 # re-writing .env after tweaking your answers) instead of the whole install.
-# Cross-step handoff (the Git/Komodo/Traefik answers Step 3 collects, the
-# paths Steps 4-5 produce, ...) goes through a small state file under
+# Cross-step handoff (the Git/DSPy answers Step 3 collects, the paths
+# Steps 4-5 produce, ...) goes through a small state file under
 # ~/.homelab-registry-mcp/ (see scripts/lib/common.sh) — a real environment
 # variable of the same name always wins over it, so every documented
 # pre-seeding trick below still works unchanged.
@@ -48,7 +48,7 @@
 #      skips cleanly if already present, but still fixes up required state
 #      (Docker group membership, NetworkManager service) even when it does.
 #                                                                     [phases/install/02-os-provision.sh]
-#   3. Prompt for Git/DSPy/Komodo/Traefik secrets and opt-in         [phases/install/03-configure.sh]
+#   3. Prompt for Git/DSPy secrets and opt-in                        [phases/install/03-configure.sh]
 #   4. Optionally create the private homelab config repo (git-crypt-encrypted
 #      secrets, Ansible inventory, nodes/ compose files) — requires `gh auth
 #      login` to already be done; reuses the Git repo from step 3 if it was
@@ -145,7 +145,7 @@ fi
 # Fresh state for a fresh run — a prior run's answers, or an option declined
 # this time, must never silently leak into this one. Cleared again on exit
 # (success or failure) via the trap below, since the state file can hold
-# secrets (GIT_TOKEN, Komodo passwords, ...) that only need to live for the
+# secrets (GIT_TOKEN, ANTHROPIC_API_KEY, ...) that only need to live for the
 # duration of this run.
 state_clear
 trap state_clear EXIT

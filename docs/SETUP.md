@@ -101,13 +101,14 @@ instead of the whole installer:
      base URL
    - Whether to enable the optional DSPy reasoning layer, and your Anthropic
      API key if so
-   - Whether to enable Komodo (container management, logs, update detection
-     for this node) and/or Traefik (this node's central ingress) — ADR-006's
-     two independent yes/no gates. If either is yes: your control-plane
-     node's LAN IP/hostname. If Komodo: an admin username/password (password
-     auto-generated if left blank) — everything else Komodo needs (database
-     credentials, Core↔Periphery secrets) and Traefik's Redis password are
-     always auto-generated, never prompted for.
+
+   `docker-compose.yml` brings up only `homelab-registry-mcp` — Komodo and
+   Traefik (formerly ADR-006's Pi non-MCP services) are no longer bundled
+   here. Deploy them instead as ordinary `nodes/<node>/<service>/compose.yaml`
+   entries in your private homelab repo, through the same GitOps pipeline
+   described in [`ansible/README.md`](../ansible/README.md) — see
+   [ADR-007](ARDs/ADR-007-Komodo-Traefik-Move-To-GitOps.md) for why they
+   were pulled out of this repo's compose file.
 
    This installer assumes a **greenfield** setup — no Traefik discovery or
    Authentik yet — so it doesn't ask about connecting to an existing Traefik
@@ -149,9 +150,7 @@ instead of the whole installer:
    else in the installer depends on it.
 6. **Writes `.env`** from everything collected in steps 3–5.
 7. **Starts the server**: `docker compose pull && docker compose up -d`, then
-   waits for it to report running. Anything enabled above (Komodo, Traefik,
-   the homelab repo, the Ansible inventory) comes up or takes effect in this
-   same step, via the `.env` step 6 just wrote.
+   waits for it to report running.
 8. **Applies the static IP** last, by handing off to
    `bootstrap.sh --network-only` — this is deliberately the final step, so the
    server is already up and running by the time this drops your SSH session.

@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Accepted |
+| **Status** | Superseded by [ADR-007](ADR-007-Komodo-Traefik-Move-To-GitOps.md) (2026-08-15) — kept for historical context. Komodo and Traefik are no longer bundled in this repo's `docker-compose.yml`; they're deployed as ordinary GitOps-managed `nodes/<node>/<service>/compose.yaml` entries instead. Sections 1-2 below (which tool, which node) still describe the operator's standing choice — only *how it's deployed* changed. |
 | **Supersedes** | ADR-005-Monitoring-Alerting-Recovery-Ingress-Architecture.md (in full) |
 | **Amends** | ADR-001-Homelab-Control-Plane.md §4.1 reference topology (Traefik row), §6.2 (ingress topology) |
 | **Date** | 2026-08-10 |
