@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     authentik_token: str | None = Field(default=None)
     authentik_timeout_seconds: float = Field(default=10.0)
     authentik_retries: int = Field(default=3)
+    komodo_api_url: str | None = Field(default=None)
+    komodo_api_key: str | None = Field(default=None)
+    komodo_api_secret: str | None = Field(default=None)
+    komodo_timeout_seconds: float = Field(default=10.0)
+    komodo_retries: int = Field(default=3)
 
     # MCP transport
     mcp_transport: Transport = Field(default="streamable-http")
