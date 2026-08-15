@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.18.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.17.0...v0.18.0) (2026-08-15)
+
+
+### Features
+
+* add read-only Komodo API integration ([194c045](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/194c0458e41c2ed7533138809f869e3a80e4a60f))
+* add read-only Komodo API integration ([5ef9a97](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/5ef9a97ad1e840c28045bfe4ea80a0d3dd404f59))
+* add Traefik Docker labels to docker-compose.yml ([bab7e03](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/bab7e03332aa79463dceafcaf7c5dbffa687256a))
+* add Traefik Docker labels to docker-compose.yml ([857e4b4](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/857e4b467bb396b6d17bbe0e41c153974cbbcbd3))
+
+
+### Bug Fixes
+
+* address Copilot review on Komodo integration ([ffcf7d3](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/ffcf7d3c13b6623e966fbcf564368264c694f140))
+* don't ship a live placeholder certresolver label ([42b84a6](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/42b84a651360b70a50fcc4824e7bd11765688d9f))
+* install.sh crashes when run via curl-pipe (BASH_SOURCE[0] unbound) ([e76ef01](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/e76ef01b3f849dbb14b461e862f0e85c706529b7))
+* point removal-rationale links at ADR-007, not ADR-006 ([fd86d17](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/fd86d17a4af480d2ae314f29c5870e5271a255a7))
+* sudo -n false-negative and GIT_BASE_URL infinite prompt loop ([3eaff91](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/3eaff91cbf8e1b5ad4e89eada7765f171e8e7583))
+
 ## [0.17.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.16.0...v0.17.0) (2026-08-11)
 
 
