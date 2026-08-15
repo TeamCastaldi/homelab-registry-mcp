@@ -11,11 +11,31 @@ services:
       MCP_PORT: 8765
       DOCKER_BASE_URL: unix:///var/run/docker.sock
     ports:
-      # Bind on all interfaces so Traefik on the workload node can reach this
-      # container over the LAN. Routing is via a static backend in Traefik's
-      # dynamic config (see docs/plans/phase-d.md) — no Docker label discovery
-      # is used on the control-plane node.
+      # Bind on all interfaces too, not just the `traefik` network below —
+      # keeps direct LAN/debug access to :8765 working regardless of how
+      # Traefik is reaching this container.
       - "0.0.0.0:8765:8765"
+    # Traefik now runs on this same node (ADR-006), GitOps-managed as its own
+    # nodes/<node>/traefik/compose.yaml in the operator's private homelab repo
+    # (ADR-007) — it reads the local Docker socket directly and discovers
+    # routes via labels, the same pattern already used in
+    # vagrant/workload-node's fixture. Supersedes the old cross-host static
+    # backend from docs/plans/phase-d.md, written back when Traefik lived on
+    # a separate workload node. Requires the external `traefik` Docker
+    # network to already exist (created by that Traefik compose project) —
+    # see CLAUDE.md's Docker/Homelab Deploy pre-reqs.
+    networks:
+      - traefik
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.registry-mcp.rule: "Host(`registry-mcp.<your-domain>`)"
+      traefik.http.routers.registry-mcp.entrypoints: "websecure"
+      # certresolver name is whatever the operator's own Traefik instance
+      # defines (ADR-006 Open Item: TLS/ACME config is operator-supplied,
+      # "bring your own certs" — not decided in this repo). Fill in or
+      # remove this line to match.
+      traefik.http.routers.registry-mcp.tls.certresolver: "<CERT_RESOLVER>"
+      traefik.http.services.registry-mcp.loadbalancer.server.port: "8765"
     volumes:
       - registry-data:/data
       # Homelab repo (git-crypt encrypted .env files + Ansible inventory).
@@ -34,3 +54,9 @@ services:
 
 volumes:
   registry-data:
+
+networks:
+  # Created by the operator's Traefik compose project (nodes/<node>/traefik/
+  # in the private homelab repo, per ADR-007) — not owned by this file.
+  traefik:
+    external: true

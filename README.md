@@ -83,10 +83,14 @@ the image is pulled from GHCR and no source checkout is required.
 #### Prerequisites
 
 - A host with Docker and the Compose plugin.
-- Traefik reachable from this host, if you want it fronted by Traefik — the
-  shipped `docker-compose.yml` publishes port 8765 directly and routes via a
-  Traefik static backend, not a shared Docker network. Point a `websecure`
-  TLS entrypoint and DNS for `registry-mcp.<your-domain>` at `<this-host>:8765`.
+- If you want it fronted by Traefik: the shipped `docker-compose.yml` carries
+  Traefik Docker labels (`traefik.enable`, a `registry-mcp.<your-domain>`
+  router, `websecure` entrypoint) and joins an external `traefik` Docker
+  network — create that network first and make sure your Traefik instance is
+  on it too (`--providers.docker=true`), plus DNS for
+  `registry-mcp.<your-domain>`. Fill in the `tls.certresolver` label to match
+  your own Traefik's ACME config, or drop it if you're not using TLS. Port
+  8765 is also published directly for LAN/debug access regardless.
 - A read-only Authentik service-account token (never an admin token).
 
 #### 1. Get the compose file and configure
