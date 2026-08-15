@@ -2,8 +2,7 @@ name: Install Script Validation
 
 # Fast, non-interactive loop for scripts/install.sh (ADR-001 §5, OOBE
 # prerequisite). Runs the real installer end-to-end on a hosted ubuntu-latest
-# runner and asserts the ADR-006 Komodo + Traefik stack it can bring up is
-# healthy.
+# runner and asserts the MCP container it brings up is healthy.
 #
 # This is the *fast* loop only: catches logic bugs, env-var plumbing issues,
 # and container-health regressions fast, without a merge to main. It
@@ -60,16 +59,6 @@ jobs:
       # this fast loop.
       DSPY_ENABLED: "false"
 
-      # ADR-006 Komodo + Traefik -- the whole point of exercising this in CI.
-      # CONTROL_PLANE_HOST is pre-seeded so install.sh's shared host prompt
-      # is skipped entirely (env-var pre-seeding, not a stdin answer -- see
-      # the printf sequence below). KOMODO_INIT_ADMIN_PASSWORD blank ->
-      # install.sh auto-generates one with `openssl rand -hex 16`, same
-      # pattern as the internal secrets it always auto-generates.
-      CONTROL_PLANE_HOST: "127.0.0.1"
-      KOMODO_INIT_ADMIN_USERNAME: "admin"
-      KOMODO_INIT_ADMIN_PASSWORD: ""
-
     steps:
       # fetch-depth: 0 -- install.sh's own `git clone --filter=blob:none
       # --sparse "$REPO_URL"` (STEP 1) is pointed at this checkout via
@@ -90,16 +79,13 @@ jobs:
           # needed for those. A handful of prompts in install.sh and
           # bootstrap.sh are raw `read -rp` yes/no gates with no env-var
           # equivalent to pre-seed (bootstrap.sh's four network-value prompts
-          # + its "Proceed?" confirm, and install.sh's Komodo/Traefik
-          # yes-no gates). Those are answered here via stdin, in the exact
-          # order the scripts ask them, mirroring the manually-validated
-          # Vagrant/Debian path:
+          # + its "Proceed?" confirm). Those are answered here via stdin, in
+          # the exact order the scripts ask them, mirroring the
+          # manually-validated Vagrant/Debian path:
           #
           #   1-4  bootstrap.sh static IP / prefix / gateway / DNS  -> blank (accept auto-detected defaults)
           #   5    bootstrap.sh "Proceed? [y/N]"                    -> y
-          #   6    install.sh  "Enable Komodo ...? [y/N]"           -> y
-          #   7    install.sh  "Enable Traefik ...? [y/N]"          -> y
-          #   8    install.sh  "Create/use a private homelab config repo now? [y/N]"
+          #   6    install.sh  "Create/use a private homelab config repo now? [y/N]"
           #                    -> n (defensive; this gate is only even reached if
           #                    both gh and git-crypt are on PATH *and* `gh auth
           #                    status` succeeds -- bootstrap.sh does install gh/
@@ -127,8 +113,6 @@ jobs:
           printf '%s\n' \
               "" "" "" "" \
               "y" \
-              "y" \
-              "y" \
               "n" \
               | bash scripts/install.sh
 
@@ -138,12 +122,12 @@ jobs:
           set -uo pipefail
           cd "$INSTALL_DIR"
 
-          # The ADR-006 "komodo" + "traefik" profile sets (docker-compose.yml)
-          # -- homelab-registry-mcp carries no profile so it's always up;
-          # both Komodo and Traefik were accepted above (the printf sequence
-          # answers "y" to both), so all five of their containers are
-          # expected too.
-          EXPECTED_UP=(homelab-registry-mcp komodo-mongo komodo-core komodo-periphery traefik traefik-redis)
+          # docker-compose.yml carries only the MCP service now -- Komodo and
+          # Traefik (formerly ADR-006's Pi non-MCP services) moved to
+          # GitOps-managed nodes/<node>/<service>/compose.yaml entries in the
+          # operator's private homelab repo instead, so this fast loop only
+          # needs to check the one container it actually brings up.
+          EXPECTED_UP=(homelab-registry-mcp)
           # No conditionally-absent container in this stack (unlike the old
           # beszel-agent gate) -- kept as an empty array so the check/summary
           # loops below don't need a separate no-EXPECT_ABSENT code path.
@@ -187,19 +171,15 @@ jobs:
               done
           }
 
-          # install.sh's own readiness wait only polls homelab-registry-mcp
-          # itself before returning -- Komodo/Traefik (pulled and started at
-          # the same time) may still be settling. Mongo + Komodo Core's
-          # first-boot keypair generation are heavier than the old stack's
-          # Go binaries, so this retries over ~90s (vs. the previous ~40s)
-          # before treating a non-running container as a real failure,
-          # rather than flagging normal startup lag; a genuinely
-          # crash-looping container stays non-"running" across every
-          # attempt, so this doesn't mask the real thing.
-          for attempt in 1 2 3 4 5 6; do
+          # install.sh's own readiness wait already polls homelab-registry-mcp
+          # before returning, so this is a light confirmation pass rather than
+          # the primary wait -- a couple of retries covers any residual
+          # startup lag without masking a genuinely crash-looping container,
+          # which stays non-"running" across every attempt regardless.
+          for attempt in 1 2 3; do
               check_once
               [ "$FAILED" -eq 0 ] && break
-              [ "$attempt" -lt 6 ] && sleep 15
+              [ "$attempt" -lt 3 ] && sleep 10
           done
 
           {

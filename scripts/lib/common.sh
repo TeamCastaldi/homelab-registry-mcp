@@ -109,7 +109,7 @@ get_env() {
 # generalized here for every other phase script.
 #
 # Parsed as plain data (never sourced) — it can hold secrets (GIT_TOKEN,
-# Komodo passwords, ...) collected by earlier phases, so it's created chmod
+# ANTHROPIC_API_KEY, ...) collected by earlier phases, so it's created chmod
 # 600 and deliberately lives outside any repo checkout (INSTALL_DIR isn't
 # even known until the clone phase runs) or version control.
 HOMELAB_STATE_DIR="${HOMELAB_STATE_DIR:-${HOME}/.homelab-registry-mcp}"

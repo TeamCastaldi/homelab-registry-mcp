@@ -138,7 +138,8 @@ In Claude Desktop, add an MCP server with the same URL under Settings.
 - [docs/ARDs/ADR-002-Client-Interfaces.md](docs/ARDs/ADR-002-Client-Interfaces.md) — MCP client integration and Discord bot interface decisions
 - [docs/ARDs/ARD-003-OOBE-Decisions.md](docs/ARDs/ARD-003-OOBE-Decisions.md) — out-of-box experience decisions
 - [docs/ARDs/ARD-004-Upstream-Version-Detection-and-Update-Proposals.md](docs/ARDs/ARD-004-Upstream-Version-Detection-and-Update-Proposals.md) — upstream version detection and update proposal design
-- [docs/ARDs/ADR-006-Pi-Non-MCP-Services-Komodo-Traefik.md](docs/ARDs/ADR-006-Pi-Non-MCP-Services-Komodo-Traefik.md) — Pi's non-MCP services (Komodo + Traefik), superseding ADR-005
+- [docs/ARDs/ADR-006-Pi-Non-MCP-Services-Komodo-Traefik.md](docs/ARDs/ADR-006-Pi-Non-MCP-Services-Komodo-Traefik.md) — Pi's non-MCP services (Komodo + Traefik), superseding ADR-005; deploy mechanism superseded by ADR-007
+- [docs/ARDs/ADR-007-Komodo-Traefik-Move-To-GitOps.md](docs/ARDs/ADR-007-Komodo-Traefik-Move-To-GitOps.md) — Komodo/Traefik moved out of this repo's `docker-compose.yml` into GitOps-managed nodes
 - [docs/SOPs/SOP-001-Deploy-New-Service.md](docs/SOPs/SOP-001-Deploy-New-Service.md) — runbook for deploying a new service to an onboarded node
 - [docs/plans/phase-d.md](docs/plans/phase-d.md) — migration plan: workload node → dedicated control-plane node deployment with Traefik static backend
 - [CONTRIBUTING.md](CONTRIBUTING.md) — branch naming, commit format, and the local checks to run before a PR
