@@ -63,9 +63,9 @@ def register_komodo_tools(mcp: FastMCP, settings: Settings) -> None:
         return await _call_list("list_services")
 
     @mcp.tool()
-    async def komodo_get_service(id: str) -> dict[str, Any]:
+    async def komodo_get_service(service_id: str) -> dict[str, Any]:
         """Get a single service by ID, including its config and runtime state."""
-        return await _call("get_service", id)
+        return await _call("get_service", service_id)
 
     @mcp.tool()
     async def komodo_list_updates() -> dict[str, Any]:

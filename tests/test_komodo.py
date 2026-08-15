@@ -16,6 +16,11 @@ STACKS = [
     {"name": "authentik", "status": "running", "services": ["authentik-server"]},
 ]
 
+SERVICES = [
+    {"id": "traefik", "name": "traefik", "state": "running"},
+    {"id": "authentik-server", "name": "authentik-server", "state": "running"},
+]
+
 
 def _handler(request: httpx.Request) -> httpx.Response:
     if request.url.path != "/rpc":
@@ -27,6 +32,14 @@ def _handler(request: httpx.Request) -> httpx.Response:
     if query == "GetStack":
         name = payload.get("name")
         match = next((s for s in STACKS if s["name"] == name), None)
+        if match is None:
+            return httpx.Response(404, json={"detail": "not found"})
+        return httpx.Response(200, json=match)
+    if query == "ListServices":
+        return httpx.Response(200, json=SERVICES)
+    if query == "GetService":
+        service_id = payload.get("serviceId")
+        match = next((s for s in SERVICES if s["id"] == service_id), None)
         if match is None:
             return httpx.Response(404, json={"detail": "not found"})
         return httpx.Response(200, json=match)
@@ -70,6 +83,27 @@ async def test_client_parses_stacks():
     assert {s["name"] for s in stacks} == {"traefik", "authentik"}
     assert (await client.get_stack("traefik"))["status"] == "running"
     assert (await client.health_check())["status"] == "ok"
+
+
+async def test_client_parses_services():
+    client = KomodoClient("http://k", "key", "secret", transport=_transport(), backoff=0)
+    services = await client.list_services()
+    assert {s["id"] for s in services} == {"traefik", "authentik-server"}
+    assert (await client.get_service("traefik"))["state"] == "running"
+
+
+async def test_client_health_check_reports_error():
+    client = KomodoClient(
+        "http://k",
+        "key",
+        "secret",
+        transport=httpx.MockTransport(lambda _r: httpx.Response(500)),
+        retries=1,
+        backoff=0,
+    )
+    result = await client.health_check()
+    assert result["status"] == "unhealthy"
+    assert "error" in result
 
 
 async def test_client_retries_then_succeeds():
@@ -159,6 +193,13 @@ async def test_tool_get_stack_and_updates(komodo_server):
 async def test_tool_get_logs(komodo_server):
     result = await call(komodo_server, "komodo_get_logs", {"service_id": "traefik"})
     assert "log line one" in result["logs"]
+
+
+async def test_tool_list_services_and_get_service(komodo_server):
+    result = await call(komodo_server, "komodo_list_services", {})
+    assert {s["id"] for s in result["items"]} == {"traefik", "authentik-server"}
+    service = await call(komodo_server, "komodo_get_service", {"service_id": "traefik"})
+    assert service["state"] == "running"
 
 
 async def test_tool_unconfigured_returns_error(tmp_path):

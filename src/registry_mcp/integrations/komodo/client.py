@@ -99,9 +99,9 @@ class KomodoClient:
         result = await self.read("ListServices")
         return result if isinstance(result, list) else []
 
-    async def get_service(self, id: str) -> dict[str, Any]:
+    async def get_service(self, service_id: str) -> dict[str, Any]:
         """Get a single service by ID."""
-        return await self.read("GetService", {"id": id})
+        return await self.read("GetService", {"serviceId": service_id})
 
     async def list_updates(self) -> list[dict[str, Any]]:
         """List detected image updates for managed services."""
@@ -117,5 +117,5 @@ class KomodoClient:
         """Check Komodo Core health."""
         try:
             return await self.read("Health")
-        except KomodoError:
-            return {"status": "unhealthy"}
+        except KomodoError as exc:
+            return {"status": "unhealthy", "error": str(exc)}
