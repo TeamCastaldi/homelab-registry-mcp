@@ -85,11 +85,13 @@ the image is pulled from GHCR and no source checkout is required.
 - A host with Docker and the Compose plugin.
 - If you want it fronted by Traefik: the shipped `docker-compose.yml` carries
   Traefik Docker labels (`traefik.enable`, a `registry-mcp.<your-domain>`
-  router, `websecure` entrypoint) and joins an external `traefik` Docker
-  network — create that network first and make sure your Traefik instance is
-  on it too (`--providers.docker=true`), plus DNS for
-  `registry-mcp.<your-domain>`. Fill in the `tls.certresolver` label to match
-  your own Traefik's ACME config, or drop it if you're not using TLS. Port
+  router, `websecure` entrypoint, TLS on with Traefik's default self-signed
+  cert) and joins an external `traefik` Docker network — create that network
+  first and make sure your Traefik instance is on it too
+  (`--providers.docker=true`), plus DNS for `registry-mcp.<your-domain>`.
+  Uncomment the commented-out
+  `traefik.http.routers.registry-mcp.tls.certresolver` label and set it to
+  your own Traefik's ACME resolver name for a real cert. Port
   8765 is also published directly for LAN/debug access regardless.
 - A read-only Authentik service-account token (never an admin token).
 

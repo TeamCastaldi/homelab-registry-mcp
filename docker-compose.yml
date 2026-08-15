@@ -30,11 +30,15 @@ services:
       traefik.enable: "true"
       traefik.http.routers.registry-mcp.rule: "Host(`registry-mcp.<your-domain>`)"
       traefik.http.routers.registry-mcp.entrypoints: "websecure"
-      # certresolver name is whatever the operator's own Traefik instance
-      # defines (ADR-006 Open Item: TLS/ACME config is operator-supplied,
-      # "bring your own certs" — not decided in this repo). Fill in or
-      # remove this line to match.
-      traefik.http.routers.registry-mcp.tls.certresolver: "<CERT_RESOLVER>"
+      # TLS on, no ACME resolver by default — Traefik falls back to its
+      # self-signed default cert, so this works out of the box (with a
+      # browser warning) rather than erroring on a placeholder resolver
+      # name. Uncomment the next line and set it to your own Traefik
+      # instance's certresolver name for a real cert (ADR-006 Open Item:
+      # TLS/ACME config is operator-supplied, "bring your own certs" —
+      # not decided in this repo).
+      traefik.http.routers.registry-mcp.tls: "true"
+      # traefik.http.routers.registry-mcp.tls.certresolver: "<your-certresolver-name>"
       traefik.http.services.registry-mcp.loadbalancer.server.port: "8765"
     volumes:
       - registry-data:/data
