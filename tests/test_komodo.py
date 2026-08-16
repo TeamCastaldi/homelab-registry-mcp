@@ -1,6 +1,5 @@
 """Tests for the Komodo client, tools, resource, and diagnostic prompt."""
 
-import base64
 import json
 
 import httpx
@@ -23,14 +22,15 @@ SERVICES = [
 
 
 def _handler(request: httpx.Request) -> httpx.Response:
-    if request.url.path != "/rpc":
+    if request.url.path != "/read":
         return httpx.Response(404, json={"detail": "not found"})
     payload = json.loads(request.read())
-    query = payload.get("query")
+    query = payload.get("type")
+    params = payload.get("params") or {}
     if query == "ListStacks":
         return httpx.Response(200, json=STACKS)
     if query == "GetStack":
-        name = payload.get("name")
+        name = params.get("name")
         match = next((s for s in STACKS if s["name"] == name), None)
         if match is None:
             return httpx.Response(404, json={"detail": "not found"})
@@ -38,7 +38,7 @@ def _handler(request: httpx.Request) -> httpx.Response:
     if query == "ListServices":
         return httpx.Response(200, json=SERVICES)
     if query == "GetService":
-        service_id = payload.get("serviceId")
+        service_id = params.get("serviceId")
         match = next((s for s in SERVICES if s["id"] == service_id), None)
         if match is None:
             return httpx.Response(404, json={"detail": "not found"})
@@ -59,22 +59,20 @@ def _transport():
 # --- client -----------------------------------------------------------------
 
 
-async def test_client_builds_basic_auth_header():
-    client = KomodoClient("http://k", "my-key", "my-secret", transport=_transport(), backoff=0)
-    expected = base64.b64encode(b"my-key:my-secret").decode()
-    assert client._auth_header == f"Basic {expected}"
-
+async def test_client_sends_api_key_and_secret_headers():
     captured = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        captured["authorization"] = request.headers.get("authorization")
+        captured["x-api-key"] = request.headers.get("x-api-key")
+        captured["x-api-secret"] = request.headers.get("x-api-secret")
         return httpx.Response(200, json=STACKS)
 
     client = KomodoClient(
         "http://k", "my-key", "my-secret", transport=httpx.MockTransport(handler), backoff=0
     )
     await client.list_stacks()
-    assert captured["authorization"] == f"Basic {expected}"
+    assert captured["x-api-key"] == "my-key"
+    assert captured["x-api-secret"] == "my-secret"
 
 
 async def test_client_parses_stacks():
