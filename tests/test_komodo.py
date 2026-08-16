@@ -43,8 +43,8 @@ def _handler(request: httpx.Request) -> httpx.Response:
         if match is None:
             return httpx.Response(404, json={"detail": "not found"})
         return httpx.Response(200, json=match)
-    if query == "Health":
-        return httpx.Response(200, json={"status": "ok"})
+    if query == "GetVersion":
+        return httpx.Response(200, json={"version": "2.3.2"})
     if query == "ListUpdates":
         return httpx.Response(200, json=[{"stack": "traefik", "available": False}])
     if query == "GetLogs":
@@ -80,7 +80,7 @@ async def test_client_parses_stacks():
     stacks = await client.list_stacks()
     assert {s["name"] for s in stacks} == {"traefik", "authentik"}
     assert (await client.get_stack("traefik"))["status"] == "running"
-    assert (await client.health_check())["status"] == "ok"
+    assert (await client.health_check())["version"] == "2.3.2"
 
 
 async def test_client_parses_services():

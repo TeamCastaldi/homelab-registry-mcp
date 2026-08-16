@@ -108,6 +108,6 @@ class KomodoClient:
     async def health_check(self) -> dict[str, Any]:
         """Check Komodo Core health."""
         try:
-            return await self.read("Health")
+            return await self.read("GetVersion")
         except KomodoError as exc:
             return {"status": "unhealthy", "error": str(exc)}
