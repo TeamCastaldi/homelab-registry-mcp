@@ -102,6 +102,24 @@ def test_update_missing_node_returns_none(hardware_store):
     assert result is None
 
 
+def test_update_node_rejects_invalid_role(hardware_store):
+    """update_node() patches fields via setattr() on an already-loaded
+    instance rather than re-validating through HardwareNode's constructor —
+    SQLModel does not re-run enum validation on plain attribute assignment,
+    so an invalid enum string would otherwise sail through setattr(), get
+    committed as raw text, and only blow up as a ValidationError on the
+    *next* read of that row. The bad value must never reach the database:
+    the update raises, and the node stays readable with its original role
+    untouched."""
+    node = hardware_store.create_node(_node(hostname="waldorf", display_name="Waldorf"))
+    with pytest.raises(ValueError):
+        hardware_store.update_node(node.id, {"role": "media_host"})
+
+    fetched = hardware_store.get_node(node.id)
+    assert fetched is not None
+    assert fetched.role == NodeRole.docker_host
+
+
 def test_update_node_by_hostname(hardware_store):
     """update_node accepts a hostname, matching get_node — a caller
     shouldn't need the internal UUID just to patch a node it already
@@ -328,6 +346,32 @@ def test_upsert_from_discovery_new_node_defaults_groups_to_empty(hardware_store)
         hostname="nas", ansible_host="10.0.0.5", ansible_groups=None, fields={}
     )
     assert node.ansible_groups == []
+
+
+async def test_hardware_update_node_tool_rejects_invalid_role(server):
+    """Regression test for the corrupted-role bug: hardware-update-node must
+    reject an invalid role through the actual MCP tool path (not just the
+    store layer) and leave the node's prior valid role readable afterward —
+    the invalid write must never land in the database."""
+    added = (
+        await server.call_tool(
+            "hardware-add-node",
+            {"hostname": "waldorf", "display_name": "Waldorf", "role": "docker_host"},
+        )
+    )[1]
+    node_id = added["id"]
+
+    updated = (
+        await server.call_tool(
+            "hardware-update-node",
+            {"id": node_id, "updates": {"role": "media_host"}},
+        )
+    )[1]
+    assert "error" in updated
+
+    fetched = (await server.call_tool("hardware-get-node", {"id": node_id}))[1]
+    assert "error" not in fetched
+    assert fetched["role"] == "docker_host"
 
 
 def test_storage_disk_model():
