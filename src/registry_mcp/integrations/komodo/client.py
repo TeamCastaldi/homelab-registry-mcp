@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 from typing import Any
 
 import httpx
@@ -28,18 +27,12 @@ class KomodoClient:
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._base = base_url.rstrip("/")
-        self._auth_header = self._build_auth_header(api_key, api_secret)
+        self._api_key = api_key
+        self._api_secret = api_secret
         self._timeout = timeout
         self._retries = max(1, retries)
         self._backoff = backoff
         self._transport = transport
-
-    @staticmethod
-    def _build_auth_header(api_key: str, api_secret: str) -> str:
-        """Build the Basic Auth header from the API key + secret pair."""
-        credentials = f"{api_key}:{api_secret}"
-        encoded = base64.b64encode(credentials.encode()).decode()
-        return f"Basic {encoded}"
 
     async def _request(self, path: str, payload: dict) -> Any:
         url = f"{self._base}/{path.lstrip('/')}"
@@ -50,7 +43,10 @@ class KomodoClient:
                     timeout=self._timeout,
                     transport=self._transport,
                 ) as client:
-                    headers = {"Authorization": self._auth_header}
+                    headers = {
+                        "X-Api-Key": self._api_key,
+                        "X-Api-Secret": self._api_secret,
+                    }
                     response = await client.post(url, json=payload, headers=headers)
                 response.raise_for_status()
                 return response.json()
@@ -69,10 +65,8 @@ class KomodoClient:
 
     async def read(self, query: str, params: dict | None = None) -> Any:
         """Execute a read query (e.g. `ListStacks`)."""
-        payload = {"query": query}
-        if params:
-            payload.update(params)
-        return await self._request("rpc", payload)
+        payload = {"type": query, "params": params or {}}
+        return await self._request("read", payload)
 
     async def execute(self, command: str, params: dict | None = None) -> Any:
         """Execute a write command (e.g. `DeployStack`).
@@ -80,10 +74,8 @@ class KomodoClient:
         Unused today — this integration is read-only by convention (see CLAUDE.md's
         "Upstream APIs are read-only" rule). Kept for a future opt-in write path.
         """
-        payload = {"command": command}
-        if params:
-            payload.update(params)
-        return await self._request("rpc", payload)
+        payload = {"type": command, "params": params or {}}
+        return await self._request("execute", payload)
 
     async def list_stacks(self) -> list[dict[str, Any]]:
         """List all stacks."""
