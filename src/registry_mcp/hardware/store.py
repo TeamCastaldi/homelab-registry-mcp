@@ -11,6 +11,7 @@ from registry_mcp.logging import get_logger
 from registry_mcp.models.hardware import (
     HardwareChangeEvent,
     HardwareNode,
+    NodeRole,
     NodeStatus,
     _utcnow,
 )
@@ -20,6 +21,14 @@ _log = get_logger("hardware.store")
 
 _HARDWARE_CREATED = "__created__"
 _HARDWARE_DELETED = "__deleted__"
+
+# HardwareNode is a table=True SQLModel: setattr() on an already-loaded
+# instance does NOT re-run Pydantic's enum validation (that only happens on
+# construction/load), so update_node()'s field-by-field setattr() loop below
+# must validate enum-typed fields itself before assigning — otherwise an
+# invalid string (e.g. role="media_host") is written as-is and only surfaces
+# as a validation error the next time the row is read back.
+_ENUM_FIELDS: dict[str, type] = {"role": NodeRole, "status": NodeStatus}
 
 _MUTABLE_FIELDS = {
     "display_name",
@@ -191,7 +200,23 @@ class HardwareStore:
     ) -> HardwareNode | None:
         """`node_id` may be the UUID primary key or the hostname, matching
         `get_node()` — a caller shouldn't need the internal UUID just to
-        patch a node it already knows by hostname."""
+        patch a node it already knows by hostname.
+
+        Enum-typed fields (`role`, `status`) are validated against `_ENUM_FIELDS`
+        up front and raise `ValueError` on an invalid value — before the
+        session is even opened, so a bad value never reaches the database."""
+        resolved: dict[str, Any] = {}
+        for field, value in updates.items():
+            if field not in _MUTABLE_FIELDS or value is None:
+                continue
+            enum_type = _ENUM_FIELDS.get(field)
+            if enum_type is not None and not isinstance(value, enum_type):
+                try:
+                    value = enum_type(value)
+                except ValueError as exc:
+                    raise ValueError(f"invalid {field} {value!r}: {exc}") from exc
+            resolved[field] = value
+
         with Session(self.engine) as session:
             node = (
                 session.get(HardwareNode, node_id)
@@ -201,9 +226,7 @@ class HardwareStore:
             )
             if node is None:
                 return None
-            for field, value in updates.items():
-                if field not in _MUTABLE_FIELDS or value is None:
-                    continue
+            for field, value in resolved.items():
                 old = getattr(node, field)
                 if old == value:
                     continue

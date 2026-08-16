@@ -169,7 +169,10 @@ def register_hardware_tools(
     @mcp.tool(name="hardware-update-node")
     def hardware_update_node(id: str, updates: dict[str, Any]) -> dict[str, Any]:
         """Patch mutable fields on a hardware node."""
-        updated = hardware_store.update_node(id, updates)
+        try:
+            updated = hardware_store.update_node(id, updates)
+        except ValueError as exc:
+            return {"error": f"invalid update: {exc}"}
         if updated is None:
             return {"error": f"no node found for {id!r}"}
         return updated.model_dump(mode="json")
