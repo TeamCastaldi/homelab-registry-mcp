@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.1](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.18.0...v0.18.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **komodo:** correct API path, payload, and auth ([9173c29](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/9173c29909f2237a60512248c61c6d1ecb084334))
+
 ## [0.18.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.17.0...v0.18.0) (2026-08-15)
 
 
