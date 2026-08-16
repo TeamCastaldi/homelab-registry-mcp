@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.2](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.18.1...v0.18.2) (2026-08-16)
+
+
+### Bug Fixes
+
+* **komodo:** use GetVersion instead of invalid Health type ([86c2b0d](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/86c2b0d06a2580a1034876fb05c7d290c88dffbc))
+
 ## [0.18.1](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.18.0...v0.18.1) (2026-08-16)
 
 
