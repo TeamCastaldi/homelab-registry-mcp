@@ -21,7 +21,7 @@ from registry_mcp.health import check_health
 from registry_mcp.integrations.authentik import register_authentik_tools
 from registry_mcp.integrations.komodo import register_komodo_tools
 from registry_mcp.integrations.traefik import register_traefik_tools
-from registry_mcp.logging import configure_logging, get_logger
+from registry_mcp.logging import configure_logging, get_logger, install_tool_call_logging
 from registry_mcp.proposal import AdoptionGenerator, PatchGenerator, ProposalEngine, ProposalStore
 from registry_mcp.providers.git import GitProvider, build_git_provider
 from registry_mcp.providers.notification import build_notification_provider
@@ -111,6 +111,7 @@ def build_server(settings: Settings | None = None) -> FastMCP:
         port=settings.mcp_port,
         lifespan=lifespan,
     )
+    install_tool_call_logging(mcp)
 
     register_registry_tools(mcp, store)
     register_event_tools(mcp, store)
