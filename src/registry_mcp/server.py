@@ -12,6 +12,7 @@ from mcp.server.fastmcp import FastMCP
 
 from registry_mcp import __version__
 from registry_mcp.adoption import AdoptionDraftStore
+from registry_mcp.chat import register_chat_routes
 from registry_mcp.config import Settings, get_settings
 from registry_mcp.discovery.engine import DiscoveryEngine, build_sources
 from registry_mcp.discovery.scheduler import build_scheduler
@@ -95,8 +96,9 @@ def build_server(settings: Settings | None = None) -> FastMCP:
 
     @asynccontextmanager
     async def lifespan(_server: FastMCP) -> AsyncIterator[dict]:
-        # WORKAROUND (FastMCP ≤ 1.27.1): streamable_http_app() hardcodes its
-        # Starlette lifespan to session_manager.run(), so this block is never
+        # WORKAROUND (FastMCP ≤ 1.29.0, the pinned version — still present there):
+        # streamable_http_app() hardcodes its Starlette lifespan to
+        # session_manager.run(), so this block is never
         # called on the streamable-http transport. Scheduler startup lives in
         # main() instead (see _streamable_with_scheduler).
         #
@@ -136,6 +138,7 @@ def build_server(settings: Settings | None = None) -> FastMCP:
         build_notification_provider(settings),
         read_only=read_only,
     )
+    register_chat_routes(mcp, settings, read_only=read_only)
 
     @mcp.tool()
     def health() -> dict[str, str]:
@@ -171,7 +174,8 @@ def main() -> None:
     get_logger("registry.server").info("starting", transport=settings.mcp_transport)
     server = build_server(settings)
 
-    # WORKAROUND (FastMCP ≤ 1.27.1): streamable_http_app() hardcodes its Starlette
+    # WORKAROUND (FastMCP ≤ 1.29.0, the pinned version — still present there):
+    # streamable_http_app() hardcodes its Starlette
     # lifespan to `lambda app: self.session_manager.run()`, silently ignoring any
     # custom lifespan passed to FastMCP(). The custom lifespan only fires on the
     # stdio transport. Work around this by monkey-patching run_streamable_http_async

@@ -347,6 +347,103 @@ you'll add that line with the token value yourself. Add the returned lines to
 `.env` and restart — the tool never writes the file for you (the container has
 no access to the host's `.env`) and never starts discovery immediately.
 
+## Setting up the chat interface
+
+`/chat` is off by default (`CHAT_ENABLED=false`). It doesn't need Traefik or
+Authentik to work at all — a static password is enough to get started — but
+it does need somewhere to run inference. See
+[ADR-008](ARDs/ADR-008-Conversational-Chat-Interface.md) for the full design
+rationale; this section is just the setup steps.
+
+### 1. Run Ollama somewhere on your LAN
+
+This repo never runs Ollama itself — `docker-compose.yml` gets no changes
+for this feature. Install Ollama on any machine with enough GPU headroom for
+reliable tool calling (a Pi 5 control plane can *coordinate* chat, but
+shouldn't try to *run* the model — CPU-only inference is both too slow and
+too unreliable at tool calling below roughly 8B parameters). Then:
+
+```bash
+ollama pull qwen3:14b
+ollama show qwen3:14b        # confirm it lists "tools" under capabilities
+```
+
+Make sure Ollama is reachable from the control-plane node
+(`curl http://<ollama-host>:11434/api/tags`) — and be aware Ollama has no
+authentication of its own, so if that host is reachable beyond your own LAN
+you need to firewall it yourself.
+
+### 2. Minimum config: a static password
+
+```bash
+CHAT_ENABLED=true
+CHAT_OLLAMA_URL=http://<ollama-host>:11434
+CHAT_PASSWORD=<a real password, not this one>
+```
+
+Restart, then open `https://registry-mcp.<your-domain>/chat` (or
+`http://<host>:8765/chat`, with `CHAT_COOKIE_SECURE=false` if you're not
+behind TLS — see the caveat on that setting in `.env.example`).
+
+### 3. Optional: Authentik OIDC instead of a password
+
+OIDC takes precedence over `CHAT_PASSWORD` whenever it's fully configured —
+you don't need to unset the password, it just stops being used. In
+Authentik, add a new **OAuth2/OpenID Provider**:
+
+- **Redirect URI**: `https://registry-mcp.<your-domain>/chat/auth/callback`
+  (exact match — this is also what you'll set as `CHAT_OIDC_REDIRECT_URL`)
+- **Client type**: Confidential
+- **Scopes**: at least `openid`, `profile`, `email`
+
+Then bind it to an **Application** and note the application's slug — the
+issuer URL follows the pattern
+`https://sso.<your-domain>/application/o/<app-slug>/`. Set:
+
+```bash
+CHAT_OIDC_ISSUER=https://sso.<your-domain>/application/o/<app-slug>/
+CHAT_OIDC_CLIENT_ID=<from the Authentik provider>
+CHAT_OIDC_CLIENT_SECRET=<from the Authentik provider>
+CHAT_OIDC_REDIRECT_URL=https://registry-mcp.<your-domain>/chat/auth/callback
+```
+
+`CHAT_OIDC_ALLOWED_GROUPS` is optional — unset means any user who
+successfully authenticates with Authentik is allowed; set it
+(comma-separated group names) to restrict access to specific groups. It only
+takes effect if your provider's scope mapping actually includes a `groups`
+claim — an easy thing to miss, and the failure mode is a confusing "you are
+not a member of an allowed group" for every user if it's forgotten.
+
+### 4. Optional: teach it about your actual lab
+
+The shipped persona is generic on purpose (this repo is public, so it can't
+carry your real hostnames). If you keep a personal DevOps/SRE reference doc
+— hostnames, topology, house safety rules — drop it in your private homelab
+repo and point `CHAT_PERSONA_PATH` at it:
+
+```bash
+CHAT_PERSONA_PATH=/opt/homelab/docs/devops-sre.md
+```
+
+`/opt/homelab` is already bind-mounted read-write into the container (see
+`docker-compose.yml`), so no compose change is needed. Two things worth
+knowing: the file is re-read (by mtime) on the next request after you edit
+it, no restart required; and if that repo is git-crypt encrypted, keep this
+file **out of** your `.gitattributes` encryption patterns, or it only reads
+correctly while the repo happens to be unlocked.
+
+### 5. Enabling writes
+
+`CHAT_ALLOW_WRITE=false` is the default — chat can look things up but can't
+change anything. Setting it `true` adds a small set of write tools (add/
+update a service or hardware node, trigger a discovery pass, open/cancel/
+verify a proposal PR) to what the assistant can call — still never
+`secrets_*`, never a delete, never the brownfield-adoption tools, regardless
+of this setting. Understand before enabling it: lab data the assistant reads
+(a Traefik router rule, a service note) is attacker-influenced the moment
+anything in your lab is internet-facing, and with writes on, a successful
+prompt injection could in principle steer one of those calls.
+
 ## Troubleshooting
 
 - **`docker compose ps` never shows the container running** — check
@@ -386,3 +483,5 @@ no access to the host's `.env`) and never starts discovery immediately.
 - [docs/ARDs/ADR-001-Homelab-Control-Plane.md](ARDs/ADR-001-Homelab-Control-Plane.md) —
   design rationale and the full OOBE conversation flow (a later, conversational
   phase this guide's scripted path precedes)
+- [docs/ARDs/ADR-008-Conversational-Chat-Interface.md](ARDs/ADR-008-Conversational-Chat-Interface.md) —
+  design rationale for the `/chat` web interface
