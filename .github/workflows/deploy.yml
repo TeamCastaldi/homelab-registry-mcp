@@ -37,7 +37,7 @@ jobs:
       targets: ${{ steps.targets.outputs.targets }}
     steps:
       - name: Checkout homelab config
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -76,10 +76,10 @@ jobs:
         target: ${{ fromJson(needs.detect-changes.outputs.targets) }}
     steps:
       - name: Checkout homelab config
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Checkout homelab-registry-mcp (docker-stack-deploy role)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: TeamCastaldi/homelab-registry-mcp
           ref: ${{ inputs.registry-mcp-ref }}

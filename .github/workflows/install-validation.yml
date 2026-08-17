@@ -68,7 +68,7 @@ jobs:
       # loop instead of a clean fallback -- reproduced locally, confirmed
       # fixed by a non-shallow source; a shallow one hangs regardless of
       # whether REPO_URL uses file:// or a plain path.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
