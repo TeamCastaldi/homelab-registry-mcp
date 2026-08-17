@@ -138,7 +138,14 @@ class OllamaClient:
                 ) as client:
                     response = await client.get(url)
                 response.raise_for_status()
-                data = response.json()
+                try:
+                    data = response.json()
+                except ValueError as exc:
+                    # A 2xx with a non-JSON body must surface as a
+                    # controlled OllamaError — otherwise a transient upstream
+                    # hiccup turns into an unhandled 500 out of
+                    # /chat/api/health, which calls this method directly.
+                    raise OllamaError(f"Ollama response from {url} was not valid JSON") from exc
                 return [m.get("name", "") for m in data.get("models", [])]
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code < 500:

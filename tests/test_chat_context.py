@@ -22,6 +22,20 @@ async def test_pack_includes_node_roster(server, settings):
     assert "role=docker_host" in text
 
 
+async def test_pack_respects_chat_tool_deny(server, settings):
+    # CHAT_TOOL_DENY is restrictive-only across the whole chat surface — the
+    # context pack must honor it too, not just direct tool dispatch, or an
+    # operator-denied tool's data would still reach the model via the pack.
+    await server.call_tool(
+        "hardware-add-node",
+        {"hostname": "heimdall", "display_name": "Heimdall", "role": "docker_host"},
+    )
+    settings.chat_tool_deny = "hardware-list-nodes"
+    text = await build_context_pack(server, settings)
+    assert "heimdall" not in text
+    assert "Hardware nodes: none registered" in text
+
+
 async def test_pack_summarizes_services_by_category_and_host(server, settings):
     await server.call_tool(
         "registry_add_service",

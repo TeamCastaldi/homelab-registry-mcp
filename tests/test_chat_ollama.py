@@ -222,6 +222,20 @@ async def test_list_models_4xx_fails_fast():
     assert calls["n"] == 1
 
 
+async def test_list_models_non_json_2xx_body_raises_ollama_error():
+    # A 2xx with a non-JSON body must surface as a controlled OllamaError —
+    # otherwise a transient upstream hiccup becomes an unhandled 500 out of
+    # /chat/api/health, which calls list_models() directly.
+    def handler(_request):
+        return httpx.Response(200, content=b"not json")
+
+    client = OllamaClient(
+        "http://ollama", model="m", transport=_transport(handler), retries=1, backoff=0
+    )
+    with pytest.raises(OllamaError):
+        await client.list_models()
+
+
 async def test_list_models_5xx_retries():
     calls = {"n": 0}
 

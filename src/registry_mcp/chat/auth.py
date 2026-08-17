@@ -111,7 +111,13 @@ async def _json_request(
             async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
                 response = await client.request(method, url, **kwargs)
             response.raise_for_status()
-            return response.json()
+            try:
+                return response.json()
+            except ValueError as exc:
+                # A 2xx with a non-JSON body (the IdP, or a proxy in front
+                # of it, misbehaving) must still surface as a controlled
+                # OidcError, not an uncaught exception out of this function.
+                raise OidcError(f"OIDC response from {url} was not valid JSON") from exc
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code < 500:
                 raise OidcError(

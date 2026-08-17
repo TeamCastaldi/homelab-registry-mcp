@@ -137,6 +137,18 @@ async def test_discover_oidc_4xx_fails_fast():
     assert calls["n"] == 1
 
 
+async def test_discover_oidc_non_json_2xx_body_raises_oidc_error():
+    # A 2xx with a non-JSON body (misbehaving IdP or an intermediate proxy)
+    # must surface as a controlled OidcError, not an uncaught ValueError.
+    discovery_cache.clear()
+
+    def handler(_request):
+        return httpx.Response(200, content=b"<html>not json</html>")
+
+    with pytest.raises(OidcError):
+        await discover_oidc("https://sso.example/app3/", transport=_transport(handler))
+
+
 # --- PKCE + authorize URL -------------------------------------------------------
 
 

@@ -4,10 +4,12 @@ prompt — the operator's live node/service/staleness picture in under
 questions ("what nodes do I have", "is anything stale") in one round trip
 without needing a tool call for them.
 
-Assembled purely through the same read-tool allowlist chat itself uses
-(`registry_mcp.chat.bridge.READ_TOOLS`, via `bridge.dispatch`) — this module
-has no store/engine reference either, for the same reason the rest of
-`chat/` doesn't (see `registry_mcp.chat.__init__`).
+Assembled purely through the same allowlisted tool surface chat itself uses
+(`registry_mcp.chat.bridge.allowed_tool_names(settings, read_only=True)`, via
+`bridge.dispatch`) — this respects an operator's `CHAT_TOOL_DENY` too, not
+just the built-in `READ_TOOLS`/`DENY_ALWAYS` partition. This module has no
+store/engine reference either, for the same reason the rest of `chat/`
+doesn't (see `registry_mcp.chat.__init__`).
 
 Every string pulled from discovered or operator-set data (a service's
 `notes`, a node's hostname, a tag) is attacker- or at least third-party-
@@ -28,7 +30,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from registry_mcp.chat.bridge import READ_TOOLS, dispatch
+from registry_mcp.chat.bridge import allowed_tool_names, dispatch
 from registry_mcp.config import Settings
 
 _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
@@ -61,8 +63,8 @@ class _CacheEntry:
 _cache: _CacheEntry | None = None
 
 
-async def _fetch(mcp: FastMCP, name: str) -> Any:
-    result = await dispatch(mcp, name, {}, READ_TOOLS, max_result_chars=1_000_000)
+async def _fetch(mcp: FastMCP, name: str, allowed: frozenset[str]) -> Any:
+    result = await dispatch(mcp, name, {}, allowed, max_result_chars=1_000_000)
     return result.get("data") if result.get("ok") else None
 
 
@@ -159,11 +161,16 @@ async def build_context_pack(mcp: FastMCP, settings: Settings) -> str:
     ):
         return _cache.text
 
-    nodes = await _fetch(mcp, "hardware-list-nodes")
-    services = await _fetch(mcp, "registry_list_services")
-    stale = await _fetch(mcp, "discovery_list_stale")
-    stale_nodes = await _fetch(mcp, "hardware-list-stale")
-    health = await _fetch(mcp, "system_health_check")
+    # read_only=True: this pack never needs a write tool, and passing it
+    # guarantees the set below is exactly READ_TOOLS minus CHAT_TOOL_DENY —
+    # the operator's deny list must apply here too, or a tool they've
+    # explicitly denied could still have its data pulled into the prompt.
+    allowed = allowed_tool_names(settings, read_only=True)
+    nodes = await _fetch(mcp, "hardware-list-nodes", allowed)
+    services = await _fetch(mcp, "registry_list_services", allowed)
+    stale = await _fetch(mcp, "discovery_list_stale", allowed)
+    stale_nodes = await _fetch(mcp, "hardware-list-stale", allowed)
+    health = await _fetch(mcp, "system_health_check", allowed)
 
     stale_services = stale.get("items") if isinstance(stale, dict) else stale
 

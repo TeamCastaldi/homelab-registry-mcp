@@ -75,6 +75,21 @@ def _load_index_html() -> str:
 
 
 def _client_ip(request: Request) -> str:
+    """Best-effort identity for the login rate limiter.
+
+    `request.client.host` is the direct TCP peer — in a real deployment
+    that's Traefik, not the browser, which would collapse every user behind
+    the proxy into one shared rate-limit bucket. Prefer the standard
+    `X-Forwarded-For` header (which Traefik sets) when present. This is
+    still just a speed bump, not a hard boundary — see
+    `LoginAttemptLimiter`'s own docstring — so a forged header from a
+    client connecting directly to :8765 (bypassing Traefik, which this
+    deployment already tolerates on the LAN) only defeats the rate limiter,
+    nothing more.
+    """
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
     client = request.client
     return client.host if client else "unknown"
 
@@ -350,12 +365,27 @@ def register_chat_routes(mcp: FastMCP, settings: Settings, *, read_only: bool) -
         if not isinstance(raw_messages, list):
             return JSONResponse({"error": "'messages' must be a list"}, status_code=400)
 
-        # Server-enforced cap regardless of what the client sends, and the
-        # system prompt is always server-derived — a client-supplied
-        # "system" message is dropped, never trusted.
-        history = [m for m in raw_messages if isinstance(m, dict) and m.get("role") != "system"][
-            -settings.chat_max_history_messages :
-        ]
+        # Server-enforced cap regardless of what the client sends. Dropped,
+        # never trusted from the request body:
+        #   - "system": the system prompt is always server-derived.
+        #   - "tool": a client could otherwise fabricate a fake prior tool
+        #     result and feed it back as if the server had produced it,
+        #     which carries more authority than an ordinary user/assistant
+        #     turn in a tool-calling chat format.
+        #   - any "assistant" message carrying tool_calls: without the
+        #     "tool" response(s) it called for (just dropped above), it's a
+        #     dangling call Ollama never resolved — malformed on resend.
+        # The real cost is that tool context doesn't survive past the turn
+        # it was produced in; the model just re-calls the tool if it needs
+        # that data again, a safe tradeoff given the client-side-history
+        # design (see ADR-008).
+        history = [
+            m
+            for m in raw_messages
+            if isinstance(m, dict)
+            and m.get("role") not in ("system", "tool")
+            and not (m.get("role") == "assistant" and m.get("tool_calls"))
+        ][-settings.chat_max_history_messages :]
 
         if not settings.chat_ollama_url:
             return JSONResponse({"error": "CHAT_OLLAMA_URL is not configured"}, status_code=503)
