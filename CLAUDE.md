@@ -67,7 +67,7 @@ src/registry_mcp/
 │   ├── secrets.py         # secrets_status/encrypt/decrypt/add/rotate/list_keys (Phase C)
 │   ├── proposal.py        # proposal_create/list_open/get/cancel/verify (Phase 8)
 │   └── adoption.py        # proposal_adopt_service[_finalize/_cancel/_get] (Phase 7 brownfield)
-├── chat/                  # web chat UI (ADR-008) — opt-in, CHAT_ENABLED=false by default
+├── chat/                  # web chat UI (ADR-009) — opt-in, CHAT_ENABLED=false by default
 │   ├── routes.py          # @mcp.custom_route handlers: /chat, /chat/auth/*, /chat/api/*
 │   ├── agent.py           # the SSE streaming loop: Ollama ⇄ MCP tool rounds
 │   ├── ollama.py          # OllamaClient — same httpx retry idiom as integrations/*, streaming
@@ -180,7 +180,7 @@ GitOps-managed) under management without leaking its hardcoded secrets. Off by d
 - `AdoptionDraft` rows hold the captured live secret values only long enough for the
   operator to answer (`ADOPTION_DRAFT_TTL_MINUTES`, default 60) before expiring.
 
-**Chat interface (ADR-008, `chat/`):** an opt-in browser page at `/chat` backed by a
+**Chat interface (ADR-009, `chat/`):** an opt-in browser page at `/chat` backed by a
 local/LAN Ollama instance the operator runs — this repo never runs Ollama itself. Off by
 default (`CHAT_ENABLED=false`); `true` with neither Authentik OIDC nor `CHAT_PASSWORD`
 configured is a startup error and the routes are never registered, not an open endpoint.
@@ -197,7 +197,7 @@ configured is a startup error and the routes are never registered, not an open e
   login is a UI convenience gate, not a new boundary around the lab.
 - Auth resolves once at startup: Authentik OIDC (authorization-code + PKCE, no ID-token
   signature verification since it's a back-channel confidential-client exchange — see
-  ADR-008) takes precedence over `CHAT_PASSWORD` whenever fully configured. Sessions are a
+  ADR-009) takes precedence over `CHAT_PASSWORD` whenever fully configured. Sessions are a
   stateless HMAC-signed cookie (stdlib `hmac`, no new dependency) — no server-side session
   store, so login survives a restart whenever `CHAT_SESSION_SECRET` is set.
 - Conversation history is client-side only; the server holds nothing between requests. A
@@ -273,7 +273,7 @@ configured is a startup error and the routes are never registered, not an open e
 | `ADOPTION_ENABLED` | `false` | Enables the `proposal_adopt_service*` brownfield adoption tools |
 | `SSH_DEFAULT_USER` | `root` | User for the ad-hoc SSH connection adoption uses to inspect a live container; reuses `SSH_KEY_PATH` |
 | `ADOPTION_DRAFT_TTL_MINUTES` | `60` | How long a drafted adoption may await the operator's keep/rotate decision before expiring |
-| `CHAT_ENABLED` | `false` | Registers `/chat` and friends (ADR-008). `true` with neither `CHAT_OIDC_*` nor `CHAT_PASSWORD` set is a startup error — routes stay unregistered, never open |
+| `CHAT_ENABLED` | `false` | Registers `/chat` and friends (ADR-009). `true` with neither `CHAT_OIDC_*` nor `CHAT_PASSWORD` set is a startup error — routes stay unregistered, never open |
 | `CHAT_OLLAMA_URL` | unset | e.g. `http://10.0.0.203:11434`; this repo never runs Ollama itself |
 | `CHAT_OLLAMA_MODEL` | `qwen3:14b` | Must support Ollama tool calling |
 | `CHAT_OLLAMA_TIMEOUT_SECONDS` / `CHAT_OLLAMA_RETRIES` | `300` / `3` | Retries only apply before the first streamed chunk — never mid-stream |
@@ -318,8 +318,8 @@ Copy `.env.example` to `.env` and fill in the upstream URLs before running local
 - **All repo-relative paths go through `gitcrypt.check_path`**: every user- or draft-supplied path (`secrets_*` tools, adoption's `.env` write) is validated by the shared helper in `gitcrypt.py` — reject absolute paths, reject `..` traversal, then `.resolve()` + `is_relative_to(repo)` as a final containment check (also catches symlink escapes). Never join a repo base with a caller-supplied path without it; `Path(base) / "/etc/passwd"` silently discards `base` and returns `/etc/passwd`.
 - **A secret never reaches Git through `GitProvider.commit_file()`**: that call is a raw hosting-API content write and bypasses git-crypt's local clean filter entirely. Anything that must land encrypted (the `.env` files `secrets_*` and adoption write) goes through `gitcrypt.py`'s local-clone subprocess helpers instead — see the brownfield adoption entry above.
 - **Structured logs go to stderr + file** — keeps stdio JSON-RPC transport clean.
-- **No HTTP /health endpoint on `/mcp` itself**: Dockerfile still uses a TCP probe on `MCP_PORT` for container health. `FastMCP.custom_route` (available since the pinned `mcp` SDK, 1.29.0) does let the server expose arbitrary Starlette routes alongside `/mcp` — the chat interface (`chat/routes.py`, ADR-008) is the first thing to use it — but no `/health` HTTP route has been added, and this line describes that gap, not a technical limitation.
-- **ForwardAuth in front of MCP clients breaks them** (clients don't follow redirects). This still applies to `/mcp` itself — auth strategy there is deferred; the endpoint is LAN-only. It does **not** apply to a browser client: the chat interface (`/chat`, ADR-008) authenticates in-process (Authentik OIDC or a static password) precisely because a browser *can* follow redirects, while `/mcp` remains unauthenticated on the same port exactly as before.
+- **No HTTP /health endpoint on `/mcp` itself**: Dockerfile still uses a TCP probe on `MCP_PORT` for container health. `FastMCP.custom_route` (available since the pinned `mcp` SDK, 1.29.0) does let the server expose arbitrary Starlette routes alongside `/mcp` — the chat interface (`chat/routes.py`, ADR-009) is the first thing to use it — but no `/health` HTTP route has been added, and this line describes that gap, not a technical limitation.
+- **ForwardAuth in front of MCP clients breaks them** (clients don't follow redirects). This still applies to `/mcp` itself — auth strategy there is deferred; the endpoint is LAN-only. It does **not** apply to a browser client: the chat interface (`/chat`, ADR-009) authenticates in-process (Authentik OIDC or a static password) precisely because a browser *can* follow redirects, while `/mcp` remains unauthenticated on the same port exactly as before.
 
 ## Testing
 
@@ -432,12 +432,12 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
 
 ## Current Status
 
-- **ADR-008 complete**: web chat interface (`chat/`) — `/chat` + `/chat/auth/*` + `/chat/api/*`
+- **ADR-009 complete**: web chat interface (`chat/`) — `/chat` + `/chat/auth/*` + `/chat/api/*`
   registered via `FastMCP.custom_route`, backed by an operator-run Ollama instance
   (`CHAT_OLLAMA_URL`), Authentik OIDC or static-password auth, and a fixed read/write tool
   allowlist. Off by default (`CHAT_ENABLED=false`). Resolves ADR-002 §4.4's Open Questions
   1-4; corrects the "no HTTP endpoint" / "ForwardAuth breaks MCP clients" conventions that
-  predated `mcp` SDK 1.29.0's `custom_route` support (see ADR-008). DSPy-on-Ollama and a
+  predated `mcp` SDK 1.29.0's `custom_route` support (see ADR-009). DSPy-on-Ollama and a
   confidence-gated local→Claude escalation are noted as future work, not attempted here.
 - **Phase 7 complete**: cross-source linking (Authentik ↔ Traefik ↔ Docker), `service_get_full_context()`, and the DSPy reasoning layer (`ResolveServiceIdentity`, `InferServiceMetadata`, `SummarizeAccessAudit`) — off by default via `DSPY_ENABLED`
 - **Phase 8 in progress**: security write path landed — `GenerateRemediationPatch`, Gitea + Ntfy/Smtp/Null providers, `Proposal` model/store, proposal engine (create + verification sweep), and the `proposal_*` tools. Off by default (`GIT_*` unset, `PROPOSAL_AUTO_CREATE=false`); see ADR-002.

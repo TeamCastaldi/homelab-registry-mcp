@@ -16,7 +16,7 @@ Route map:
 
 See `registry_mcp.chat.__init__` for why this module (and everything else
 under `chat/`) never receives a store/engine reference directly, and
-ADR-008 for the auth design rationale and its explicit limits — most
+ADR-009 for the auth design rationale and its explicit limits — most
 importantly that this login gates the chat UI only, not `/mcp`, which stays
 unauthenticated exactly as it is today.
 """
@@ -378,7 +378,7 @@ def register_chat_routes(mcp: FastMCP, settings: Settings, *, read_only: bool) -
         # The real cost is that tool context doesn't survive past the turn
         # it was produced in; the model just re-calls the tool if it needs
         # that data again, a safe tradeoff given the client-side-history
-        # design (see ADR-008).
+        # design (see ADR-009).
         history = [
             m
             for m in raw_messages

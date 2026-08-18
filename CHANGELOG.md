@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.19.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.18.2...v0.19.0) (2026-08-18)
+
+
+### Features
+
+* **logging:** log session/tool/outcome on every tools/call ([30336fd](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/30336fdbb068c92299746d6e23f04be8e19dfe93))
+
+
+### Bug Fixes
+
+* **hardware:** reject invalid role/status before hardware-update-node writes ([492d10d](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/492d10ded4da5f2800d7d9600aff676f20f1f914))
+* **hardware:** reject invalid role/status before hardware-update-node writes ([c0b1746](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/c0b1746a9948afc59d7797c4ae616e3b9ba3f72f))
+* **logging:** patch the tool manager, not FastMCP.call_tool ([4854129](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/4854129a79d64d611064b138365ae63bc5979533))
+
+
+### Documentation
+
+* address Copilot review feedback on ADR-008 ([fa4f82a](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/fa4f82acd2adecbebd591559eb4711cd8a3f1401))
+* **adr:** record MCP tool organization decision and tier assignment ([24df128](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/24df1280ba07e5e84ba42078261723f5777ad7a6))
+
 ## [0.18.2](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.18.1...v0.18.2) (2026-08-16)
 
 

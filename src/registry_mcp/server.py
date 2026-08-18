@@ -22,7 +22,7 @@ from registry_mcp.health import check_health
 from registry_mcp.integrations.authentik import register_authentik_tools
 from registry_mcp.integrations.komodo import register_komodo_tools
 from registry_mcp.integrations.traefik import register_traefik_tools
-from registry_mcp.logging import configure_logging, get_logger
+from registry_mcp.logging import configure_logging, get_logger, install_tool_call_logging
 from registry_mcp.proposal import AdoptionGenerator, PatchGenerator, ProposalEngine, ProposalStore
 from registry_mcp.providers.git import GitProvider, build_git_provider
 from registry_mcp.providers.notification import build_notification_provider
@@ -96,11 +96,11 @@ def build_server(settings: Settings | None = None) -> FastMCP:
 
     @asynccontextmanager
     async def lifespan(_server: FastMCP) -> AsyncIterator[dict]:
-        # WORKAROUND (FastMCP ≤ 1.29.0, the pinned version — still present there):
-        # streamable_http_app() hardcodes its Starlette lifespan to
-        # session_manager.run(), so this block is never
-        # called on the streamable-http transport. Scheduler startup lives in
-        # main() instead (see _streamable_with_scheduler).
+        # WORKAROUND (confirmed still present in mcp==1.29.0, the pinned
+        # version): streamable_http_app() hardcodes its Starlette lifespan to
+        # session_manager.run(), so this block is never called on the
+        # streamable-http transport. Scheduler startup lives in main()
+        # instead (see _streamable_with_scheduler).
         #
         # TO REVERT when fixed upstream: remove _streamable_with_scheduler from
         # main(), restore the scheduler start/stop logic here, and delete this
@@ -113,6 +113,7 @@ def build_server(settings: Settings | None = None) -> FastMCP:
         port=settings.mcp_port,
         lifespan=lifespan,
     )
+    install_tool_call_logging(mcp)
 
     register_registry_tools(mcp, store)
     register_event_tools(mcp, store)
@@ -174,12 +175,13 @@ def main() -> None:
     get_logger("registry.server").info("starting", transport=settings.mcp_transport)
     server = build_server(settings)
 
-    # WORKAROUND (FastMCP ≤ 1.29.0, the pinned version — still present there):
-    # streamable_http_app() hardcodes its Starlette
-    # lifespan to `lambda app: self.session_manager.run()`, silently ignoring any
-    # custom lifespan passed to FastMCP(). The custom lifespan only fires on the
-    # stdio transport. Work around this by monkey-patching run_streamable_http_async
-    # so the scheduler starts inside the correct asyncio event loop.
+    # WORKAROUND (confirmed still present in mcp==1.29.0, the pinned version):
+    # streamable_http_app() hardcodes its Starlette lifespan to
+    # `lambda app: self.session_manager.run()`, silently ignoring any custom
+    # lifespan passed to FastMCP(). The custom lifespan only fires on the
+    # stdio transport. Work around this by monkey-patching
+    # run_streamable_http_async so the scheduler starts inside the correct
+    # asyncio event loop.
     #
     # TO REVERT when fixed upstream: delete _streamable_with_scheduler and the
     # monkey-patch line, restore scheduler start/stop in the lifespan block in

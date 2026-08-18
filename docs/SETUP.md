@@ -352,7 +352,7 @@ no access to the host's `.env`) and never starts discovery immediately.
 `/chat` is off by default (`CHAT_ENABLED=false`). It doesn't need Traefik or
 Authentik to work at all — a static password is enough to get started — but
 it does need somewhere to run inference. See
-[ADR-008](ARDs/ADR-008-Conversational-Chat-Interface.md) for the full design
+[ADR-009](ARDs/ADR-009-Conversational-Chat-Interface.md) for the full design
 rationale; this section is just the setup steps.
 
 ### 1. Run Ollama somewhere on your LAN
@@ -483,5 +483,5 @@ prompt injection could in principle steer one of those calls.
 - [docs/ARDs/ADR-001-Homelab-Control-Plane.md](ARDs/ADR-001-Homelab-Control-Plane.md) —
   design rationale and the full OOBE conversation flow (a later, conversational
   phase this guide's scripted path precedes)
-- [docs/ARDs/ADR-008-Conversational-Chat-Interface.md](ARDs/ADR-008-Conversational-Chat-Interface.md) —
+- [docs/ARDs/ADR-009-Conversational-Chat-Interface.md](ARDs/ADR-009-Conversational-Chat-Interface.md) —
   design rationale for the `/chat` web interface

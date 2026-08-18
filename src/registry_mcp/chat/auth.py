@@ -5,7 +5,7 @@ Resolution order — decided once per request by `resolve_mode()`, never
 mixed: OIDC when all four `CHAT_OIDC_*` values are set, else the static
 `CHAT_PASSWORD`, else chat refuses to serve at all (`registry_mcp.chat.
 routes` treats "disabled" as a reason not to register the chat routes, not
-as an open endpoint — see ADR-008).
+as an open endpoint — see ADR-009).
 
 **Why no ID-token signature verification.** This is a confidential client
 doing a back-channel authorization-code exchange: the code is redeemed

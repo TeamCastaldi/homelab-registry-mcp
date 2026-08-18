@@ -1,4 +1,4 @@
-# ADR-008: Conversational Chat Interface (Resolves ADR-002 §4.4 Open Questions 1-4)
+# ADR-009: Conversational Chat Interface (Resolves ADR-002 §4.4 Open Questions 1-4)
 
 | | |
 |---|---|

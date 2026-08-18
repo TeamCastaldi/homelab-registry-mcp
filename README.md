@@ -32,7 +32,7 @@ query and act on.
   LAN Ollama instance you run — ask about your services, hardware, and staleness
   in plain language, or just talk through an idea. Authentik OIDC or a static
   password gates access; the assistant only ever sees your lab through a fixed,
-  read-only-by-default tool allowlist. See [ADR-008](docs/ARDs/ADR-008-Conversational-Chat-Interface.md).
+  read-only-by-default tool allowlist. See [ADR-009](docs/ARDs/ADR-009-Conversational-Chat-Interface.md).
 
 ### Write (opt-in, off by default)
 

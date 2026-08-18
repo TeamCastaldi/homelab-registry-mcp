@@ -18,7 +18,7 @@ container can set arbitrary Docker labels; an IdP application name is
 whatever the IdP says it is. `_sanitize()` neutralizes the cheapest
 prompt-injection shapes before any of it reaches the model, but that is
 advisory, not a security boundary — the tool allowlist in `bridge.py` is the
-actual boundary. See ADR-008.
+actual boundary. See ADR-009.
 """
 
 from __future__ import annotations
