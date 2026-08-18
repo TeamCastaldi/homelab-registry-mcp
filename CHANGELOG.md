@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.20.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.19.0...v0.20.0) (2026-08-18)
+
+
+### Features
+
+* **chat:** add web chat interface backed by operator-run Ollama ([f0297b5](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/f0297b5d06bb7b54b3f329c42cb0419c7866c0f3))
+
+
+### Documentation
+
+* **chat:** update example Ollama host to 10.0.0.203 ([98e7d69](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/98e7d69716854c7c489090848148f38392eabdf0))
+
 ## [0.19.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.18.2...v0.19.0) (2026-08-18)
 
 
