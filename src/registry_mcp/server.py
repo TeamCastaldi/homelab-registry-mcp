@@ -95,10 +95,11 @@ def build_server(settings: Settings | None = None) -> FastMCP:
 
     @asynccontextmanager
     async def lifespan(_server: FastMCP) -> AsyncIterator[dict]:
-        # WORKAROUND (FastMCP ≤ 1.27.1): streamable_http_app() hardcodes its
-        # Starlette lifespan to session_manager.run(), so this block is never
-        # called on the streamable-http transport. Scheduler startup lives in
-        # main() instead (see _streamable_with_scheduler).
+        # WORKAROUND (confirmed still present in mcp==1.29.0, the pinned
+        # version): streamable_http_app() hardcodes its Starlette lifespan to
+        # session_manager.run(), so this block is never called on the
+        # streamable-http transport. Scheduler startup lives in main()
+        # instead (see _streamable_with_scheduler).
         #
         # TO REVERT when fixed upstream: remove _streamable_with_scheduler from
         # main(), restore the scheduler start/stop logic here, and delete this
@@ -172,11 +173,13 @@ def main() -> None:
     get_logger("registry.server").info("starting", transport=settings.mcp_transport)
     server = build_server(settings)
 
-    # WORKAROUND (FastMCP ≤ 1.27.1): streamable_http_app() hardcodes its Starlette
-    # lifespan to `lambda app: self.session_manager.run()`, silently ignoring any
-    # custom lifespan passed to FastMCP(). The custom lifespan only fires on the
-    # stdio transport. Work around this by monkey-patching run_streamable_http_async
-    # so the scheduler starts inside the correct asyncio event loop.
+    # WORKAROUND (confirmed still present in mcp==1.29.0, the pinned version):
+    # streamable_http_app() hardcodes its Starlette lifespan to
+    # `lambda app: self.session_manager.run()`, silently ignoring any custom
+    # lifespan passed to FastMCP(). The custom lifespan only fires on the
+    # stdio transport. Work around this by monkey-patching
+    # run_streamable_http_async so the scheduler starts inside the correct
+    # asyncio event loop.
     #
     # TO REVERT when fixed upstream: delete _streamable_with_scheduler and the
     # monkey-patch line, restore scheduler start/stop in the lifespan block in
