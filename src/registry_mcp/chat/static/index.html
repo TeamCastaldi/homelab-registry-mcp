@@ -313,8 +313,8 @@
   <div id="attachments"></div>
   <form id="composer">
     <input type="file" id="file-input" multiple hidden
-      accept=".yaml,.yml,.txt,.json,.log,.conf,.env,.md,.sh,.py,.toml,.ini,.cfg">
-    <button id="attach-btn" type="button" title="Attach a text file">📎</button>
+      accept=".yaml,.yml,.txt,.json,.log,.conf,.md,.sh,.py,.toml,.ini,.cfg">
+    <button id="attach-btn" type="button" title="Attach a text file" aria-label="Attach a text file">📎</button>
     <textarea id="input" rows="1" placeholder="Message…" autofocus></textarea>
     <button id="send-btn" type="submit">Send</button>
   </form>
@@ -424,6 +424,7 @@ If the fix doesn't work, go back to Observe with the new symptom. When we're don
         const copyBtn = el("button", { class: "copy-btn", text: "📋" });
         copyBtn.type = "button";
         copyBtn.title = "Copy";
+        copyBtn.setAttribute("aria-label", "Copy code");
         copyBtn.addEventListener("click", () => {
           copyText(code.textContent)
             .then(() => { copyBtn.textContent = "✓"; })
@@ -491,6 +492,7 @@ If the fix doesn't work, go back to Observe with the new symptom. When we're don
       const removeBtn = el("button", { text: "✕" });
       removeBtn.type = "button";
       removeBtn.title = "Remove " + att.name;
+      removeBtn.setAttribute("aria-label", "Remove " + att.name);
       removeBtn.addEventListener("click", () => {
         attachments.splice(idx, 1);
         renderAttachments();
@@ -776,7 +778,11 @@ If the fix doesn't work, go back to Observe with the new symptom. When we're don
   }
 
   function updateThemeToggleIcon() {
-    themeToggleBtn.textContent = currentTheme() === "dark" ? "☀️" : "🌙";
+    const isDark = currentTheme() === "dark";
+    themeToggleBtn.textContent = isDark ? "☀️" : "🌙";
+    const label = isDark ? "Switch to light theme" : "Switch to dark theme";
+    themeToggleBtn.title = label;
+    themeToggleBtn.setAttribute("aria-label", label);
   }
 
   const storedTheme = localStorage.getItem(THEME_KEY);
