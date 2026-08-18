@@ -20,6 +20,7 @@
     --error-text: #991b1b;
     --chip-bg: #eef2ff;
     --chip-text: #3730a3;
+    --gutter: clamp(1rem, 4vw, 4rem);
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -51,7 +52,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0.75rem 1rem;
+    padding: 0.75rem var(--gutter);
     border-bottom: 1px solid var(--border);
     background: var(--panel);
     flex-shrink: 0;
@@ -74,15 +75,13 @@
   #messages {
     flex: 1;
     overflow-y: auto;
-    padding: 1rem;
-    max-width: 720px;
+    padding: 1rem var(--gutter);
     width: 100%;
-    margin: 0 auto;
   }
   .msg { display: flex; margin-bottom: 0.85rem; }
   .msg-user { justify-content: flex-end; }
   .msg-body {
-    max-width: 80%;
+    max-width: min(80%, 60rem);
     padding: 0.55rem 0.8rem;
     border-radius: 12px;
     line-height: 1.45;
@@ -93,14 +92,30 @@
   .msg-assistant .msg-body { background: var(--assistant-bg); border: 1px solid var(--border); }
   .msg-body p { margin: 0 0 0.5rem; }
   .msg-body p:last-child { margin-bottom: 0; }
+  .code-block { position: relative; margin: 0.4rem 0; }
   .msg-body pre {
     background: rgba(127, 127, 127, 0.12);
     border-radius: 8px;
     padding: 0.6rem;
     overflow-x: auto;
-    margin: 0.4rem 0;
+    margin: 0;
   }
+  .code-block pre { padding-right: 2.6rem; }
   .msg-body code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.85em; }
+  .copy-btn {
+    position: absolute;
+    top: 0.4rem;
+    right: 0.4rem;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    border-radius: 6px;
+    padding: 0.15rem 0.4rem;
+    font-size: 0.75rem;
+    line-height: 1.3;
+    cursor: pointer;
+    color: var(--muted);
+  }
+  .copy-btn:hover { border-color: var(--accent); color: var(--accent); }
   .msg-error .msg-body { background: var(--error-bg); color: var(--error-text); border: none; }
   .tool-chip {
     display: inline-flex;
@@ -147,7 +162,7 @@
     40% { transform: scale(1); opacity: 1; }
   }
   details.thinking {
-    max-width: 80%;
+    max-width: min(80%, 60rem);
     margin: 0 0 0.5rem;
     font-size: 0.8rem;
     color: var(--muted);
@@ -169,11 +184,35 @@
     flex-shrink: 0;
     border-top: 1px solid var(--border);
     background: var(--panel);
-    padding: 0.75rem 1rem;
+    padding: 0.75rem var(--gutter);
+  }
+  #attachments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+  #attachments:empty { display: none; }
+  .attachment-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: var(--chip-bg);
+    color: var(--chip-text);
+    border-radius: 999px;
+    padding: 0.2rem 0.5rem 0.2rem 0.7rem;
+    font-size: 0.75rem;
+  }
+  .attachment-chip button {
+    background: transparent;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    font-size: 0.9em;
+    padding: 0 0.2rem;
+    line-height: 1;
   }
   #composer {
-    max-width: 720px;
-    margin: 0 auto;
     display: flex;
     gap: 0.5rem;
     align-items: flex-end;
@@ -198,10 +237,14 @@
     font: inherit;
     cursor: pointer;
   }
+  #composer button#attach-btn {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
   #composer button:disabled { opacity: 0.5; cursor: default; }
   #status {
-    max-width: 720px;
-    margin: 0.3rem auto 0;
+    margin: 0.3rem 0 0;
     font-size: 0.75rem;
     color: var(--muted);
     min-height: 1em;
@@ -230,7 +273,11 @@
     <button type="button" class="chip" data-prompt="List any open proposals awaiting review.">Open proposals</button>
     <button type="button" class="chip" data-prompt-id="troubleshoot">Troubleshoot</button>
   </div>
+  <div id="attachments"></div>
   <form id="composer">
+    <input type="file" id="file-input" multiple hidden
+      accept=".yaml,.yml,.txt,.json,.log,.conf,.env,.md,.sh,.py,.toml,.ini,.cfg">
+    <button id="attach-btn" type="button" title="Attach a text file">📎</button>
     <textarea id="input" rows="1" placeholder="Message…" autofocus></textarea>
     <button id="send-btn" type="submit">Send</button>
   </form>
@@ -249,9 +296,26 @@
   const statusEl = document.getElementById("status");
   const modelStatusEl = document.getElementById("model-status");
   const quickActionsEl = document.getElementById("quick-actions");
+  const attachBtn = document.getElementById("attach-btn");
+  const fileInputEl = document.getElementById("file-input");
+  const attachmentsEl = document.getElementById("attachments");
 
   /** @type {Array<{role: string, content?: string, tool_calls?: unknown, tool_name?: string}>} */
   let history = [];
+
+  /** @type {Array<{name: string, content: string}>} */
+  let attachments = [];
+  const MAX_ATTACHMENTS = 3;
+  // Sized against CHAT_TOOL_RESULT_MAX_CHARS/CHAT_CONTEXT_MAX_CHARS (8000/6000
+  // chars) — the model only has CHAT_NUM_CTX=8192 tokens total, so a much
+  // larger cap here would silently blow the context budget instead of
+  // failing loudly.
+  const MAX_ATTACHMENT_CHARS = 20000;
+  const ATTACHMENT_LANGS = {
+    yml: "yaml", yaml: "yaml", json: "json", sh: "bash", bash: "bash",
+    py: "python", toml: "toml", ini: "ini", cfg: "ini", md: "markdown",
+    log: "", txt: "", env: "", conf: "",
+  };
 
   // Long structured prompts live here as templates rather than inline
   // `data-prompt` attributes, so the workflow stays readable/editable and
@@ -280,6 +344,24 @@ If the fix doesn't work, go back to Observe with the new symptom. When we're don
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
+  // Copies `text` to the clipboard. navigator.clipboard requires a secure
+  // context; CHAT_COOKIE_SECURE=false documents plain http:// LAN deploys
+  // where it's unavailable, so fall back to the legacy execCommand path.
+  async function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const ta = el("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
+  }
+
   // Renders message text as plain text, with ``` fenced blocks split into
   // <pre><code> — via textContent only, never innerHTML. This text may
   // echo lab-sourced data (a service note, a Traefik router rule, an IdP
@@ -292,7 +374,19 @@ If the fix doesn't work, go back to Observe with the new symptom. When we're don
         const pre = el("pre");
         const code = el("code", { text: part.replace(/^[^\n]*\n/, "") });
         pre.appendChild(code);
-        container.appendChild(pre);
+        const wrap = el("div", { class: "code-block" });
+        wrap.appendChild(pre);
+        const copyBtn = el("button", { class: "copy-btn", text: "📋" });
+        copyBtn.type = "button";
+        copyBtn.title = "Copy";
+        copyBtn.addEventListener("click", () => {
+          copyText(code.textContent).then(() => {
+            copyBtn.textContent = "✓";
+            setTimeout(() => { copyBtn.textContent = "📋"; }, 1500);
+          });
+        });
+        wrap.appendChild(copyBtn);
+        container.appendChild(wrap);
       } else if (part) {
         part.split(/\n{2,}/).forEach((para) => {
           if (para.trim()) container.appendChild(el("p", { text: para }));
@@ -338,7 +432,87 @@ If the fix doesn't work, go back to Observe with the new symptom. When we're don
   function setComposerEnabled(enabled) {
     inputEl.disabled = !enabled;
     sendBtn.disabled = !enabled;
+    attachBtn.disabled = !enabled;
     quickActionsEl.querySelectorAll(".chip").forEach((b) => (b.disabled = !enabled));
+  }
+
+  function renderAttachments() {
+    attachmentsEl.textContent = "";
+    attachments.forEach((att, idx) => {
+      const chip = el("div", { class: "attachment-chip" });
+      chip.appendChild(el("span", { text: "📎 " + att.name }));
+      const removeBtn = el("button", { text: "✕" });
+      removeBtn.type = "button";
+      removeBtn.title = "Remove " + att.name;
+      removeBtn.addEventListener("click", () => {
+        attachments.splice(idx, 1);
+        renderAttachments();
+      });
+      chip.appendChild(removeBtn);
+      attachmentsEl.appendChild(chip);
+    });
+  }
+
+  function readFileAsText(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(file);
+    });
+  }
+
+  async function handleFilesSelected(fileList) {
+    for (const file of Array.from(fileList)) {
+      if (attachments.length >= MAX_ATTACHMENTS) {
+        statusEl.textContent = "Attachment limit reached (" + MAX_ATTACHMENTS + " files).";
+        break;
+      }
+      if (file.size === 0) {
+        statusEl.textContent = file.name + " is empty, skipped.";
+        continue;
+      }
+      let text;
+      try {
+        text = await readFileAsText(file);
+      } catch (e) {
+        statusEl.textContent = "Couldn't read " + file.name + ".";
+        continue;
+      }
+      if (text.includes("�")) {
+        statusEl.textContent = file.name + " doesn't look like a text file, skipped.";
+        continue;
+      }
+      let truncated = false;
+      if (text.length > MAX_ATTACHMENT_CHARS) {
+        text = text.slice(0, MAX_ATTACHMENT_CHARS);
+        truncated = true;
+      }
+      attachments.push({ name: file.name, content: text });
+      statusEl.textContent = truncated
+        ? "Attached " + file.name + " (truncated to " + MAX_ATTACHMENT_CHARS + " chars)."
+        : "Attached " + file.name + ".";
+    }
+    renderAttachments();
+  }
+
+  function attachmentLang(name) {
+    const ext = name.includes(".") ? name.split(".").pop().toLowerCase() : "";
+    return Object.prototype.hasOwnProperty.call(ATTACHMENT_LANGS, ext) ? ATTACHMENT_LANGS[ext] : ext;
+  }
+
+  function buildOutgoingText(typed) {
+    if (!attachments.length) return typed;
+    const blocks = attachments.map(
+      (att) => "File: " + att.name + "\n```" + attachmentLang(att.name) + "\n" + att.content + "\n```"
+    );
+    return blocks.join("\n\n") + (typed ? "\n\n" + typed : "");
+  }
+
+  function buildDisplayText(typed) {
+    if (!attachments.length) return typed;
+    const lines = attachments.map((att) => "📎 " + att.name);
+    return (typed ? typed + "\n" : "") + lines.join("\n");
   }
 
   async function checkHealth() {
@@ -375,8 +549,12 @@ If the fix doesn't work, go back to Observe with the new symptom. When we're don
   }
 
   async function send(text, displayText) {
-    history.push({ role: "user", content: text });
-    addMessage("user", displayText || text);
+    const outgoingText = buildOutgoingText(text);
+    const outgoingDisplay = buildDisplayText(displayText || text);
+    attachments = [];
+    renderAttachments();
+    history.push({ role: "user", content: outgoingText });
+    addMessage("user", outgoingDisplay);
     inputEl.value = "";
     inputEl.style.height = "auto";
     setComposerEnabled(false);
@@ -477,6 +655,18 @@ If the fix doesn't work, go back to Observe with the new symptom. When we're don
     inputEl.focus();
   }
 
+  attachBtn.addEventListener("click", () => {
+    if (attachBtn.disabled) return;
+    fileInputEl.click();
+  });
+
+  fileInputEl.addEventListener("change", () => {
+    if (fileInputEl.files && fileInputEl.files.length) {
+      handleFilesSelected(fileInputEl.files);
+    }
+    fileInputEl.value = "";
+  });
+
   quickActionsEl.querySelectorAll(".chip").forEach((chip) => {
     chip.addEventListener("click", () => {
       if (chip.disabled) return;
@@ -488,7 +678,7 @@ If the fix doesn't work, go back to Observe with the new symptom. When we're don
   formEl.addEventListener("submit", (e) => {
     e.preventDefault();
     const text = inputEl.value.trim();
-    if (!text) return;
+    if (!text && !attachments.length) return;
     send(text);
   });
 
