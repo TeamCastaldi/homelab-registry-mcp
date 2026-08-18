@@ -28,6 +28,11 @@ query and act on.
   query aggregate capacity across the lab.
 - Optional LLM reasoning (off by default) for fuzzy cross-source matching,
   metadata enrichment, and access-audit summaries.
+- Optional web chat interface (off by default) at `/chat`, backed by a local or
+  LAN Ollama instance you run — ask about your services, hardware, and staleness
+  in plain language, or just talk through an idea. Authentik OIDC or a static
+  password gates access; the assistant only ever sees your lab through a fixed,
+  read-only-by-default tool allowlist. See [ADR-009](docs/ARDs/ADR-009-Conversational-Chat-Interface.md).
 
 ### Write (opt-in, off by default)
 
