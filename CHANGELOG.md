@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.21.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.20.0...v0.21.0) (2026-08-18)
+
+
+### Features
+
+* **chat:** add a Troubleshoot chip with a structured debugging prompt ([377c77b](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/377c77b5b076ee187d23aa94d532cd1298a6df3b))
+* **chat:** add thinking-dots bubble and quick-action chips ([51694a7](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/51694a75d74ff8347f01abbc85b835bfde475d27))
+
 ## [0.20.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.19.0...v0.20.0) (2026-08-18)
 
 
