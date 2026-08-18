@@ -23,7 +23,7 @@
     --gutter: clamp(1rem, 4vw, 4rem);
   }
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme="light"]) {
       --bg: #16171a;
       --panel: #1f2023;
       --text: #e7e7e9;
@@ -37,8 +37,26 @@
       --error-text: #f5a3a3;
       --chip-bg: #232640;
       --chip-text: #b7c0ff;
+      color-scheme: dark;
     }
   }
+  :root[data-theme="dark"] {
+    --bg: #16171a;
+    --panel: #1f2023;
+    --text: #e7e7e9;
+    --muted: #9aa0a8;
+    --border: #303236;
+    --accent: #5b8def;
+    --user-bg: #2f5fd6;
+    --user-text: #ffffff;
+    --assistant-bg: #1f2023;
+    --error-bg: #3a1d1d;
+    --error-text: #f5a3a3;
+    --chip-bg: #232640;
+    --chip-text: #b7c0ff;
+    color-scheme: dark;
+  }
+  :root[data-theme="light"] { color-scheme: light; }
   * { box-sizing: border-box; }
   html, body {
     height: 100%;
@@ -147,6 +165,23 @@
   }
   .chip:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
   .chip:disabled { opacity: 0.5; cursor: default; }
+  #quick-actions-toggle {
+    display: none;
+    font: inherit;
+    font-size: 0.8rem;
+    padding: 0.35rem 0.8rem;
+    border-radius: 999px;
+    background: var(--chip-bg);
+    color: var(--chip-text);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    margin-bottom: 0.6rem;
+  }
+  @media (max-width: 640px) {
+    #quick-actions-toggle { display: inline-block; }
+    .quick-actions { display: none; }
+    .quick-actions.open { display: flex; }
+  }
   .msg-thinking .msg-body { display: flex; align-items: center; gap: 0.3rem; }
   .msg-thinking .dot {
     width: 6px;
@@ -258,6 +293,7 @@
     <span id="model-status">checking…</span>
     <button id="new-chat" type="button">New chat</button>
     <button id="sign-out" type="button">Sign out</button>
+    <button id="theme-toggle" type="button" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
   </div>
 </header>
 
@@ -266,6 +302,7 @@
 </div>
 
 <footer>
+  <button id="quick-actions-toggle" type="button" aria-expanded="false" aria-controls="quick-actions">☰ Quick actions</button>
   <div id="quick-actions" class="quick-actions">
     <button type="button" class="chip" data-prompt="Which services are currently marked stale, and why?">Stale services</button>
     <button type="button" class="chip" data-prompt="Give me a capacity summary across all hardware nodes.">Hardware capacity</button>
@@ -299,6 +336,8 @@
   const attachBtn = document.getElementById("attach-btn");
   const fileInputEl = document.getElementById("file-input");
   const attachmentsEl = document.getElementById("attachments");
+  const themeToggleBtn = document.getElementById("theme-toggle");
+  const quickActionsToggleBtn = document.getElementById("quick-actions-toggle");
 
   /** @type {Array<{role: string, content?: string, tool_calls?: unknown, tool_name?: string}>} */
   let history = [];
@@ -306,10 +345,15 @@
   /** @type {Array<{name: string, content: string}>} */
   let attachments = [];
   const MAX_ATTACHMENTS = 3;
+  // Gate on raw byte size before FileReader loads the file into memory —
+  // reading first and truncating after would let a huge file be fully read
+  // (and freeze the tab) before ever being rejected.
+  const MAX_ATTACHMENT_BYTES = 20000;
   // Sized against CHAT_TOOL_RESULT_MAX_CHARS/CHAT_CONTEXT_MAX_CHARS (8000/6000
   // chars) — the model only has CHAT_NUM_CTX=8192 tokens total, so a much
   // larger cap here would silently blow the context budget instead of
-  // failing loudly.
+  // failing loudly. Applied post-read as a second bound, since multi-byte
+  // UTF-8 content means byte count doesn't map 1:1 to char count.
   const MAX_ATTACHMENT_CHARS = 20000;
   const ATTACHMENT_LANGS = {
     yml: "yaml", yaml: "yaml", json: "json", sh: "bash", bash: "bash",
@@ -358,8 +402,9 @@ If the fix doesn't work, go back to Observe with the new symptom. When we're don
     ta.style.opacity = "0";
     document.body.appendChild(ta);
     ta.select();
-    document.execCommand("copy");
+    const ok = document.execCommand("copy");
     ta.remove();
+    if (!ok) throw new Error("execCommand('copy') failed");
   }
 
   // Renders message text as plain text, with ``` fenced blocks split into
@@ -380,10 +425,12 @@ If the fix doesn't work, go back to Observe with the new symptom. When we're don
         copyBtn.type = "button";
         copyBtn.title = "Copy";
         copyBtn.addEventListener("click", () => {
-          copyText(code.textContent).then(() => {
-            copyBtn.textContent = "✓";
-            setTimeout(() => { copyBtn.textContent = "📋"; }, 1500);
-          });
+          copyText(code.textContent)
+            .then(() => { copyBtn.textContent = "✓"; })
+            .catch(() => { copyBtn.textContent = "✕"; })
+            .finally(() => {
+              setTimeout(() => { copyBtn.textContent = "📋"; }, 1500);
+            });
         });
         wrap.appendChild(copyBtn);
         container.appendChild(wrap);
@@ -472,6 +519,10 @@ If the fix doesn't work, go back to Observe with the new symptom. When we're don
         statusEl.textContent = file.name + " is empty, skipped.";
         continue;
       }
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        statusEl.textContent = file.name + " is too large (max " + Math.floor(MAX_ATTACHMENT_BYTES / 1000) + "KB), skipped.";
+        continue;
+      }
       let text;
       try {
         text = await readFileAsText(file);
@@ -479,7 +530,7 @@ If the fix doesn't work, go back to Observe with the new symptom. When we're don
         statusEl.textContent = "Couldn't read " + file.name + ".";
         continue;
       }
-      if (text.includes("�")) {
+      if (text.includes("\u0000") || text.includes("�")) {
         statusEl.textContent = file.name + " doesn't look like a text file, skipped.";
         continue;
       }
@@ -672,7 +723,14 @@ If the fix doesn't work, go back to Observe with the new symptom. When we're don
       if (chip.disabled) return;
       const prompt = chip.dataset.promptId ? PRESET_PROMPTS[chip.dataset.promptId] : chip.dataset.prompt;
       send(prompt, chip.textContent);
+      quickActionsEl.classList.remove("open");
+      quickActionsToggleBtn.setAttribute("aria-expanded", "false");
     });
+  });
+
+  quickActionsToggleBtn.addEventListener("click", () => {
+    const isOpen = quickActionsEl.classList.toggle("open");
+    quickActionsToggleBtn.setAttribute("aria-expanded", String(isOpen));
   });
 
   formEl.addEventListener("submit", (e) => {
@@ -703,6 +761,35 @@ If the fix doesn't work, go back to Observe with the new symptom. When we're don
   document.getElementById("sign-out").addEventListener("click", async () => {
     await fetch("/chat/auth/logout", { method: "POST" });
     window.location.href = "/chat/auth/login";
+  });
+
+  // Explicit light/dark override on top of the prefers-color-scheme default
+  // (see the :root[data-theme] rules in <style>), persisted in localStorage.
+  // No stored preference means "follow system" — no data-theme attribute set.
+  const THEME_KEY = "chat-theme";
+  const prefersDark = window.matchMedia("(prefers-color-scheme: dark)");
+
+  function currentTheme() {
+    const stored = localStorage.getItem(THEME_KEY);
+    if (stored === "light" || stored === "dark") return stored;
+    return prefersDark.matches ? "dark" : "light";
+  }
+
+  function updateThemeToggleIcon() {
+    themeToggleBtn.textContent = currentTheme() === "dark" ? "☀️" : "🌙";
+  }
+
+  const storedTheme = localStorage.getItem(THEME_KEY);
+  if (storedTheme === "light" || storedTheme === "dark") {
+    document.documentElement.dataset.theme = storedTheme;
+  }
+  updateThemeToggleIcon();
+
+  themeToggleBtn.addEventListener("click", () => {
+    const next = currentTheme() === "dark" ? "light" : "dark";
+    localStorage.setItem(THEME_KEY, next);
+    document.documentElement.dataset.theme = next;
+    updateThemeToggleIcon();
   });
 
   checkHealth();
