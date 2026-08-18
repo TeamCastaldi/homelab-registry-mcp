@@ -274,7 +274,7 @@ configured is a startup error and the routes are never registered, not an open e
 | `SSH_DEFAULT_USER` | `root` | User for the ad-hoc SSH connection adoption uses to inspect a live container; reuses `SSH_KEY_PATH` |
 | `ADOPTION_DRAFT_TTL_MINUTES` | `60` | How long a drafted adoption may await the operator's keep/rotate decision before expiring |
 | `CHAT_ENABLED` | `false` | Registers `/chat` and friends (ADR-008). `true` with neither `CHAT_OIDC_*` nor `CHAT_PASSWORD` set is a startup error — routes stay unregistered, never open |
-| `CHAT_OLLAMA_URL` | unset | e.g. `http://10.0.0.202:11434`; this repo never runs Ollama itself |
+| `CHAT_OLLAMA_URL` | unset | e.g. `http://10.0.0.203:11434`; this repo never runs Ollama itself |
 | `CHAT_OLLAMA_MODEL` | `qwen3:14b` | Must support Ollama tool calling |
 | `CHAT_OLLAMA_TIMEOUT_SECONDS` / `CHAT_OLLAMA_RETRIES` | `300` / `3` | Retries only apply before the first streamed chunk — never mid-stream |
 | `CHAT_OLLAMA_KEEP_ALIVE` | `30m` | Avoids a model-reload stall on every idle gap |
