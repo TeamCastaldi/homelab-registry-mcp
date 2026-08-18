@@ -25,10 +25,11 @@ implemented.
 
 68 MCP tools are registered on a single FastMCP server, confirmed by direct
 inspection of the registered tool list (`server.py` + each `register_*_tools`
-call): Authentik (10), Traefik (7), Discovery (5), Hardware (12), Proposals
-(9), Registry core + service resolution (7), Secrets (6), Events (3), Komodo
-(7), System/health (2). Connecting a session to all 68 regardless of what
-that session actually needs is unnecessary tool-call surface, and puts
+call): Authentik (10), Traefik (7), Discovery (5), Hardware (12),
+Proposals + adoption (9), Registry core + service resolution (7),
+Secrets (6), Events (3), Komodo (7), System/health (2). Connecting a
+session to all 68 regardless of what that session actually needs is
+unnecessary tool-call surface, and puts
 tools with very different risk profiles (a read-only Traefik query vs.
 `secrets_add`) in the same reachable set by default.
 
@@ -116,7 +117,12 @@ independent session IDs on `initialize` and route/tool-call correctly and
 in isolation. This generalizes the existing single-server workaround in
 `server.py`'s `main()` (`_streamable_with_scheduler`, which already
 monkey-patches around `streamable_http_app()`'s hardcoded lifespan to start
-the scheduler) — the mount split replaces calling any one sub-server's
+the scheduler). That workaround's comment labels it as needed for
+"FastMCP ≤ 1.27.1" — stale against the pinned `mcp==1.29.0` confirmed here;
+direct inspection of the installed 1.29.0 source shows the lifespan is
+still hardcoded to `session_manager.run()`, so the comment should be
+corrected (drop the version ceiling) rather than treated as a signal this
+is fixed upstream. The mount split replaces calling any one sub-server's
 `run_streamable_http_async()` with building the composed app, entering all
 N session managers plus the existing scheduler/comment-poll startup in one
 combined lifespan, and serving that composed app directly via
