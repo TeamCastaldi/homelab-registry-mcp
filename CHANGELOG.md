@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.22.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.21.0...v0.22.0) (2026-08-18)
+
+
+### Features
+
+* **chat:** dark mode toggle, mobile quick-actions menu, review fixes ([31221a5](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/31221a50812d9686633c01031e701c6e2a1d6aaa))
+* **chat:** full-width layout, file attachments, code copy button ([366ba87](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/366ba87e72d5bd87373bdce34a559e0873b962b4))
+
+
+### Bug Fixes
+
+* **chat:** address second Copilot review pass (a11y + secrets hygiene) ([bcf1f22](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/bcf1f2227bb0e9be75ffff749210f8f6e2a6e794))
+
 ## [0.21.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.20.0...v0.21.0) (2026-08-18)
 
 
