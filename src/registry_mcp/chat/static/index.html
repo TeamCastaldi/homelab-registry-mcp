@@ -367,11 +367,21 @@
   const PRESET_PROMPTS = {
     troubleshoot: `Let's troubleshoot something that's broken in my homelab. Run this as a structured debugging session: Observe, then Theorize, then Act — one step at a time, checking in with me between each.
 
-Observe: If I haven't already told you what's broken, ask me for the exact symptom, which service or node it affects, and when it started. Then gather evidence before theorizing: check discovery status and staleness, pull the affected service's full context including its router and auth application, look at its recent change and discovery events, check the hardware node it runs on (and capacity if resource exhaustion is plausible), and pull recent logs if it's container-level. Only look up what's relevant to the symptom. Summarize what you found as Symptom / First seen / Affected scope, and confirm it matches what I'm seeing before moving on.
+Observe: If I haven't already told you what's broken, start by acting as a first-line help desk tech. Ask me clarifying, diagnostic questions one at a time to gather the exact details of the incident. Focus on finding out:
+* What is the exact error message or symptom?
+* When did it start, and was it working normally before?
+* Were there any recent changes, updates, or power events?
+* What is the impact (e.g., is just one service down, or the whole node)?
+
+Once you have those answers, shift into systems engineering mode. Leverage the MCP toolkit to proactively gather evidence: check discovery status and staleness, pull the affected service's full context including its router and auth application, look at its recent change and discovery events, check the hardware node it runs on (and capacity if resource exhaustion is plausible), and pull recent logs if it's container-level. Only look up what's relevant to the symptom. 
+
+**Fallback Protocol:** If an MCP tool fails, is unavailable, or does not exist for a piece of evidence you need, do not hallucinate or guess the status. Instead, explicitly state the tool limitation and provide me with the exact CLI commands I need to run manually to gather that data. Format these commands clearly in fenced code blocks and wait for me to paste the output.
+
+Summarize what you found (or what we gathered manually) as Symptom / First seen / Affected scope, and confirm it matches what I'm seeing before moving on.
 
 Theorize: Once I confirm, give me one root-cause theory grounded in what you actually found, not a generic guess. State the theory, the evidence for it, the proposed fix, and the risk. Wait for me to approve it before acting.
 
-Act: Once approved, be precise about what fixing this actually requires. A curated registry field you can update directly, say so and confirm before doing it. Real service or infra config goes through the GitOps proposal path, not a direct edit — describe the exact change and offer to open a proposal if one makes sense, then wait for my go-ahead. Never fabricate a fix for something you haven't looked up, and never take an irreversible action without me confirming first.
+Act: Once approved, be precise about what fixing this actually requires. If it's a curated registry field you can update directly via MCP, say so and confirm before doing it. Real service or infra config goes through the GitOps proposal path, not a direct edit — describe the exact change and offer to open a proposal if one makes sense, then wait for my go-ahead. Never fabricate a fix for something you haven't looked up, and never take an irreversible action without me confirming first.
 
 If the fix doesn't work, go back to Observe with the new symptom. When we're done, summarize the root cause and fix in one paragraph, and tell me if the service's notes are worth updating so this doesn't get re-diagnosed from scratch next time.`,
   };
