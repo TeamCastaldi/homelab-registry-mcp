@@ -257,7 +257,15 @@ configured is a startup error and the routes are never registered, not an open e
 - Streaming is hand-rolled Server-Sent Events (`chat/agent.py`) over a `StreamingResponse` —
   not `sse-starlette` (transitive-only via `mcp`), not WebSocket. The frontend
   (`chat/static/index.html`) is one self-contained vanilla-JS file, no build step; model
-  output is rendered via `textContent` only, since it can echo lab-sourced data.
+  output is rendered via `createElement`/`textContent` only, never `innerHTML`, since it can
+  echo lab-sourced data. A hand-rolled markdown parser + DOM builder (headers, bold/italic,
+  inline code, fenced code blocks, tables, lists, links) formats the completed response —
+  streamed tokens still append as flat text and get swapped for the formatted version once
+  the response finishes, so nothing during the stream is ever partially parsed. The parser
+  only produces plain-data node descriptors (no DOM access at all); the builder that turns
+  those into real nodes is the one place with a security check — a link's `href` is only
+  ever assigned once `new URL(href).protocol` is exactly `http:` or `https:`, otherwise it
+  degrades to plain text. See ADR-009's "Frontend" section for the full rationale.
 
 **A source only runs when its upstream env var is set** (e.g., no Traefik discovery if `TRAEFIK_API_URL` is unset).
 
@@ -387,6 +395,12 @@ uv run pytest --cov=src                  # with coverage
 
 Fixtures live in `tests/conftest.py` (IsolatedSettings, in-memory store).
 
+`tests/chat_markdown.test.mjs` (+ its `tests/chat_markdown_support.mjs` helper) is the one
+exception: `node --test`, zero npm dependencies, covering the JS-only markdown parser/DOM
+builder in `chat/static/index.html`. It extracts that file's `<script>` block directly (no
+duplicated logic) and runs it against a hand-rolled fake DOM. Not wired into `uv run pytest`
+or CI — run it with `node --test tests/chat_markdown.test.mjs` when touching that renderer.
+
 ### Installer validation (two-tier)
 
 `scripts/install.sh` / `scripts/bootstrap.sh` have two separate test loops, each catching a different class of bug. Run the fast one first; reach for the slow one only when a change needs fidelity the fast one structurally can't provide.
@@ -493,6 +507,10 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
   1-4; corrects the "no HTTP endpoint" / "ForwardAuth breaks MCP clients" conventions that
   predated `mcp` SDK 1.29.0's `custom_route` support (see ADR-009). DSPy-on-Ollama and a
   confidence-gated local→Claude escalation are noted as future work, not attempted here.
+  **Follow-up landed**: safe markdown rendering for assistant responses (headers, bold/italic,
+  inline code, fenced code blocks, tables, lists, links) — still `createElement`/`textContent`
+  only, never `innerHTML`, so ADR-009's XSS guarantee is unchanged; see ADR-009's "Frontend"
+  section and `tests/chat_markdown.test.mjs`.
 - **Phase 7 complete**: cross-source linking (Authentik ↔ Traefik ↔ Docker), `service_get_full_context()`, and the DSPy reasoning layer (`ResolveServiceIdentity`, `InferServiceMetadata`, `SummarizeAccessAudit`) — off by default via `DSPY_ENABLED`
 - **Phase 8 in progress**: security write path landed — `GenerateRemediationPatch`, Gitea + Ntfy/Smtp/Null providers, `Proposal` model/store, proposal engine (create + verification sweep), and the `proposal_*` tools. Off by default (`GIT_*` unset, `PROPOSAL_AUTO_CREATE=false`); see ADR-002. Normalization path complete — `docs/specs/spec-compose-normal-form.md`, the `normalization/` engine (`ruamel.yaml` deterministic formatter + `NormalizeConfigFile` DSPy escalation + `yamllint`), and the `proposal_normalize` tool + `NORMALIZATION_SCHEDULE` scheduler job. Off by default (`NORMALIZATION_ENABLED=false`).
 - **Phase 8 remaining**: flipping `PROPOSAL_DRY_RUN=false` (and `NORMALIZATION_DRY_RUN=false`) against the homelab repo (a deliberate human step); runbooks, cold-restore testing, Ansible provisioning. (GitHub provider landed — `GitHubGitProvider` alongside Gitea, selected via `GIT_PROVIDER=github`.)

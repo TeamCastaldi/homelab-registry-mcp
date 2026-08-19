@@ -167,11 +167,22 @@ tabs.
 Dockerfile stage. `Dockerfile` installs no Node toolchain and none of this
 repo's 11 runtime dependencies today are a frontend framework; introducing
 one for a single page would be a disproportionate new axis of maintenance.
-Model output is rendered via `textContent` only, never `innerHTML` — it can
-contain lab-sourced data (a service note, a Traefik router rule, an IdP
-application name) that must never be interpreted as markup. A per-response
-CSP nonce (`script-src`/`style-src` only, `default-src 'none'`) is
-substituted into the page on each request.
+Model output is rendered via `createElement`/`textContent` only, never
+`innerHTML` — it can contain lab-sourced data (a service note, a Traefik
+router rule, an IdP application name) that must never be interpreted as
+markup. This ADR originally rendered output as flat `textContent`; a later
+change (a hand-rolled markdown parser + DOM builder, still no `innerHTML`
+anywhere, no new dependency) added headers/bold/italic/code/tables/lists/
+links formatting on top without weakening this guarantee — the parser only
+ever produces plain-data node descriptors, and the DOM builder that
+consumes them uses `createElement` + `.textContent =` per node the same
+way this section always described, plus one added check: a link's `href`
+is only ever assigned after `new URL(href).protocol` resolves to `http:`
+or `https:`, so a `javascript:`/`data:` link degrades to plain text
+instead. Streaming still appends raw text live; the formatted version
+replaces it once a response completes. A per-response CSP nonce
+(`script-src`/`style-src` only, `default-src 'none'`) is substituted into
+the page on each request.
 
 ## Consequences
 

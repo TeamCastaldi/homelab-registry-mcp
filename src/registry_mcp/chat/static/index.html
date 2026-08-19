@@ -110,6 +110,33 @@
   .msg-assistant .msg-body { background: var(--assistant-bg); border: 1px solid var(--border); }
   .msg-body p { margin: 0 0 0.5rem; }
   .msg-body p:last-child { margin-bottom: 0; }
+  .msg-body h1, .msg-body h2, .msg-body h3 {
+    margin: 0.6rem 0 0.4rem;
+    line-height: 1.3;
+  }
+  .msg-body h1:first-child, .msg-body h2:first-child, .msg-body h3:first-child { margin-top: 0; }
+  .msg-body h1 { font-size: 1.25rem; }
+  .msg-body h2 { font-size: 1.1rem; }
+  .msg-body h3 { font-size: 1rem; }
+  .msg-body ul, .msg-body ol {
+    margin: 0 0 0.5rem;
+    padding-left: 1.4rem;
+  }
+  .msg-body li { margin: 0.15rem 0; }
+  .msg-body a { color: var(--accent); text-decoration: underline; }
+  .msg-body table {
+    border-collapse: collapse;
+    display: block;
+    overflow-x: auto;
+    margin: 0.4rem 0;
+    font-size: 0.9em;
+  }
+  .msg-body th, .msg-body td {
+    border: 1px solid var(--border);
+    padding: 0.3rem 0.5rem;
+    text-align: left;
+  }
+  .msg-body th { background: rgba(127, 127, 127, 0.08); }
   .code-block { position: relative; margin: 0.4rem 0; }
   .msg-body pre {
     background: rgba(127, 127, 127, 0.12);
@@ -323,6 +350,424 @@
 <script nonce="__CSP_NONCE__">
 (() => {
   "use strict";
+  // Safe markdown rendering for assistant chat output. Text in, real DOM
+  // nodes out via createElement/textContent only — never innerHTML — so
+  // lab-sourced data a model reply might echo (a Traefik router rule, a
+  // service note, an IdP application name) can never be interpreted as
+  // markup. Kept in its own script block, isolated from the rest of the
+  // app until the wiring commit lands (see index.html's git history /
+  // the PR this shipped in). Marker-delimited so
+  // tests/chat_markdown.test.mjs (`node --test`) can extract this source
+  // and exercise it directly without a build step.
+  //
+  // Manually QA'd in a real Chromium browser (Playwright) against this
+  // exact file, in addition to the node --test suite: the sample
+  // discovery-status-shaped response (headings, bold/italic, a table,
+  // inline code, a fenced code block, a link, an ordered list) renders
+  // correctly in both light and dark themes via the existing --bg/--text/
+  // --border/--accent custom properties, with no new per-theme CSS
+  // needed; and four adversarial inputs (a literal <script> tag, a
+  // javascript: link, a data: link with an embedded <script>, and an
+  // onerror-bearing <img> tag) all render as inert escaped text with zero
+  // script execution, zero dialogs, and zero on* attributes anywhere in
+  // the built DOM. Full results in the PR description.
+  //
+  // Rollback: this is a single-file, client-only change with no server
+  // state or migration -- if it ever needs to come out, `git revert` on
+  // the commit(s) touching this file is the whole procedure. No compose
+  // change, no restart-order concern, nothing else to coordinate.
+
+  // ---- markdown-render:start ----
+
+  // Phase 1 — tokenizer/parser: a plain string in, a plain-data node tree
+  // out. No DOM access here by design: a parser bug can never itself be an
+  // injection vector if it never touches the DOM at all. Deliberately no
+  // `_text_` italics: naive underscore-based emphasis corrupts snake_case
+  // identifiers (env vars, hostnames) that show up constantly in this
+  // domain's chat output, so only `*text*` is recognized for italics.
+
+  function mdParseInline(text) {
+    const nodes = [];
+    let buf = "";
+    let i = 0;
+    const n = text.length;
+
+    function flush() {
+      if (buf) {
+        nodes.push({ type: "text", value: buf });
+        buf = "";
+      }
+    }
+
+    while (i < n) {
+      const ch = text[i];
+
+      if (ch === "`") {
+        const end = text.indexOf("`", i + 1);
+        if (end !== -1) {
+          flush();
+          nodes.push({ type: "code_inline", value: text.slice(i + 1, end) });
+          i = end + 1;
+          continue;
+        }
+      }
+
+      if (ch === "*" && text[i + 1] === "*") {
+        const end = text.indexOf("**", i + 2);
+        if (end !== -1 && end > i + 2) {
+          flush();
+          nodes.push({ type: "bold", children: mdParseInline(text.slice(i + 2, end)) });
+          i = end + 2;
+          continue;
+        }
+        // Unterminated (or empty, "****") "**": both asterisks are
+        // literal. Consume them together — falling through one char at a
+        // time would let the second "*" be picked up fresh as an italic
+        // opener/closer on the next iteration (e.g. "**a*" would wrongly
+        // italicize "a" instead of staying fully literal).
+        buf += "**";
+        i += 2;
+        continue;
+      }
+
+      if (ch === "*" && text[i + 1] !== "*") {
+        // Scan for a closing single `*`, but treat any `**...**` run
+        // encountered along the way as an atomic (nested bold) unit rather
+        // than letting its first `*` prematurely close the italic span —
+        // otherwise `*a **b** c*` closes after "a " instead of spanning
+        // the whole thing.
+        let j = i + 1;
+        let end = -1;
+        while (j < n) {
+          if (text[j] === "*" && text[j + 1] === "*") {
+            const innerEnd = text.indexOf("**", j + 2);
+            if (innerEnd === -1) {
+              // Unterminated nested "**": skip both chars as a unit, same
+              // reasoning as the top-level bold check above — neither may
+              // be reinterpreted as the italic closer on its own.
+              j += 2;
+              continue;
+            }
+            j = innerEnd + 2;
+            continue;
+          }
+          if (text[j] === "*") {
+            end = j;
+            break;
+          }
+          j += 1;
+        }
+        if (end !== -1 && end > i + 1) {
+          flush();
+          nodes.push({ type: "italic", children: mdParseInline(text.slice(i + 1, end)) });
+          i = end + 1;
+          continue;
+        }
+      }
+
+      if (ch === "[") {
+        const closeBracket = text.indexOf("]", i + 1);
+        if (closeBracket !== -1 && text[closeBracket + 1] === "(") {
+          // Depth-tracked, not indexOf(")"): a URL commonly contains its
+          // own parens (a Wikipedia-style path, a javascript: call), and
+          // stopping at the first ")" would truncate the href.
+          let depth = 1;
+          let j = closeBracket + 2;
+          while (j < n && depth > 0) {
+            if (text[j] === "(") depth++;
+            else if (text[j] === ")") depth--;
+            if (depth === 0) break;
+            j++;
+          }
+          if (depth === 0) {
+            flush();
+            nodes.push({
+              type: "link",
+              href: text.slice(closeBracket + 2, j),
+              // Recursively parsed, same as every other container (headings,
+              // table cells, list items, paragraphs) -- so `[**bold**](url)`
+              // renders bold text inside the link instead of literal `**`.
+              children: mdParseInline(text.slice(i + 1, closeBracket)),
+            });
+            i = j + 1;
+            continue;
+          }
+        }
+      }
+
+      buf += ch;
+      i += 1;
+    }
+    flush();
+    return nodes;
+  }
+
+  function mdIsTableSeparator(line) {
+    // Require 3+ dashes per cell (the "---" convention virtually every
+    // markdown table — including model output — actually uses), not GFM's
+    // bare minimum of 1. A single dash is loose enough to misfire on
+    // ordinary prose containing a "|" (e.g. "cost - | benefit -"). Also
+    // require an actual "|" in the line: a bare "---" (a Setext heading
+    // underline or horizontal rule) would otherwise match as a valid
+    // single-column separator, misparsing a prose line that happens to
+    // contain "|" followed by one as a table.
+    return line.includes("|") && /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/.test(line);
+  }
+
+  function mdSplitTableRow(line) {
+    let s = line.trim();
+    if (s.startsWith("|")) s = s.slice(1);
+    if (s.endsWith("|")) s = s.slice(0, -1);
+    return s.split("|").map((c) => c.trim());
+  }
+
+  function mdStartsBlock(lines, idx) {
+    const line = lines[idx];
+    if (/^#{1,3}\s+/.test(line)) return true;
+    if (/^\s{0,3}(`{3,}|~{3,})/.test(line)) return true;
+    if (/^\s{0,3}([-*+]|\d+\.)\s+/.test(line)) return true;
+    if (line.includes("|") && idx + 1 < lines.length && mdIsTableSeparator(lines[idx + 1])) {
+      return true;
+    }
+    return false;
+  }
+
+  function mdParseBlocks(text) {
+    const lines = text.replace(/\r\n/g, "\n").split("\n");
+    const blocks = [];
+    const n = lines.length;
+    let i = 0;
+
+    while (i < n) {
+      const line = lines[i];
+
+      if (line.trim() === "") {
+        i++;
+        continue;
+      }
+
+      const fenceMatch = line.match(/^\s{0,3}(`{3,}|~{3,})\s*([^`~\s]*)\s*$/);
+      if (fenceMatch) {
+        const fence = fenceMatch[1];
+        const fenceChar = fence[0];
+        const fenceLen = fence.length;
+        const lang = fenceMatch[2] || null;
+        const closeRe = new RegExp("^\\s{0,3}" + fenceChar + "{" + fenceLen + ",}\\s*$");
+        const codeLines = [];
+        i++;
+        while (i < n && !closeRe.test(lines[i])) {
+          codeLines.push(lines[i]);
+          i++;
+        }
+        if (i < n) i++; // consume the closing fence line, if one was found
+        blocks.push({ type: "code_block", lang: lang, value: codeLines.join("\n") });
+        continue;
+      }
+
+      const headingMatch = line.match(/^(#{1,3})\s+(.*)$/);
+      if (headingMatch) {
+        blocks.push({
+          type: "heading",
+          level: headingMatch[1].length,
+          children: mdParseInline(headingMatch[2].trim()),
+        });
+        i++;
+        continue;
+      }
+
+      if (line.includes("|") && i + 1 < n && mdIsTableSeparator(lines[i + 1])) {
+        const headerCells = mdSplitTableRow(line);
+        i += 2;
+        const rowCells = [];
+        while (i < n && lines[i].trim() !== "" && lines[i].includes("|")) {
+          rowCells.push(mdSplitTableRow(lines[i]));
+          i++;
+        }
+        blocks.push({
+          type: "table",
+          headers: headerCells.map((c) => mdParseInline(c)),
+          rows: rowCells.map((row) => row.map((c) => mdParseInline(c))),
+        });
+        continue;
+      }
+
+      const listMatch = line.match(/^\s{0,3}([-*+]|\d+\.)\s+(.*)$/);
+      if (listMatch) {
+        const ordered = /^\d+\.$/.test(listMatch[1]);
+        const items = [];
+        while (i < n) {
+          const m = lines[i].match(/^\s{0,3}([-*+]|\d+\.)\s+(.*)$/);
+          if (!m || /^\d+\.$/.test(m[1]) !== ordered) break;
+          items.push(mdParseInline(m[2]));
+          i++;
+        }
+        blocks.push({ type: "list", ordered: ordered, items: items });
+        continue;
+      }
+
+      const paraLines = [line];
+      i++;
+      while (i < n && lines[i].trim() !== "" && !mdStartsBlock(lines, i)) {
+        paraLines.push(lines[i]);
+        i++;
+      }
+      blocks.push({ type: "paragraph", children: mdParseInline(paraLines.join(" ")) });
+    }
+
+    return blocks;
+  }
+
+  function mdParse(text) {
+    return { type: "root", children: mdParseBlocks(String(text)) };
+  }
+
+  // Phase 2 — DOM builder: node-description tree in, real DOM nodes out.
+  // One small function per node type, each using createElement/textContent
+  // only — never innerHTML — recursing into children the same way. `doc`
+  // is passed in rather than closed over so this stays testable against a
+  // fake document with no real DOM available (see
+  // tests/chat_markdown.test.mjs).
+  //
+  // The link builder below is the one place in this whole file with a
+  // real security check: an unsafe or unparseable href is never assigned
+  // to `.href` — it silently degrades to plain text instead of erroring
+  // loudly into a broken UI mid-stream.
+
+  function mdBuildInline(doc, node) {
+    if (node.type === "text") {
+      return doc.createTextNode(node.value);
+    }
+    if (node.type === "bold") {
+      const strong = doc.createElement("strong");
+      mdAppendInline(doc, strong, node.children);
+      return strong;
+    }
+    if (node.type === "italic") {
+      const em = doc.createElement("em");
+      mdAppendInline(doc, em, node.children);
+      return em;
+    }
+    if (node.type === "code_inline") {
+      const code = doc.createElement("code");
+      code.textContent = node.value;
+      return code;
+    }
+    if (node.type === "link") {
+      let protocol = null;
+      try {
+        protocol = new URL(node.href).protocol;
+      } catch (e) {
+        protocol = null;
+      }
+      if (protocol === "http:" || protocol === "https:") {
+        const a = doc.createElement("a");
+        a.href = node.href;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        mdAppendInline(doc, a, node.children);
+        return a;
+      }
+      // Unsafe scheme (javascript:, data:, ...) or a malformed href that
+      // threw in the URL constructor: degrade to plain text, never touch
+      // .href.
+      const frag = doc.createDocumentFragment();
+      mdAppendInline(doc, frag, node.children);
+      return frag;
+    }
+    // Unknown inline node type never happens from mdParseInline, but stay
+    // safe-by-construction rather than throwing on unexpected input.
+    return doc.createTextNode("");
+  }
+
+  function mdAppendInline(doc, parent, children) {
+    children.forEach((child) => parent.appendChild(mdBuildInline(doc, child)));
+  }
+
+  function mdBuildBlock(doc, node) {
+    if (node.type === "heading") {
+      const h = doc.createElement("h" + node.level);
+      mdAppendInline(doc, h, node.children);
+      return h;
+    }
+    if (node.type === "paragraph") {
+      const p = doc.createElement("p");
+      mdAppendInline(doc, p, node.children);
+      return p;
+    }
+    if (node.type === "code_block") {
+      const wrap = doc.createElement("div");
+      wrap.className = "code-block";
+      const pre = doc.createElement("pre");
+      const code = doc.createElement("code");
+      code.textContent = node.value;
+      pre.appendChild(code);
+      wrap.appendChild(pre);
+      return wrap;
+    }
+    if (node.type === "list") {
+      const list = doc.createElement(node.ordered ? "ol" : "ul");
+      node.items.forEach((itemChildren) => {
+        const li = doc.createElement("li");
+        mdAppendInline(doc, li, itemChildren);
+        list.appendChild(li);
+      });
+      return list;
+    }
+    if (node.type === "table") {
+      const table = doc.createElement("table");
+      const thead = doc.createElement("thead");
+      const headRow = doc.createElement("tr");
+      node.headers.forEach((cellChildren) => {
+        const th = doc.createElement("th");
+        mdAppendInline(doc, th, cellChildren);
+        headRow.appendChild(th);
+      });
+      thead.appendChild(headRow);
+      table.appendChild(thead);
+      const tbody = doc.createElement("tbody");
+      node.rows.forEach((rowChildren) => {
+        const tr = doc.createElement("tr");
+        rowChildren.forEach((cellChildren) => {
+          const td = doc.createElement("td");
+          mdAppendInline(doc, td, cellChildren);
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      return table;
+    }
+    // Unknown block node type never happens from mdParseBlocks, but stay
+    // safe-by-construction rather than throwing on unexpected input.
+    return doc.createTextNode("");
+  }
+
+  function mdBuildFragment(doc, tree) {
+    const frag = doc.createDocumentFragment();
+    tree.children.forEach((block) => frag.appendChild(mdBuildBlock(doc, block)));
+    return frag;
+  }
+
+  function renderMarkdown(container, text) {
+    container.textContent = "";
+    // container.ownerDocument, not the closed-over `document`: consistent
+    // with every builder function above taking `doc` as a parameter rather
+    // than assuming a single global document.
+    container.appendChild(mdBuildFragment(container.ownerDocument || document, mdParse(text)));
+  }
+
+  // ---- markdown-render:end ----
+
+  window.ChatMarkdown = {
+    parseMarkdown: mdParse,
+    buildFragment: mdBuildFragment,
+    renderMarkdown: renderMarkdown,
+  };
+})();
+</script>
+<script nonce="__CSP_NONCE__">
+(() => {
+  "use strict";
 
   const messagesEl = document.getElementById("messages");
   const hintEl = document.getElementById("hint");
@@ -337,6 +782,7 @@
   const attachmentsEl = document.getElementById("attachments");
   const themeToggleBtn = document.getElementById("theme-toggle");
   const quickActionsToggleBtn = document.getElementById("quick-actions-toggle");
+  const { renderMarkdown } = window.ChatMarkdown;
 
   /** @type {Array<{role: string, content?: string, tool_calls?: unknown, tool_name?: string}>} */
   let history = [];
@@ -449,6 +895,30 @@ If the fix doesn't work, go back to Observe with the new symptom. When we're don
           if (para.trim()) container.appendChild(el("p", { text: para }));
         });
       }
+    });
+  }
+
+  // Adds the same copy-to-clipboard affordance renderContent's own code
+  // blocks get to the code blocks the markdown renderer just built for a
+  // completed response (see the "done" handler in send()).
+  function enhanceCodeBlocks(container) {
+    container.querySelectorAll(".code-block").forEach((wrap) => {
+      if (wrap.querySelector(".copy-btn")) return;
+      const code = wrap.querySelector("code");
+      if (!code) return;
+      const copyBtn = el("button", { class: "copy-btn", text: "📋" });
+      copyBtn.type = "button";
+      copyBtn.title = "Copy";
+      copyBtn.setAttribute("aria-label", "Copy code");
+      copyBtn.addEventListener("click", () => {
+        copyText(code.textContent)
+          .then(() => { copyBtn.textContent = "✓"; })
+          .catch(() => { copyBtn.textContent = "✕"; })
+          .finally(() => {
+            setTimeout(() => { copyBtn.textContent = "📋"; }, 1500);
+          });
+      });
+      wrap.appendChild(copyBtn);
     });
   }
 
@@ -703,6 +1173,16 @@ If the fix doesn't work, go back to Observe with the new symptom. When we're don
         } else if (event === "error") {
           addMessage("error", data.message || ("Error: " + (data.kind || "unknown")));
         } else if (event === "done") {
+          if (assistantBody && assistantText) {
+            try {
+              renderMarkdown(assistantBody, assistantText);
+              enhanceCodeBlocks(assistantBody);
+            } catch (e) {
+              // A rendering bug should never lose the response — fall back
+              // to the same plain-text path used during streaming.
+              renderContent(assistantBody, assistantText);
+            }
+          }
           history = history.concat(Array.isArray(data.messages) ? data.messages : []);
           assistantBody = null;
           assistantText = "";
