@@ -57,6 +57,18 @@ class ProposalStore:
             )
             return session.exec(statement).first()
 
+    def find_open_by_path(self, file_path: str, finding_type: FindingType) -> Proposal | None:
+        """Like ``find_open`` but keyed on ``file_path`` instead of
+        ``service_id`` — normalization proposals are batched per node
+        (``service_id`` is ``None``) and need a different dedupe key."""
+        with Session(self.engine) as session:
+            statement = select(Proposal).where(
+                Proposal.file_path == file_path,
+                Proposal.finding_type == finding_type,
+                Proposal.status == ProposalStatus.open,
+            )
+            return session.exec(statement).first()
+
     def list_open(self, *, exclude_normalization: bool = False) -> list[Proposal]:
         with Session(self.engine) as session:
             statement = select(Proposal).where(Proposal.status == ProposalStatus.open)

@@ -8,6 +8,7 @@ from mcp.server.fastmcp import FastMCP
 
 if TYPE_CHECKING:
     from registry_mcp.discovery.engine import DiscoveryEngine
+    from registry_mcp.normalization import NormalizationEngine
     from registry_mcp.proposal import ProposalEngine, ProposalStore
     from registry_mcp.registry import RegistryStore
 
@@ -18,6 +19,7 @@ def register_proposal_tools(
     proposals: ProposalStore,
     discovery_engine: DiscoveryEngine,
     store: RegistryStore,
+    normalization_engine: NormalizationEngine,
     read_only: bool = False,
 ) -> None:
     """Register the `proposal_*` write-path tools.
@@ -86,3 +88,26 @@ def register_proposal_tools(
             "auth_mode_conflict": service.auth_mode_conflict,
             "verified": not service.auth_mode_conflict,
         }
+
+    @mcp.tool()
+    async def proposal_normalize(
+        node: str | None = None, dry_run: bool | None = None
+    ) -> dict[str, Any]:
+        """Scan compose files against the canonical form and open normalization PRs.
+
+        Checks `nodes/*/*/compose.yaml` against
+        docs/specs/spec-compose-normal-form.md: formatting issues (key order,
+        label/port/environment shape, a misnamed compose file, ...) are
+        auto-fixed and opened as one PR per node; judgment calls (`:latest`
+        tags, missing `restart:`, hardcoded secrets, ...) are reported under
+        `findings` and never auto-fixed. Every auto-fix is proven
+        behavior-preserving before it's committed. `node` restricts the scan
+        to one node; `dry_run` overrides `NORMALIZATION_DRY_RUN` for this
+        call only — no branch is created and no PR is opened when dry-run.
+        Always a separate PR/label from security remediation proposals.
+        """
+        if err := _read_only_error():
+            return err
+        return await normalization_engine.run_sweep(
+            node=node, dry_run=dry_run, actor="manual:proposal_normalize"
+        )

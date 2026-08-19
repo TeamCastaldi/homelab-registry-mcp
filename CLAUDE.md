@@ -48,6 +48,12 @@ src/registry_mcp/
 │   ├── adoption.py        # AdoptionGenerator: calls DSPy DetectHardcodedSecrets + same gates
 │   ├── engine.py          # create per finding, verification sweep, after_discovery hook
 │   └── store.py           # Proposal CRUD (shares the registry SQLite engine)
+├── normalization/         # normalization engine — see docs/specs/spec-compose-normal-form.md
+│   ├── rules.py           # rule IDs, canonical key orders, equivalence-guarantee projection
+│   ├── formatter.py       # deterministic ruamel.yaml round-trip (Tier 1, comment-safe)
+│   ├── generator.py       # DSPy NormalizeConfigFile escalation for what the formatter skipped
+│   ├── scanner.py         # repo-wide file listing + Tier 2 finding check, grouped by node
+│   └── engine.py          # one PR per node; kept separate from proposal/ on purpose
 ├── adoption/              # brownfield adoption (Phase 7) — see docs/plans/updated-phases.md
 │   ├── ssh.py             # SSH docker-inspect/cat helpers against a HardwareNode
 │   └── store.py           # AdoptionDraftStore: the pause point between draft and finalize
@@ -65,7 +71,7 @@ src/registry_mcp/
 │   ├── linking.py         # service_link_authentik + service_get_full_context
 │   ├── hardware.py        # hardware-add-node/get/list/update/delete + link/capacity tools
 │   ├── secrets.py         # secrets_status/encrypt/decrypt/add/rotate/list_keys (Phase C)
-│   ├── proposal.py        # proposal_create/list_open/get/cancel/verify (Phase 8)
+│   ├── proposal.py        # proposal_create/list_open/get/cancel/verify/normalize (Phase 8)
 │   └── adoption.py        # proposal_adopt_service[_finalize/_cancel/_get] (Phase 7 brownfield)
 ├── chat/                  # web chat UI (ADR-009) — opt-in, CHAT_ENABLED=false by default
 │   ├── routes.py          # @mcp.custom_route handlers: /chat, /chat/auth/*, /chat/api/*
@@ -155,6 +161,47 @@ at all, and `PROPOSAL_AUTO_CREATE=true` for unattended creation.
 - `NotificationProvider.send()` takes an optional `diff` — Smtp renders it into a templated
   HTML email (PR summary + truncated diff + Approve/Request Changes/View Diff buttons); Ntfy/Null
   ignore it (a full diff has no place in a mobile push).
+
+**Normalization engine (`normalization/`, spec in `docs/specs/spec-compose-normal-form.md`):**
+checks `nodes/*/*/compose.yaml` against a committed canonical form and opens one PR per node
+with any safe fixes. Off by default (`NORMALIZATION_ENABLED=false`); requires the same `GIT_*`
+as the proposal layer. Deliberately kept out of `proposal/` — a normalization PR can never
+bundle a security remediation; they are always separate PRs with separate labels
+(`NORMALIZATION_LABEL` vs `PROPOSAL_LABEL`), sharing only the `Proposal` table
+(`finding_type=normalization`, `service_id=None`).
+- **Hybrid rewrite, deterministic first:** `formatter.py` applies every Tier 1 (formatting)
+  rule via a `ruamel.yaml` round-trip — no LLM call, fully repeatable. It's comment-safe by
+  construction: `ruamel` anchors "a comment above key X" to the *previous* key's trailing-comment
+  slot, not to X, so a blind key reorder can silently relocate a comment onto the wrong line.
+  The formatter checks whether a mapping/list carries any attached comment before reordering
+  it or converting its shape (labels/environment list→mapping); when one does, that specific
+  rule is left unapplied and recorded in `skipped_rules` rather than risking misplacement.
+- **DSPy `NormalizeConfigFile` is the escalation path**, not a co-equal half — it only ever
+  finishes the *specific* rules the formatter skipped (or the whole file, on the rare case the
+  formatter can't parse it at all), never rewrites a file DSPy hasn't seen partially normalized
+  already. Same no-fallback discipline as `GenerateRemediationPatch`: `PROPOSAL_CONFIDENCE_THRESHOLD`
+  gate, YAML validity, no rule-based patch if it fails.
+- **The equivalence guarantee** is normalization's own gate, stricter than the security path's:
+  `rules.is_equivalent(before, after)` parses both sides and projects labels/ports/environment
+  to their representation-independent form (a labels list and a labels mapping compare equal)
+  before comparing — a rewrite that changes anything Docker would see differently is never
+  committed, regardless of which path produced it.
+- Judgment-call findings (`:latest` tags, missing `restart:`, a `build:` key, an unflagged
+  `ports:` mapping, a hardcoded proxy network or secret, a `container_name` mismatch) are
+  **reported, never auto-fixed** — returned under `findings` and listed in the PR body.
+- N-100 (renaming a misnamed `docker-compose.yml`/`.yaml`/`compose.yml` to the only filename
+  `ansible/roles/docker-stack-deploy` can see, `compose.yaml`) is gated by its own
+  `NORMALIZATION_RENAME_MISNAMED` flag, off by default — it makes a stack **deploy-visible for
+  the first time**, a different kind of change than the rest of normalization's cosmetic fixes,
+  and the PR body calls it out explicitly whenever it fires.
+- **One PR per node, not per sweep and not per file** — `.github/workflows/deploy.yml` redeploys
+  every stack a merged PR touches, so batching per node bounds that blast radius to one host per
+  merge. `NORMALIZATION_MAX_FILES_PER_PR` caps a single node's diff size.
+- `GitProvider` gained `list_files()` (one recursive git-trees call, repo-wide) and
+  `delete_file()` (for N-100) — implemented on both Gitea and GitHub providers.
+- Triggered by the `proposal_normalize` tool (`node`/`dry_run` params) or the
+  `NORMALIZATION_SCHEDULE` scheduler job — same three-part gate as comment polling (opt-in flag,
+  write path configured, not read-only).
 
 **Brownfield adoption (`docs/plans/updated-phases.md` Phase 7, `adoption/` + `proposal/adoption.py`
 + `tools/adoption.py`):** brings a live, pre-existing Docker service (discovered but never
@@ -262,8 +309,13 @@ configured is a startup error and the routes are never registered, not an open e
 | `PROPOSAL_COMMENT_POLL_ENABLED` | `false` | Poll open proposal PRs for comments and push a DSPy-revised commit in response (never scheduled in read-only mode) |
 | `PROPOSAL_COMMENT_POLL_INTERVAL_SECONDS` | `300` | Poll interval (seconds) when `PROPOSAL_COMMENT_POLL_ENABLED=true` |
 | `PROPOSAL_COMMENT_ALLOWED_USERS` | unset | Comma-separated GitHub/Gitea usernames trusted to trigger a revision. **Fails closed** — empty means every comment is ignored |
-| `NORMALIZATION_ENABLED` | `false` | Reserved; normalization engine is a later Phase 8 increment |
-| `NORMALIZATION_SCHEDULE` | `weekly` | Reserved |
+| `NORMALIZATION_ENABLED` | `false` | Scans `nodes/*/*/compose.yaml` against `docs/specs/spec-compose-normal-form.md` and opens one PR per node with safe formatting fixes; requires `GIT_*` |
+| `NORMALIZATION_SCHEDULE` | `weekly` | `daily`, `weekly`, `monthly`, or a raw seconds value |
+| `NORMALIZATION_PATH_GLOB` | `nodes/*/*/compose.yaml` | Which files the canonical form applies to |
+| `NORMALIZATION_MAX_FILES_PER_PR` | `25` | Caps one node's PR diff size on a first run against a messy repo |
+| `NORMALIZATION_DRY_RUN` | `false` | Generate diffs and log them without opening PRs |
+| `NORMALIZATION_RENAME_MISNAMED` | `false` | Renames `docker-compose.yml`/`.yaml`/`compose.yml` → `compose.yaml` (N-100) — makes a previously deploy-invisible stack visible, so it's opt-in separately from the rest of normalization |
+| `NORMALIZATION_LABEL` | `normalization` | PR label — always distinct from `PROPOSAL_LABEL` so a normalization PR is never mistaken for a security one |
 | `SECRETS_ENABLED` | `true` | Enables `secrets_*` MCP tools (Phase C git-crypt integration) |
 | `SECRETS_REPO_PATH` | unset | Absolute path to the cloned private homelab repo on this node. `pydantic-settings` reads `.env` as literal strings — `$HOME`/`~` are not expanded, so use a concrete absolute path (e.g. `/opt/homelab` on the Pi, `/Users/you/homelab` on macOS) |
 | `SECRETS_KEY_PATH` | unset | Absolute path to the exported git-crypt key file (priority over env var); same no-expansion caveat as `SECRETS_REPO_PATH` |
@@ -310,6 +362,8 @@ Copy `.env.example` to `.env` and fill in the upstream URLs before running local
 - **Upstream APIs are read-only**: Traefik, Authentik, and Docker are never modified.
 - **The write path writes to Git only**: the proposal layer opens PRs; it never merges them and never writes the filesystem Traefik/Docker watch. The PR + human merge is the safety gate. All write behavior defaults off.
 - **All patch generation goes through DSPy**: `proposal/generator.py` has no rule-based fallback. Low-confidence or invalid-YAML patches become `rejected` Proposals, never commits.
+- **A normalization rewrite must prove behavior equivalence before it's committed**: `normalization/rules.is_equivalent()` projects both the before and after YAML to a representation-independent form and compares them; a rewrite that changes anything Docker would see differently is never committed, regardless of whether the deterministic formatter or the DSPy escalation produced it. Security patches (`proposal/generator.py`) intentionally change behavior and have no equivalent gate.
+- **Normalization and security proposals are never bundled**: `normalization/` is its own engine, never merged into `proposal/`, and opens PRs under a separate label (`NORMALIZATION_LABEL`).
 - **New tools must be registered in `server.py`** — FastMCP doesn't auto-discover them.
 - **No LLM calls in the detection layer**: `reconcile.py` and discovery sources stay deterministic. Reasoning (DSPy) lives in `dspy/` and is wired in via injected callables; those layers never `import dspy`.
 - **DSPy/`dspy/` subpackage does not shadow the library**: Python 3 absolute imports resolve `import dspy` to the top-level package; the library is imported lazily so a disabled reasoning layer adds no startup cost.
@@ -440,8 +494,8 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
   predated `mcp` SDK 1.29.0's `custom_route` support (see ADR-009). DSPy-on-Ollama and a
   confidence-gated local→Claude escalation are noted as future work, not attempted here.
 - **Phase 7 complete**: cross-source linking (Authentik ↔ Traefik ↔ Docker), `service_get_full_context()`, and the DSPy reasoning layer (`ResolveServiceIdentity`, `InferServiceMetadata`, `SummarizeAccessAudit`) — off by default via `DSPY_ENABLED`
-- **Phase 8 in progress**: security write path landed — `GenerateRemediationPatch`, Gitea + Ntfy/Smtp/Null providers, `Proposal` model/store, proposal engine (create + verification sweep), and the `proposal_*` tools. Off by default (`GIT_*` unset, `PROPOSAL_AUTO_CREATE=false`); see ADR-002.
-- **Phase 8 remaining**: normalization path (`NormalizeConfigFile`, yamllint, `proposal_normalize`); flipping `PROPOSAL_DRY_RUN=false` against the homelab repo (a deliberate human step); runbooks, cold-restore testing, Ansible provisioning. (GitHub provider landed — `GitHubGitProvider` alongside Gitea, selected via `GIT_PROVIDER=github`.)
+- **Phase 8 in progress**: security write path landed — `GenerateRemediationPatch`, Gitea + Ntfy/Smtp/Null providers, `Proposal` model/store, proposal engine (create + verification sweep), and the `proposal_*` tools. Off by default (`GIT_*` unset, `PROPOSAL_AUTO_CREATE=false`); see ADR-002. Normalization path complete — `docs/specs/spec-compose-normal-form.md`, the `normalization/` engine (`ruamel.yaml` deterministic formatter + `NormalizeConfigFile` DSPy escalation + `yamllint`), and the `proposal_normalize` tool + `NORMALIZATION_SCHEDULE` scheduler job. Off by default (`NORMALIZATION_ENABLED=false`).
+- **Phase 8 remaining**: flipping `PROPOSAL_DRY_RUN=false` (and `NORMALIZATION_DRY_RUN=false`) against the homelab repo (a deliberate human step); runbooks, cold-restore testing, Ansible provisioning. (GitHub provider landed — `GitHubGitProvider` alongside Gitea, selected via `GIT_PROVIDER=github`.)
 - **Phase 9a-9b complete**: hardware node registry — `HardwareNode` model + `HardwareStore` + 11 MCP tools registered in `server.py`; `hardware-discover-now` runs a live Ansible `setup` fact-gather against `ANSIBLE_CFG_PATH`'s inventory and upserts provenance fields (curated fields untouched). `scripts/setup-ansible-inventory.sh` bootstraps the `ansible.cfg`/inventory prerequisite itself (seeds the control-plane node, then prompts for more hosts) until the OOBE CLI replaces it — also folded inline into `scripts/install.sh` (opt-in, only offered when a homelab config repo already exists) so hardware onboarding can start from a fresh install rather than a separate manual step; the standalone script remains the way to add more hosts later.
 - **Phase C complete**: git-crypt secrets integration — 6 `secrets_*` MCP tools, `scripts/setup-homelab-repo.sh` bootstrap, `git-crypt` in Dockerfile. Path validation hardened against arbitrary file read/write via absolute paths (`check_path` in `gitcrypt.py`, shared with Phase 7 adoption); `setup-homelab-repo.sh` and `.env.example` work cross-platform (macOS/Linux/WSL), defaulting to `$HOME`-relative paths instead of `/opt/homelab` — also folded inline into `scripts/install.sh` (Pi defaults there) so a fresh install can create the repo without a separate manual step; `setup-homelab-repo.sh` remains the standalone/cross-platform path
 - **Phase D complete, routing model since moved to Docker labels**: migrated registry-mcp off the workload node onto the dedicated control-plane node; GitHub Actions self-hosted runner operational; first automated CD deploy proven end-to-end; `docker-compose.yml` binds `0.0.0.0:8765`. Originally routed via a Traefik static backend (`docs/plans/phase-d.md`, written when Traefik lived on a separate workload node); now that Traefik runs co-located on this same node (ADR-006/ADR-007), `docker-compose.yml` carries standard Traefik Docker labels and joins the external `traefik` network instead — see the Docker/Homelab Deploy section above.

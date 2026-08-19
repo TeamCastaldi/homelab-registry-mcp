@@ -12,7 +12,7 @@ from dspy.utils.dummies import DummyLM
 
 from conftest import IsolatedSettings
 from registry_mcp.dspy import build_reasoner
-from registry_mcp.dspy.signatures import ResolveServiceIdentity
+from registry_mcp.dspy.signatures import NormalizeConfigFile, ResolveServiceIdentity
 from registry_mcp.models import AuthMode, Category
 from registry_mcp.server import build_server
 
@@ -158,6 +158,35 @@ def test_resolve_identity_end_to_end_with_dummy_lm():
         [{"name": "vault", "urls": ["https://vault.lan"]}],
     )
     assert result == "vault"
+
+
+def test_normalize_config_end_to_end_with_dummy_lm():
+    reasoner = build_reasoner(IsolatedSettings(dspy_enabled=True))
+    lm = DummyLM(
+        [
+            {
+                "reasoning": "moved image above restart",
+                "normalized_file": (
+                    "services:\n  plex:\n    image: x:1\n    restart: unless-stopped\n"
+                ),
+                "commit_message": "style: normalize plex/compose.yaml",
+                "confidence": "0.9",
+            }
+        ]
+    )
+    dspy.configure(lm=lm)
+    reasoner._normalize = dspy.ChainOfThought(NormalizeConfigFile)
+    reasoner._patch_lm = lm
+    reasoner._configured = True
+
+    result = reasoner.normalize_config(
+        current_file="services:\n  plex:\n    restart: unless-stopped\n    image: x:1\n",
+        file_path="nodes/pi/plex/compose.yaml",
+        violations="N-006",
+        canonical_form="per-service keys ordered image, restart, ...",
+    )
+    assert result["confidence"] == 0.9
+    assert "image: x:1" in result["normalized_file"]
 
 
 # --- MCP tool: summarize events is gated on the reasoning layer ------------

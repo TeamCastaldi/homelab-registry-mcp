@@ -118,6 +118,48 @@ class GenerateRemediationPatch(dspy.Signature):
     reasoning: str = dspy.OutputField(desc="Why this patch resolves the finding")
 
 
+class NormalizeConfigFile(dspy.Signature):
+    """Given a Docker Compose file and a list of formatting rules it still
+    violates, rewrite it to satisfy exactly those rules.
+
+    A deterministic formatter has already applied every rule it could apply
+    safely; ``current_file`` may already be partially normalized. The rules
+    listed in ``violations`` are the only ones left — usually because a
+    comment stood in the way of a safe automated fix (e.g. reordering keys
+    around a comment, or converting a commented list to a mapping).
+
+    Output the COMPLETE file content, never a diff. Change ONLY what is
+    needed to satisfy the listed violations: preserve every value, every
+    comment (in the same position relative to the line it annotates), and
+    every key not mentioned by a violation, verbatim. This must be a pure
+    reformatting — the parsed meaning of the file (images, environment
+    values, port mappings, volumes, networks) must be identical before and
+    after. If you cannot satisfy a violation without touching something the
+    canonical form doesn't call for, leave that specific violation
+    unresolved rather than guess, and reflect it in a lower confidence score.
+
+    IMPORTANT: Never include real credentials, tokens, or secrets in the
+    output. If a value already looks like a hardcoded credential, leave it
+    exactly as it was in the input — do not invent a placeholder; that is a
+    Tier 2 finding for a human to fix, not something this rewrite handles."""
+
+    current_file: str = dspy.InputField(desc="Current file content verbatim")
+    file_path: str = dspy.InputField(desc="Path of the file being normalized")
+    violations: str = dspy.InputField(
+        desc="Comma-separated rule IDs (e.g. 'N-006, N-009') this file still violates"
+    )
+    canonical_form: str = dspy.InputField(desc="Summary of the target canonical form's rules")
+
+    normalized_file: str = dspy.OutputField(
+        desc="Complete file content with only the listed violations resolved"
+    )
+    commit_message: str = dspy.OutputField(
+        desc="Conventional commit message, e.g. 'style: normalize ...'"
+    )
+    confidence: float = dspy.OutputField(desc="0.0 to 1.0")
+    reasoning: str = dspy.OutputField(desc="Which violations were resolved and how")
+
+
 class ApplyReviewFeedback(dspy.Signature):
     """Given the current content of a file on an open remediation PR and a
     human reviewer's comment requesting a change, produce the revised file.

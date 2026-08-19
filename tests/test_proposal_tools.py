@@ -70,3 +70,17 @@ async def test_proposal_verify_missing_service(tmp_path):
     server = _server(tmp_path)
     result = await call(server, "proposal_verify", {"service_id": "ghost"})
     assert "error" in result
+
+
+async def test_proposal_normalize_read_only_when_health_checks_fail(tmp_path):
+    server = _server(tmp_path)
+    result = await call(server, "proposal_normalize", {})
+    assert "error" in result
+    assert "read-only mode" in result["error"]
+
+
+async def test_proposal_normalize_disabled_returns_error(tmp_path):
+    server = _healthy_server(tmp_path)
+    result = await call(server, "proposal_normalize", {})
+    assert "error" in result
+    assert "write path not configured" in result["error"]

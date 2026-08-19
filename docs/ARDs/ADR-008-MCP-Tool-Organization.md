@@ -136,7 +136,9 @@ Conclusion: the mount split is technically unblocked. Not yet implemented
 ## 5. Tier Assignment
 
 Every registered tool, classified by what it does rather than its domain.
-Reconciles exactly to 68 against the per-domain counts in §2.
+Reconciled to 68 against the per-domain counts in §2 as of this ADR's
+original decision; `proposal_normalize` (normalization engine) landed since,
+bringing the total to 69 — see Tier 2 below.
 
 ### Tier 1 — Read-only observability (44 tools)
 
@@ -165,14 +167,14 @@ discovery). None of the five carry a `read_only` gate in
 regardless of tier, not just Tier 1 — it's what explains why a Tier 2 tool
 just returned a read-only error.
 
-### Tier 2 — Git-write / curated-field mutation / live-infra execution (18 tools)
+### Tier 2 — Git-write / curated-field mutation / live-infra execution (19 tools)
 
 The actual Degree-3 Agency surface: a wrong call here has a durable,
 human-facing consequence even though it's PR-gated.
 
 | Domain | Tools |
 |---|---|
-| Proposals + adoption (9, unsplit) | `proposal_create`, `proposal_list_open`, `proposal_get`, `proposal_cancel`, `proposal_verify`, `proposal_adopt_service`, `proposal_adopt_service_finalize`, `proposal_adopt_service_cancel`, `proposal_adopt_service_get` |
+| Proposals + adoption (10, unsplit) | `proposal_create`, `proposal_list_open`, `proposal_get`, `proposal_cancel`, `proposal_verify`, `proposal_normalize`, `proposal_adopt_service`, `proposal_adopt_service_finalize`, `proposal_adopt_service_cancel`, `proposal_adopt_service_get` |
 | Registry mutation (4) | `registry_add_service`, `registry_update_service`, `registry_delete_service`, `service_link_authentik` |
 | Hardware mutation (4) | `hardware-add-node`, `hardware-update-node`, `hardware-delete-node`, `hardware-link-service` |
 | Hardware live discovery (1) | `hardware-discover-now` |

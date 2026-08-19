@@ -123,9 +123,21 @@ class Settings(BaseSettings):
     # able to steer a committed change.
     proposal_comment_allowed_users: str = Field(default="")
 
-    # Normalization (opt-in; engine deferred to a later Phase 8 increment).
+    # Normalization (opt-in) — scans nodes/*/*/compose.yaml against
+    # docs/specs/spec-compose-normal-form.md and opens one PR per node with
+    # any safe formatting fixes. Reuses GIT_*; always a separate PR/label
+    # from security proposals, never bundled with one.
     normalization_enabled: bool = Field(default=False)
     normalization_schedule: str = Field(default="weekly")
+    normalization_path_glob: str = Field(default="nodes/*/*/compose.yaml")
+    # Caps the diff size of a single node's PR on a first run against a messy repo.
+    normalization_max_files_per_pr: int = Field(default=25)
+    normalization_dry_run: bool = Field(default=False)
+    # N-100 (misnamed compose file rename) makes a stack visible to the
+    # deploy pipeline for the first time — opt in separately from the rest
+    # of normalization, which is purely cosmetic.
+    normalization_rename_misnamed: bool = Field(default=False)
+    normalization_label: str = Field(default="normalization")
 
     # Brownfield adoption (Phase 7) — opt-in. Reuses SSH_KEY_PATH (the same key
     # Ansible uses to reach workload nodes) to inspect a live container and its
