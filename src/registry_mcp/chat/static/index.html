@@ -376,6 +376,14 @@
           i = end + 2;
           continue;
         }
+        // Unterminated (or empty, "****") "**": both asterisks are
+        // literal. Consume them together — falling through one char at a
+        // time would let the second "*" be picked up fresh as an italic
+        // opener/closer on the next iteration (e.g. "**a*" would wrongly
+        // italicize "a" instead of staying fully literal).
+        buf += "**";
+        i += 2;
+        continue;
       }
 
       if (ch === "*" && text[i + 1] !== "*") {
@@ -390,7 +398,10 @@
           if (text[j] === "*" && text[j + 1] === "*") {
             const innerEnd = text.indexOf("**", j + 2);
             if (innerEnd === -1) {
-              j += 1;
+              // Unterminated nested "**": skip both chars as a unit, same
+              // reasoning as the top-level bold check above — neither may
+              // be reinterpreted as the italic closer on its own.
+              j += 2;
               continue;
             }
             j = innerEnd + 2;
