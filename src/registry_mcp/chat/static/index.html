@@ -359,6 +359,18 @@
   // the PR this shipped in). Marker-delimited so
   // tests/chat_markdown.test.mjs (`node --test`) can extract this source
   // and exercise it directly without a build step.
+  //
+  // Manually QA'd in a real Chromium browser (Playwright) against this
+  // exact file, in addition to the node --test suite: the sample
+  // discovery-status-shaped response (headings, bold/italic, a table,
+  // inline code, a fenced code block, a link, an ordered list) renders
+  // correctly in both light and dark themes via the existing --bg/--text/
+  // --border/--accent custom properties, with no new per-theme CSS
+  // needed; and four adversarial inputs (a literal <script> tag, a
+  // javascript: link, a data: link with an embedded <script>, and an
+  // onerror-bearing <img> tag) all render as inert escaped text with zero
+  // script execution, zero dialogs, and zero on* attributes anywhere in
+  // the built DOM. Full results in the PR description.
 
   // ---- markdown-render:start ----
 
