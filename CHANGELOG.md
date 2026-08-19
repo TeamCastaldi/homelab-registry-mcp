@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.23.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.22.0...v0.23.0) (2026-08-19)
+
+
+### Features
+
+* **chat:** reword discovery chip, drop hardware capacity, alphabetize ([80cca98](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/80cca983462196f98c266a305d7ecd460a2e6fdb))
+
+
+### Bug Fixes
+
+* **chat:** improve troubleshooting guidance for first-line help desk tech ([9fe1e94](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/9fe1e94eeaa9378fac40fa2a058fb22dd3981723))
+* **chat:** make discovery chip's fallback deterministic ([4d28618](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/4d28618e46c6b7310dc62c31cd8d1a12af7e1589))
+
 ## [0.22.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.21.0...v0.22.0) (2026-08-18)
 
 
