@@ -89,6 +89,7 @@ class Reasoner:
         self._patch_lm: Any = None
         self._revise: Any = None
         self._detect_secrets: Any = None
+        self._normalize: Any = None
 
     # -- lazy setup --------------------------------------------------------
     def _ensure(self) -> None:
@@ -101,6 +102,7 @@ class Reasoner:
             DetectHardcodedSecrets,
             GenerateRemediationPatch,
             InferServiceMetadata,
+            NormalizeConfigFile,
             ResolveServiceIdentity,
             SummarizeAccessAudit,
         )
@@ -129,6 +131,9 @@ class Reasoner:
         self._detect_secrets = dspy.ChainOfThought(DetectHardcodedSecrets)
         # Also emits a whole file; reuse the patch LM's larger token budget.
         self._detect_secrets.set_lm(self._patch_lm)
+        self._normalize = dspy.ChainOfThought(NormalizeConfigFile)
+        # Also emits a whole file; reuse the patch LM's larger token budget.
+        self._normalize.set_lm(self._patch_lm)
         self._load_compiled()
         self._configured = True
         _log.info("reasoning_configured", model=self._settings.dspy_model)
@@ -147,6 +152,7 @@ class Reasoner:
             (self._patch, "remediation_patch.json"),
             (self._revise, "apply_review_feedback.json"),
             (self._detect_secrets, "detect_hardcoded_secrets.json"),
+            (self._normalize, "normalize_config.json"),
         ):
             full = os.path.join(path, fname)
             if not os.path.exists(full):
@@ -368,6 +374,45 @@ class Reasoner:
         return {
             "sanitized_compose": getattr(pred, "sanitized_compose", "") or "",
             "detected_secret_keys": list(getattr(pred, "detected_secret_keys", []) or []),
+            "confidence": _as_float(getattr(pred, "confidence", 0.0)),
+            "reasoning": getattr(pred, "reasoning", "") or "",
+        }
+
+    def normalize_config(
+        self, *, current_file: str, file_path: str, violations: str, canonical_form: str
+    ) -> dict | None:
+        """Finish the Tier 1 formatting rules the deterministic formatter
+        (``normalization/formatter.py``) couldn't safely apply on its own.
+
+        Returns the raw module outputs (including ``confidence``) so
+        ``NormalizationGenerator`` can enforce its own gate — including the
+        normalization-specific equivalence guarantee, which this layer
+        doesn't check; returns None only when the reasoning layer is
+        disabled or the call errors. Same no-fallback rule as
+        ``generate_remediation_patch``: a None or low-confidence result must
+        be rejected, never hand-applied.
+        """
+        if not self.enabled:
+            return None
+        self._ensure()
+        try:
+            pred = self._normalize(
+                current_file=current_file,
+                file_path=file_path,
+                violations=violations,
+                canonical_form=canonical_form,
+            )
+        except Exception as exc:
+            _log.warning(
+                "reasoning_failed",
+                op="normalize_config",
+                error=str(exc),
+                partial_response=_last_completion(self._patch_lm),
+            )
+            return None
+        return {
+            "normalized_file": getattr(pred, "normalized_file", "") or "",
+            "commit_message": getattr(pred, "commit_message", "") or "",
             "confidence": _as_float(getattr(pred, "confidence", 0.0)),
             "reasoning": getattr(pred, "reasoning", "") or "",
         }

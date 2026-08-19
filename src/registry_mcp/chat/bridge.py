@@ -114,6 +114,9 @@ WRITE_TOOLS: frozenset[str] = frozenset(
         "proposal_create",
         "proposal_cancel",
         "proposal_verify",
+        # tools/proposal.py — opens formatting-only PRs (never a security
+        # fix — always a separate PR/label); same read_only gate as above
+        "proposal_normalize",
     }
 )
 

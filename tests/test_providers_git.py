@@ -16,14 +16,19 @@ class FakeGitea:
     """Minimal in-memory Gitea API over an httpx MockTransport."""
 
     def __init__(
-        self, files: dict[str, str] | None = None, comments: dict[int, list] | None = None
+        self,
+        files: dict[str, str] | None = None,
+        comments: dict[int, list] | None = None,
+        truncated: bool = False,
     ):
         self.files = dict(files or {})
         self.branches: list[dict] = []
         self.commits: list[dict] = []
+        self.deletes: list[dict] = []
         self.pulls: list[dict] = []
         self.labels = [{"id": 7, "name": "homelab-registry-mcp"}]
         self.comments: dict[int, list[dict]] = dict(comments or {})
+        self.truncated = truncated
         self._next_pr = 41
 
     def transport(self) -> httpx.MockTransport:
@@ -32,6 +37,14 @@ class FakeGitea:
     def _handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
         method = request.method
+        if method == "GET" and "/git/trees/" in path:
+            return httpx.Response(
+                200,
+                json={
+                    "tree": [{"path": p, "type": "blob"} for p in self.files],
+                    "truncated": self.truncated,
+                },
+            )
         if method == "POST" and path.endswith("/branches"):
             body = _json(request)
             self.branches.append(body)
@@ -50,6 +63,11 @@ class FakeGitea:
                 self.files[file_path] = base64.b64decode(body["content"]).decode()
                 self.commits.append({"path": file_path, **body})
                 return httpx.Response(200, json={"content": {"sha": "newsha"}})
+            if method == "DELETE":
+                body = _json(request)
+                self.files.pop(file_path, None)
+                self.deletes.append({"path": file_path, **body})
+                return httpx.Response(200, json={})
         if path.endswith("/labels"):
             if method == "GET":
                 return httpx.Response(200, json=self.labels)
@@ -123,6 +141,37 @@ async def test_commit_new_file_omits_sha():
     fake = FakeGitea()
     await _provider(fake).commit_file(REPO, "new.yaml", "a: 1\n", "patch/x", "feat: add")
     assert "sha" not in fake.commits[-1]
+
+
+async def test_list_files_returns_blob_paths():
+    fake = FakeGitea(
+        files={
+            "nodes/pi/plex/compose.yaml": "a: 1\n",
+            "nodes/pi/sonarr/compose.yaml": "a: 1\n",
+        }
+    )
+    paths = await _provider(fake).list_files(REPO, "main")
+    assert sorted(paths) == ["nodes/pi/plex/compose.yaml", "nodes/pi/sonarr/compose.yaml"]
+
+
+async def test_list_files_raises_on_truncated_tree():
+    fake = FakeGitea(files={"a.yaml": "x\n"}, truncated=True)
+    with pytest.raises(GitError):
+        await _provider(fake).list_files(REPO, "main")
+
+
+async def test_delete_file_removes_existing_file():
+    fake = FakeGitea(files={"old.yaml": "a: 1\n"})
+    await _provider(fake).delete_file(REPO, "old.yaml", "patch/x", "chore: remove")
+    assert "old.yaml" not in fake.files
+    assert fake.deletes[-1]["branch"] == "patch/x"
+    assert fake.deletes[-1]["sha"] == "deadbeef"
+
+
+async def test_delete_file_missing_file_is_a_noop():
+    fake = FakeGitea()
+    await _provider(fake).delete_file(REPO, "nope.yaml", "patch/x", "chore: remove")
+    assert fake.deletes == []
 
 
 async def test_open_pr_resolves_label_and_returns_url():
@@ -206,14 +255,20 @@ class FakeGitHub:
     """Minimal in-memory GitHub REST API over an httpx MockTransport."""
 
     def __init__(
-        self, files: dict[str, str] | None = None, comments: dict[int, list] | None = None
+        self,
+        files: dict[str, str] | None = None,
+        comments: dict[int, list] | None = None,
+        truncated: bool = False,
     ):
         self.files = dict(files or {})
         self.refs: list[dict] = []
         self.commits: list[dict] = []
+        self.deletes: list[dict] = []
         self.pulls: list[dict] = []
         self.labels_added: list[dict] = []
         self.comments: dict[int, list[dict]] = dict(comments or {})
+        self.tree_requests: list[str] = []
+        self.truncated = truncated
         self._next_pr = 41
 
     def transport(self) -> httpx.MockTransport:
@@ -222,6 +277,15 @@ class FakeGitHub:
     def _handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
         method = request.method
+        if method == "GET" and "/git/trees/" in path:
+            self.tree_requests.append(path.rsplit("/git/trees/", 1)[1])
+            return httpx.Response(
+                200,
+                json={
+                    "tree": [{"path": p, "type": "blob"} for p in self.files],
+                    "truncated": self.truncated,
+                },
+            )
         # Resolve a branch ref to a commit sha (used before forking a new branch).
         if method == "GET" and "/git/ref/heads/" in path:
             return httpx.Response(200, json={"object": {"sha": "basesha"}})
@@ -243,6 +307,11 @@ class FakeGitHub:
                 self.files[file_path] = base64.b64decode(body["content"]).decode()
                 self.commits.append({"path": file_path, **body})
                 return httpx.Response(200, json={"content": {"sha": "newsha"}})
+            if method == "DELETE":
+                body = _json(request)
+                self.files.pop(file_path, None)
+                self.deletes.append({"path": file_path, **body})
+                return httpx.Response(200, json={})
         if path.endswith("/pulls") and method == "POST":
             body = _json(request)
             self._next_pr += 1
@@ -402,3 +471,36 @@ async def test_github_list_pr_comments_paginates_past_first_page():
     comments = await _gh(fake).list_pr_comments(REPO, 41)
     assert len(comments) == 150
     assert [c["id"] for c in comments] == list(range(1, 151))
+
+
+async def test_github_list_files_returns_blob_paths():
+    fake = FakeGitHub(files={"nodes/pi/plex/compose.yaml": "a: 1\n"})
+    paths = await _gh(fake).list_files(REPO, "main")
+    assert paths == ["nodes/pi/plex/compose.yaml"]
+
+
+async def test_github_list_files_resolves_branch_to_a_commit_sha():
+    # The trees endpoint is called with the resolved commit sha, not the
+    # bare branch name — see PR #104 review comment on this method.
+    fake = FakeGitHub(files={"a.yaml": "x\n"})
+    await _gh(fake).list_files(REPO, "main")
+    assert fake.tree_requests == ["basesha"]
+
+
+async def test_github_list_files_raises_on_truncated_tree():
+    fake = FakeGitHub(files={"a.yaml": "x\n"}, truncated=True)
+    with pytest.raises(GitError):
+        await _gh(fake).list_files(REPO, "main")
+
+
+async def test_github_delete_file_removes_existing_file():
+    fake = FakeGitHub(files={"old.yaml": "a: 1\n"})
+    await _gh(fake).delete_file(REPO, "old.yaml", "patch/x", "chore: remove")
+    assert "old.yaml" not in fake.files
+    assert fake.deletes[-1]["branch"] == "patch/x"
+
+
+async def test_github_delete_file_missing_file_is_a_noop():
+    fake = FakeGitHub()
+    await _gh(fake).delete_file(REPO, "nope.yaml", "patch/x", "chore: remove")
+    assert fake.deletes == []

@@ -30,9 +30,13 @@ class GitProvider(Protocol):
 
     async def read_file(self, repo: str, path: str, ref: str) -> str: ...
 
+    async def list_files(self, repo: str, ref: str) -> list[str]: ...
+
     async def commit_file(
         self, repo: str, path: str, content: str, branch: str, message: str
     ) -> None: ...
+
+    async def delete_file(self, repo: str, path: str, branch: str, message: str) -> None: ...
 
     async def open_pr(
         self, repo: str, title: str, body: str, branch: str, base: str, label: str | None = None

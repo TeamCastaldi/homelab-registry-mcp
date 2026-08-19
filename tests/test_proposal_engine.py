@@ -43,6 +43,7 @@ class FakeGit:
         self.files = files or {}
         self.branches = []
         self.commits = []
+        self.deletes = []
         self.opened = []
         self.closed = []
         self.comments = comments or {}
@@ -50,12 +51,19 @@ class FakeGit:
     async def read_file(self, repo, path, ref):
         return self.files.get(path, "services: {}\n")
 
+    async def list_files(self, repo, ref):
+        return list(self.files.keys())
+
     async def create_branch(self, repo, branch, base):
         self.branches.append(branch)
 
     async def commit_file(self, repo, path, content, branch, message):
         self.commits.append({"path": path, "content": content, "branch": branch})
         self.files[path] = content
+
+    async def delete_file(self, repo, path, branch, message):
+        self.deletes.append({"path": path, "branch": branch})
+        self.files.pop(path, None)
 
     async def open_pr(self, repo, title, body, branch, base, label=None):
         number = 100 + len(self.opened)

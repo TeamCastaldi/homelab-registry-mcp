@@ -94,6 +94,27 @@ class GitHubGitProvider:
             return base64.b64decode(content).decode("utf-8")
         return content
 
+    async def list_files(self, repo: str, ref: str) -> list[str]:
+        """List every blob path in the repo at ``ref`` via one recursive tree
+        call. Raises ``GitError`` when GitHub reports the tree as truncated
+        (>100,000 entries or >7MB) rather than silently returning a partial
+        listing — a normalization sweep must never scan less than the whole
+        repo without knowing it.
+
+        Resolves ``ref`` (always a branch name here — the caller passes
+        ``GIT_BASE_BRANCH``) to a commit SHA first via the same ref-heads
+        lookup ``create_branch`` uses, rather than handing the trees
+        endpoint a bare branch name directly."""
+        sha = await self._branch_sha(repo, ref)
+        response = await self._request(
+            "GET", f"repos/{repo}/git/trees/{sha}", params={"recursive": "1"}
+        )
+        self._raise_for(response, "list_files")
+        payload = response.json()
+        if payload.get("truncated"):
+            raise GitError(f"list_files: tree for {repo}@{ref} was truncated by the API")
+        return [item["path"] for item in payload.get("tree", []) if item.get("type") == "blob"]
+
     async def _file_sha(self, repo: str, path: str, branch: str) -> str | None:
         response = await self._request(
             "GET", f"repos/{repo}/contents/{path}", params={"ref": branch}
@@ -117,6 +138,17 @@ class GitHubGitProvider:
         # PUT creates or updates depending on whether sha is present.
         response = await self._request("PUT", f"repos/{repo}/contents/{path}", json=body)
         self._raise_for(response, "commit_file")
+
+    async def delete_file(self, repo: str, path: str, branch: str, message: str) -> None:
+        sha = await self._file_sha(repo, path, branch)
+        if sha is None:  # already gone on this branch — nothing to do
+            return
+        response = await self._request(
+            "DELETE",
+            f"repos/{repo}/contents/{path}",
+            json={"message": message, "sha": sha, "branch": branch},
+        )
+        self._raise_for(response, "delete_file")
 
     async def _add_label(self, repo: str, number: int, label: str) -> None:
         """Best-effort: attach a label to the PR (PRs are issues for labelling)."""

@@ -23,6 +23,7 @@ from registry_mcp.integrations.authentik import register_authentik_tools
 from registry_mcp.integrations.komodo import register_komodo_tools
 from registry_mcp.integrations.traefik import register_traefik_tools
 from registry_mcp.logging import configure_logging, get_logger, install_tool_call_logging
+from registry_mcp.normalization import NormalizationEngine, NormalizationGenerator, schedule_seconds
 from registry_mcp.proposal import AdoptionGenerator, PatchGenerator, ProposalEngine, ProposalStore
 from registry_mcp.providers.git import GitProvider, build_git_provider
 from registry_mcp.providers.notification import build_notification_provider
@@ -62,6 +63,25 @@ def build_proposal_engine(
     return engine, proposals, git
 
 
+def build_normalization_engine(
+    settings: Settings, store: RegistryStore, reasoner: Reasoner, git: GitProvider | None
+) -> NormalizationEngine:
+    """Assemble the normalization engine, reusing the proposal store (same
+    `Proposal` table, `finding_type=normalization`) and Git provider — kept
+    as its own engine, never merged into `ProposalEngine`, so a normalization
+    PR can never bundle a security remediation."""
+    proposals = ProposalStore(store.engine)
+    return NormalizationEngine(
+        settings=settings,
+        proposals=proposals,
+        generator=NormalizationGenerator(
+            reasoner, threshold=settings.proposal_confidence_threshold
+        ),
+        notifier=build_notification_provider(settings),
+        git=git,
+    )
+
+
 def build_server(settings: Settings | None = None) -> FastMCP:
     """Construct the FastMCP server and register its tools."""
     settings = settings or get_settings()
@@ -78,6 +98,7 @@ def build_server(settings: Settings | None = None) -> FastMCP:
         )
     reasoner = build_reasoner(settings)
     proposal_engine, proposal_store, git_provider = build_proposal_engine(settings, store, reasoner)
+    normalization_engine = build_normalization_engine(settings, store, reasoner, git_provider)
     adoption_store = AdoptionDraftStore(store.engine)
     # Pending drafts hold captured live secret values in the (non-git-crypt)
     # registry SQLite until the operator answers — sweep anything left over
@@ -124,7 +145,13 @@ def build_server(settings: Settings | None = None) -> FastMCP:
     register_linking_tools(mcp, store, settings, hardware_store=hardware_store)
     register_hardware_tools(mcp, store, hardware_store, settings, read_only=read_only)
     register_proposal_tools(
-        mcp, proposal_engine, proposal_store, engine, store, read_only=read_only
+        mcp,
+        proposal_engine,
+        proposal_store,
+        engine,
+        store,
+        normalization_engine,
+        read_only=read_only,
     )
     register_secrets_tools(mcp, settings, read_only=read_only)
     register_adoption_tools(
@@ -191,7 +218,10 @@ def main() -> None:
     async def _streamable_with_scheduler() -> None:
         _store = RegistryStore(settings.registry_db_path)
         _reasoner = build_reasoner(settings)
-        _proposal_engine, _, _ = build_proposal_engine(settings, _store, _reasoner)
+        _proposal_engine, _, _git_provider = build_proposal_engine(settings, _store, _reasoner)
+        _normalization_engine = build_normalization_engine(
+            settings, _store, _reasoner, _git_provider
+        )
         _engine = DiscoveryEngine(
             _store,
             build_sources(settings),
@@ -223,6 +253,22 @@ def main() -> None:
             get_logger("proposal.engine").info(
                 "comment_poll_scheduled",
                 interval_seconds=settings.proposal_comment_poll_interval_seconds,
+            )
+
+        # Normalization sweep: same three-part gate as comment polling —
+        # opt-in flag, write path configured, and never in read-only mode.
+        if settings.normalization_enabled and _normalization_engine.configured and not _read_only:
+            if scheduler is None:
+                scheduler = AsyncIOScheduler()
+            scheduler.add_job(
+                _normalization_engine.run_sweep,
+                "interval",
+                seconds=schedule_seconds(settings.normalization_schedule),
+                id="normalization-sweep",
+                replace_existing=True,
+            )
+            get_logger("normalization.engine").info(
+                "normalization_sweep_scheduled", schedule=settings.normalization_schedule
             )
 
         if scheduler is not None:
