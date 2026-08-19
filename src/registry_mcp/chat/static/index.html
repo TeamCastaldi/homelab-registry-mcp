@@ -574,10 +574,144 @@
     return { type: "root", children: mdParseBlocks(String(text)) };
   }
 
+  // Phase 2 — DOM builder: node-description tree in, real DOM nodes out.
+  // One small function per node type, each using createElement/textContent
+  // only — never innerHTML — recursing into children the same way. `doc`
+  // is passed in rather than closed over so this stays testable against a
+  // fake document with no real DOM available (see
+  // tests/chat_markdown.test.mjs).
+  //
+  // The link builder below is the one place in this whole file with a
+  // real security check: an unsafe or unparseable href is never assigned
+  // to `.href` — it silently degrades to plain text instead of erroring
+  // loudly into a broken UI mid-stream.
+
+  function mdBuildInline(doc, node) {
+    if (node.type === "text") {
+      return doc.createTextNode(node.value);
+    }
+    if (node.type === "bold") {
+      const strong = doc.createElement("strong");
+      mdAppendInline(doc, strong, node.children);
+      return strong;
+    }
+    if (node.type === "italic") {
+      const em = doc.createElement("em");
+      mdAppendInline(doc, em, node.children);
+      return em;
+    }
+    if (node.type === "code_inline") {
+      const code = doc.createElement("code");
+      code.textContent = node.value;
+      return code;
+    }
+    if (node.type === "link") {
+      let protocol = null;
+      try {
+        protocol = new URL(node.href).protocol;
+      } catch (e) {
+        protocol = null;
+      }
+      if (protocol === "http:" || protocol === "https:") {
+        const a = doc.createElement("a");
+        a.href = node.href;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        mdAppendInline(doc, a, node.children);
+        return a;
+      }
+      // Unsafe scheme (javascript:, data:, ...) or a malformed href that
+      // threw in the URL constructor: degrade to plain text, never touch
+      // .href.
+      const frag = doc.createDocumentFragment();
+      mdAppendInline(doc, frag, node.children);
+      return frag;
+    }
+    // Unknown inline node type never happens from mdParseInline, but stay
+    // safe-by-construction rather than throwing on unexpected input.
+    return doc.createTextNode("");
+  }
+
+  function mdAppendInline(doc, parent, children) {
+    children.forEach((child) => parent.appendChild(mdBuildInline(doc, child)));
+  }
+
+  function mdBuildBlock(doc, node) {
+    if (node.type === "heading") {
+      const h = doc.createElement("h" + node.level);
+      mdAppendInline(doc, h, node.children);
+      return h;
+    }
+    if (node.type === "paragraph") {
+      const p = doc.createElement("p");
+      mdAppendInline(doc, p, node.children);
+      return p;
+    }
+    if (node.type === "code_block") {
+      const wrap = doc.createElement("div");
+      wrap.className = "code-block";
+      const pre = doc.createElement("pre");
+      const code = doc.createElement("code");
+      code.textContent = node.value;
+      pre.appendChild(code);
+      wrap.appendChild(pre);
+      return wrap;
+    }
+    if (node.type === "list") {
+      const list = doc.createElement(node.ordered ? "ol" : "ul");
+      node.items.forEach((itemChildren) => {
+        const li = doc.createElement("li");
+        mdAppendInline(doc, li, itemChildren);
+        list.appendChild(li);
+      });
+      return list;
+    }
+    if (node.type === "table") {
+      const table = doc.createElement("table");
+      const thead = doc.createElement("thead");
+      const headRow = doc.createElement("tr");
+      node.headers.forEach((cellChildren) => {
+        const th = doc.createElement("th");
+        mdAppendInline(doc, th, cellChildren);
+        headRow.appendChild(th);
+      });
+      thead.appendChild(headRow);
+      table.appendChild(thead);
+      const tbody = doc.createElement("tbody");
+      node.rows.forEach((rowChildren) => {
+        const tr = doc.createElement("tr");
+        rowChildren.forEach((cellChildren) => {
+          const td = doc.createElement("td");
+          mdAppendInline(doc, td, cellChildren);
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      return table;
+    }
+    // Unknown block node type never happens from mdParseBlocks, but stay
+    // safe-by-construction rather than throwing on unexpected input.
+    return doc.createTextNode("");
+  }
+
+  function mdBuildFragment(doc, tree) {
+    const frag = doc.createDocumentFragment();
+    tree.children.forEach((block) => frag.appendChild(mdBuildBlock(doc, block)));
+    return frag;
+  }
+
+  function renderMarkdown(container, text) {
+    container.textContent = "";
+    container.appendChild(mdBuildFragment(document, mdParse(text)));
+  }
+
   // ---- markdown-render:end ----
 
   window.ChatMarkdown = {
     parseMarkdown: mdParse,
+    buildFragment: mdBuildFragment,
+    renderMarkdown: renderMarkdown,
   };
 })();
 </script>
