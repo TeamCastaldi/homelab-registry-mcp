@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.24.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.23.0...v0.24.0) (2026-08-19)
+
+
+### Features
+
+* **normalization:** implement compose file normalization engine ([52a1794](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/52a1794e501770814b2dcb43663aadb0d18d9af8))
+* **normalization:** implement compose file normalization engine ([8ccbe5e](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/8ccbe5ef9df91cd95519f2646922f51f611f40f9))
+
+
+### Bug Fixes
+
+* **normalization:** address Copilot review findings on PR [#104](https://github.com/TeamCastaldi/homelab-registry-mcp/issues/104) ([b01fe95](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/b01fe951a284593fd994dfa6313bda48056aeea1))
+
 ## [0.23.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.22.0...v0.23.0) (2026-08-19)
 
 
