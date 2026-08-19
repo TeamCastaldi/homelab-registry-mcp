@@ -2,7 +2,7 @@
 //
 // Loads the markdown parser/DOM-builder straight out of
 // src/registry_mcp/chat/static/index.html (the single source of truth --
-// nothing here duplicates that logic) by extracting its first
+// nothing here duplicates that logic) by extracting its
 // <script nonce="__CSP_NONCE__"> block and running it in a `vm` context
 // against a hand-rolled fake `document`. No jsdom, no npm dependency: this
 // is deliberately just enough of the DOM surface
@@ -31,24 +31,24 @@ const INDEX_HTML_PATH = path.join(
 // extra whitespace, an added attribute) doesn't break this extraction.
 const OPEN_TAG_RE = /<script\b[^>]*\bnonce="__CSP_NONCE__"[^>]*>/g;
 const CLOSE_TAG = "</script>";
+const MARKDOWN_RENDER_MARKER = "// ---- markdown-render:start ----";
 
-// index.html has two such script tags in document order: the markdown
-// renderer (occurrence 0) and the app wiring (occurrence 1). Only the
-// first is under test here.
-function extractScriptBlock(html, occurrence) {
+// index.html has two nonce'd script tags: the markdown renderer and the
+// app wiring. Selected by content (the marker comment the production file
+// already carries for this exact purpose), not by document position, so
+// this keeps working even if another nonce'd script tag is ever added
+// earlier in the document.
+function extractMarkdownRenderScript(html) {
   OPEN_TAG_RE.lastIndex = 0;
   let match;
-  let count = -1;
   while ((match = OPEN_TAG_RE.exec(html)) !== null) {
-    count += 1;
-    if (count === occurrence) {
-      const start = match.index + match[0].length;
-      const end = html.indexOf(CLOSE_TAG, start);
-      if (end === -1) throw new Error("index.html: unterminated <script> block");
-      return html.slice(start, end);
-    }
+    const start = match.index + match[0].length;
+    const end = html.indexOf(CLOSE_TAG, start);
+    if (end === -1) throw new Error("index.html: unterminated <script> block");
+    const content = html.slice(start, end);
+    if (content.includes(MARKDOWN_RENDER_MARKER)) return content;
   }
-  throw new Error(`index.html: could not find script block #${occurrence}`);
+  throw new Error("index.html: could not find the markdown-render script block");
 }
 
 function escapeText(s) {
@@ -210,7 +210,7 @@ export function collectElements(root) {
 
 export function loadChatMarkdown() {
   const html = fs.readFileSync(INDEX_HTML_PATH, "utf8");
-  const source = extractScriptBlock(html, 0);
+  const source = extractMarkdownRenderScript(html);
   const fakeDoc = makeFakeDocument();
   const sandbox = { window: {}, document: fakeDoc, URL };
   vm.createContext(sandbox);
