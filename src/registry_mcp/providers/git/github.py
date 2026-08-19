@@ -99,9 +99,15 @@ class GitHubGitProvider:
         call. Raises ``GitError`` when GitHub reports the tree as truncated
         (>100,000 entries or >7MB) rather than silently returning a partial
         listing — a normalization sweep must never scan less than the whole
-        repo without knowing it."""
+        repo without knowing it.
+
+        Resolves ``ref`` (always a branch name here — the caller passes
+        ``GIT_BASE_BRANCH``) to a commit SHA first via the same ref-heads
+        lookup ``create_branch`` uses, rather than handing the trees
+        endpoint a bare branch name directly."""
+        sha = await self._branch_sha(repo, ref)
         response = await self._request(
-            "GET", f"repos/{repo}/git/trees/{ref}", params={"recursive": "1"}
+            "GET", f"repos/{repo}/git/trees/{sha}", params={"recursive": "1"}
         )
         self._raise_for(response, "list_files")
         payload = response.json()

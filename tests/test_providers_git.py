@@ -267,6 +267,7 @@ class FakeGitHub:
         self.pulls: list[dict] = []
         self.labels_added: list[dict] = []
         self.comments: dict[int, list[dict]] = dict(comments or {})
+        self.tree_requests: list[str] = []
         self.truncated = truncated
         self._next_pr = 41
 
@@ -277,6 +278,7 @@ class FakeGitHub:
         path = request.url.path
         method = request.method
         if method == "GET" and "/git/trees/" in path:
+            self.tree_requests.append(path.rsplit("/git/trees/", 1)[1])
             return httpx.Response(
                 200,
                 json={
@@ -475,6 +477,14 @@ async def test_github_list_files_returns_blob_paths():
     fake = FakeGitHub(files={"nodes/pi/plex/compose.yaml": "a: 1\n"})
     paths = await _gh(fake).list_files(REPO, "main")
     assert paths == ["nodes/pi/plex/compose.yaml"]
+
+
+async def test_github_list_files_resolves_branch_to_a_commit_sha():
+    # The trees endpoint is called with the resolved commit sha, not the
+    # bare branch name — see PR #104 review comment on this method.
+    fake = FakeGitHub(files={"a.yaml": "x\n"})
+    await _gh(fake).list_files(REPO, "main")
+    assert fake.tree_requests == ["basesha"]
 
 
 async def test_github_list_files_raises_on_truncated_tree():

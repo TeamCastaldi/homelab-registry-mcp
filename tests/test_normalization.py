@@ -4,7 +4,7 @@ network — same duck-typed style as ``test_proposal_engine.py``.
 """
 
 from conftest import IsolatedSettings
-from registry_mcp.normalization.engine import NormalizationEngine
+from registry_mcp.normalization.engine import NormalizationEngine, schedule_seconds
 from registry_mcp.normalization.formatter import normalize as format_file
 from registry_mcp.normalization.generator import NormalizationGenerator
 from registry_mcp.normalization.rules import canonical_projection, check, is_equivalent
@@ -12,6 +12,33 @@ from registry_mcp.normalization.scanner import scan
 from registry_mcp.proposal.store import ProposalStore
 from registry_mcp.providers.git import GitError, OpenedPR
 from registry_mcp.registry import RegistryStore
+
+# ---------------------------------------------------------------------------
+# engine.py: schedule_seconds
+# ---------------------------------------------------------------------------
+
+
+def test_schedule_seconds_named_presets():
+    assert schedule_seconds("daily") == 86400
+    assert schedule_seconds("weekly") == 604800
+    assert schedule_seconds("monthly") == 2592000
+
+
+def test_schedule_seconds_raw_positive_value():
+    assert schedule_seconds("120") == 120
+
+
+def test_schedule_seconds_falls_back_to_weekly_for_zero():
+    assert schedule_seconds("0") == 604800
+
+
+def test_schedule_seconds_falls_back_to_weekly_for_negative():
+    assert schedule_seconds("-5") == 604800
+
+
+def test_schedule_seconds_falls_back_to_weekly_for_garbage():
+    assert schedule_seconds("bogus") == 604800
+
 
 # ---------------------------------------------------------------------------
 # rules.py

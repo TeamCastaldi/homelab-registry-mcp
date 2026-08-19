@@ -36,15 +36,19 @@ _SCHEDULE_SECONDS = {"daily": 86400, "weekly": 604800, "monthly": 2592000}
 
 def schedule_seconds(schedule: str) -> int:
     """Map ``NORMALIZATION_SCHEDULE`` to an APScheduler interval in seconds.
-    Accepts the named presets, a raw integer-seconds string, or falls back
-    to weekly for anything else."""
+    Accepts the named presets or a raw positive-integer-seconds string;
+    falls back to weekly for anything else — including zero or negative,
+    which APScheduler's interval trigger rejects outright at ``add_job()``."""
     if schedule in _SCHEDULE_SECONDS:
         return _SCHEDULE_SECONDS[schedule]
     try:
-        return int(schedule)
+        seconds = int(schedule)
     except (TypeError, ValueError):
+        seconds = None
+    if seconds is None or seconds <= 0:
         _log.warning("normalization_schedule_invalid", schedule=schedule, fallback="weekly")
         return _SCHEDULE_SECONDS["weekly"]
+    return seconds
 
 
 @dataclass
