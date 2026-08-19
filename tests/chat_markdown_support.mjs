@@ -26,24 +26,29 @@ const INDEX_HTML_PATH = path.join(
   "index.html"
 );
 
-const OPEN_TAG = '<script nonce="__CSP_NONCE__">';
+// Matches the opening tag by its nonce attribute rather than an exact
+// string, so a harmless index.html formatting change (attribute order,
+// extra whitespace, an added attribute) doesn't break this extraction.
+const OPEN_TAG_RE = /<script\b[^>]*\bnonce="__CSP_NONCE__"[^>]*>/g;
 const CLOSE_TAG = "</script>";
 
 // index.html has two such script tags in document order: the markdown
 // renderer (occurrence 0) and the app wiring (occurrence 1). Only the
 // first is under test here.
 function extractScriptBlock(html, occurrence) {
-  let pos = -1;
-  for (let n = 0; n <= occurrence; n++) {
-    pos = html.indexOf(OPEN_TAG, pos + 1);
-    if (pos === -1) {
-      throw new Error(`index.html: could not find script block #${occurrence}`);
+  OPEN_TAG_RE.lastIndex = 0;
+  let match;
+  let count = -1;
+  while ((match = OPEN_TAG_RE.exec(html)) !== null) {
+    count += 1;
+    if (count === occurrence) {
+      const start = match.index + match[0].length;
+      const end = html.indexOf(CLOSE_TAG, start);
+      if (end === -1) throw new Error("index.html: unterminated <script> block");
+      return html.slice(start, end);
     }
   }
-  const start = pos + OPEN_TAG.length;
-  const end = html.indexOf(CLOSE_TAG, start);
-  if (end === -1) throw new Error("index.html: unterminated <script> block");
-  return html.slice(start, end);
+  throw new Error(`index.html: could not find script block #${occurrence}`);
 }
 
 function escapeText(s) {

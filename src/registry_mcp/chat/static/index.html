@@ -484,7 +484,10 @@
             nodes.push({
               type: "link",
               href: text.slice(closeBracket + 2, j),
-              children: [{ type: "text", value: text.slice(i + 1, closeBracket) }],
+              // Recursively parsed, same as every other container (headings,
+              // table cells, list items, paragraphs) -- so `[**bold**](url)`
+              // renders bold text inside the link instead of literal `**`.
+              children: mdParseInline(text.slice(i + 1, closeBracket)),
             });
             i = j + 1;
             continue;
@@ -747,7 +750,10 @@
 
   function renderMarkdown(container, text) {
     container.textContent = "";
-    container.appendChild(mdBuildFragment(document, mdParse(text)));
+    // container.ownerDocument, not the closed-over `document`: consistent
+    // with every builder function above taking `doc` as a parameter rather
+    // than assuming a single global document.
+    container.appendChild(mdBuildFragment(container.ownerDocument || document, mdParse(text)));
   }
 
   // ---- markdown-render:end ----
