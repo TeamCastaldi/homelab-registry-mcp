@@ -378,8 +378,30 @@
         }
       }
 
-      if (ch === "*") {
-        const end = text.indexOf("*", i + 1);
+      if (ch === "*" && text[i + 1] !== "*") {
+        // Scan for a closing single `*`, but treat any `**...**` run
+        // encountered along the way as an atomic (nested bold) unit rather
+        // than letting its first `*` prematurely close the italic span —
+        // otherwise `*a **b** c*` closes after "a " instead of spanning
+        // the whole thing.
+        let j = i + 1;
+        let end = -1;
+        while (j < n) {
+          if (text[j] === "*" && text[j + 1] === "*") {
+            const innerEnd = text.indexOf("**", j + 2);
+            if (innerEnd === -1) {
+              j += 1;
+              continue;
+            }
+            j = innerEnd + 2;
+            continue;
+          }
+          if (text[j] === "*") {
+            end = j;
+            break;
+          }
+          j += 1;
+        }
         if (end !== -1 && end > i + 1) {
           flush();
           nodes.push({ type: "italic", children: mdParseInline(text.slice(i + 1, end)) });
@@ -423,7 +445,11 @@
   }
 
   function mdIsTableSeparator(line) {
-    return /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/.test(line);
+    // Require 3+ dashes per cell (the "---" convention virtually every
+    // markdown table — including model output — actually uses), not GFM's
+    // bare minimum of 1. A single dash is loose enough to misfire on
+    // ordinary prose containing a "|" (e.g. "cost - | benefit -").
+    return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/.test(line);
   }
 
   function mdSplitTableRow(line) {
