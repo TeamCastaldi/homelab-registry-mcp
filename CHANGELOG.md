@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.25.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.24.0...v0.25.0) (2026-08-19)
+
+
+### Features
+
+* **chat:** add DOM builder for safe markdown rendering (Phase 2) ([4e7dfdf](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/4e7dfdf08fbcfd03d1e5fe1f2e7a4a22009eddfb))
+* **chat:** add markdown parser for safe chat rendering (Phase 1) ([d11873c](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/d11873cfb2de0c200d80a6916b93143d1f523371))
+* **chat:** safe markdown rendering in /chat ([b765cee](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/b765cee35058a2780a92c0cf244da414915015c7))
+* **chat:** wire safe markdown rendering into the message pipeline (Phase 3) ([96cf2d9](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/96cf2d97c98c9d7e685b9b225f76fbdfa2cffc42))
+
+
+### Bug Fixes
+
+* **chat:** address Copilot review findings on PR [#106](https://github.com/TeamCastaldi/homelab-registry-mcp/issues/106) (Phase 1) ([0b4f1a2](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/0b4f1a229a571efc08e0885dfc319d57dc976b6e))
+* **chat:** address remaining Copilot suppressed-comment findings ([20af287](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/20af2879b7347bfb50b675e73cc589e6d9792180))
+* **chat:** address WCAG link contrast and test log noise findings ([1c9b4ea](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/1c9b4ea6eadf90382e09e73ef1d8ad2aa7fdd030))
+* **chat:** escape &lt; and &gt; in the fake DOM test harness's outerHTML ([625348f](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/625348f9b6f8796510546cb5001a80b187bc6408))
+* **chat:** handle unterminated ** consistently in markdown parser ([2010958](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/201095896e75d95079c134bbf6bb2f2b822fd81f))
+* **chat:** require a pipe in the table separator line itself ([a5d9762](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/a5d9762dce839ab0d65aaaf1ef03da7d7aa5fe6a))
+* **chat:** select the markdown-render test script block by content ([0cf2cfc](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/0cf2cfc2980101b5a594a840a2d8ba44f0b64e43))
+
+
+### Documentation
+
+* **chat:** add rollback plan note (Phase 6) ([e3e2641](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/e3e264189655c79f728ee915fe54c9f056c23064))
+* **chat:** record Phase 5 manual QA results ([62ff057](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/62ff057eae1d010fe47b387769dc3c1608fd2a58))
+* reflect safe markdown chat rendering in CLAUDE.md and ADR-009 ([8d12332](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/8d12332971786f0303876b50db776cfe882219a0))
+
 ## [0.24.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.23.0...v0.24.0) (2026-08-19)
 
 
