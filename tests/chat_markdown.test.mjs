@@ -267,8 +267,12 @@ describe("Track B: adversarial fixtures", () => {
     // Timing is informational only, not asserted: a hard wall-clock
     // threshold is flaky across CI/local environments even when the
     // algorithm itself is fine. The row-count/type checks above are what
-    // actually catches a correctness regression; this line is what you'd
-    // watch if someone introduced an accidental O(n^2).
-    console.log(`    (2000-row table parsed in ${elapsedMs}ms)`);
+    // actually catches a correctness regression. Gated behind an env var
+    // so a normal `node --test` run stays quiet -- run with
+    // VERBOSE_TIMING=1 to see it (what you'd check if someone introduced
+    // an accidental O(n^2)).
+    if (process.env.VERBOSE_TIMING) {
+      console.log(`    (2000-row table parsed in ${elapsedMs}ms)`);
+    }
   });
 });
