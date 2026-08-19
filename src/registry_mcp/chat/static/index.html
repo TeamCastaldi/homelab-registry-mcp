@@ -323,6 +323,226 @@
 <script nonce="__CSP_NONCE__">
 (() => {
   "use strict";
+  // Safe markdown rendering for assistant chat output. Text in, real DOM
+  // nodes out via createElement/textContent only — never innerHTML — so
+  // lab-sourced data a model reply might echo (a Traefik router rule, a
+  // service note, an IdP application name) can never be interpreted as
+  // markup. Kept in its own script block, isolated from the rest of the
+  // app until the wiring commit lands (see index.html's git history /
+  // the PR this shipped in). Marker-delimited so
+  // tests/chat_markdown.test.mjs (`node --test`) can extract this source
+  // and exercise it directly without a build step.
+
+  // ---- markdown-render:start ----
+
+  // Phase 1 — tokenizer/parser: a plain string in, a plain-data node tree
+  // out. No DOM access here by design: a parser bug can never itself be an
+  // injection vector if it never touches the DOM at all. Deliberately no
+  // `_text_` italics: naive underscore-based emphasis corrupts snake_case
+  // identifiers (env vars, hostnames) that show up constantly in this
+  // domain's chat output, so only `*text*` is recognized for italics.
+
+  function mdParseInline(text) {
+    const nodes = [];
+    let buf = "";
+    let i = 0;
+    const n = text.length;
+
+    function flush() {
+      if (buf) {
+        nodes.push({ type: "text", value: buf });
+        buf = "";
+      }
+    }
+
+    while (i < n) {
+      const ch = text[i];
+
+      if (ch === "`") {
+        const end = text.indexOf("`", i + 1);
+        if (end !== -1) {
+          flush();
+          nodes.push({ type: "code_inline", value: text.slice(i + 1, end) });
+          i = end + 1;
+          continue;
+        }
+      }
+
+      if (ch === "*" && text[i + 1] === "*") {
+        const end = text.indexOf("**", i + 2);
+        if (end !== -1 && end > i + 2) {
+          flush();
+          nodes.push({ type: "bold", children: mdParseInline(text.slice(i + 2, end)) });
+          i = end + 2;
+          continue;
+        }
+      }
+
+      if (ch === "*") {
+        const end = text.indexOf("*", i + 1);
+        if (end !== -1 && end > i + 1) {
+          flush();
+          nodes.push({ type: "italic", children: mdParseInline(text.slice(i + 1, end)) });
+          i = end + 1;
+          continue;
+        }
+      }
+
+      if (ch === "[") {
+        const closeBracket = text.indexOf("]", i + 1);
+        if (closeBracket !== -1 && text[closeBracket + 1] === "(") {
+          // Depth-tracked, not indexOf(")"): a URL commonly contains its
+          // own parens (a Wikipedia-style path, a javascript: call), and
+          // stopping at the first ")" would truncate the href.
+          let depth = 1;
+          let j = closeBracket + 2;
+          while (j < n && depth > 0) {
+            if (text[j] === "(") depth++;
+            else if (text[j] === ")") depth--;
+            if (depth === 0) break;
+            j++;
+          }
+          if (depth === 0) {
+            flush();
+            nodes.push({
+              type: "link",
+              href: text.slice(closeBracket + 2, j),
+              children: [{ type: "text", value: text.slice(i + 1, closeBracket) }],
+            });
+            i = j + 1;
+            continue;
+          }
+        }
+      }
+
+      buf += ch;
+      i += 1;
+    }
+    flush();
+    return nodes;
+  }
+
+  function mdIsTableSeparator(line) {
+    return /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/.test(line);
+  }
+
+  function mdSplitTableRow(line) {
+    let s = line.trim();
+    if (s.startsWith("|")) s = s.slice(1);
+    if (s.endsWith("|")) s = s.slice(0, -1);
+    return s.split("|").map((c) => c.trim());
+  }
+
+  function mdStartsBlock(lines, idx) {
+    const line = lines[idx];
+    if (/^#{1,3}\s+/.test(line)) return true;
+    if (/^\s{0,3}(`{3,}|~{3,})/.test(line)) return true;
+    if (/^\s{0,3}([-*+]|\d+\.)\s+/.test(line)) return true;
+    if (line.includes("|") && idx + 1 < lines.length && mdIsTableSeparator(lines[idx + 1])) {
+      return true;
+    }
+    return false;
+  }
+
+  function mdParseBlocks(text) {
+    const lines = text.replace(/\r\n/g, "\n").split("\n");
+    const blocks = [];
+    const n = lines.length;
+    let i = 0;
+
+    while (i < n) {
+      const line = lines[i];
+
+      if (line.trim() === "") {
+        i++;
+        continue;
+      }
+
+      const fenceMatch = line.match(/^\s{0,3}(`{3,}|~{3,})\s*([^`~\s]*)\s*$/);
+      if (fenceMatch) {
+        const fence = fenceMatch[1];
+        const fenceChar = fence[0];
+        const fenceLen = fence.length;
+        const lang = fenceMatch[2] || null;
+        const closeRe = new RegExp("^\\s{0,3}" + fenceChar + "{" + fenceLen + ",}\\s*$");
+        const codeLines = [];
+        i++;
+        while (i < n && !closeRe.test(lines[i])) {
+          codeLines.push(lines[i]);
+          i++;
+        }
+        if (i < n) i++; // consume the closing fence line, if one was found
+        blocks.push({ type: "code_block", lang: lang, value: codeLines.join("\n") });
+        continue;
+      }
+
+      const headingMatch = line.match(/^(#{1,3})\s+(.*)$/);
+      if (headingMatch) {
+        blocks.push({
+          type: "heading",
+          level: headingMatch[1].length,
+          children: mdParseInline(headingMatch[2].trim()),
+        });
+        i++;
+        continue;
+      }
+
+      if (line.includes("|") && i + 1 < n && mdIsTableSeparator(lines[i + 1])) {
+        const headerCells = mdSplitTableRow(line);
+        i += 2;
+        const rowCells = [];
+        while (i < n && lines[i].trim() !== "" && lines[i].includes("|")) {
+          rowCells.push(mdSplitTableRow(lines[i]));
+          i++;
+        }
+        blocks.push({
+          type: "table",
+          headers: headerCells.map((c) => mdParseInline(c)),
+          rows: rowCells.map((row) => row.map((c) => mdParseInline(c))),
+        });
+        continue;
+      }
+
+      const listMatch = line.match(/^\s{0,3}([-*+]|\d+\.)\s+(.*)$/);
+      if (listMatch) {
+        const ordered = /^\d+\.$/.test(listMatch[1]);
+        const items = [];
+        while (i < n) {
+          const m = lines[i].match(/^\s{0,3}([-*+]|\d+\.)\s+(.*)$/);
+          if (!m || /^\d+\.$/.test(m[1]) !== ordered) break;
+          items.push(mdParseInline(m[2]));
+          i++;
+        }
+        blocks.push({ type: "list", ordered: ordered, items: items });
+        continue;
+      }
+
+      const paraLines = [line];
+      i++;
+      while (i < n && lines[i].trim() !== "" && !mdStartsBlock(lines, i)) {
+        paraLines.push(lines[i]);
+        i++;
+      }
+      blocks.push({ type: "paragraph", children: mdParseInline(paraLines.join(" ")) });
+    }
+
+    return blocks;
+  }
+
+  function mdParse(text) {
+    return { type: "root", children: mdParseBlocks(String(text)) };
+  }
+
+  // ---- markdown-render:end ----
+
+  window.ChatMarkdown = {
+    parseMarkdown: mdParse,
+  };
+})();
+</script>
+<script nonce="__CSP_NONCE__">
+(() => {
+  "use strict";
 
   const messagesEl = document.getElementById("messages");
   const hintEl = document.getElementById("hint");
