@@ -371,6 +371,11 @@
   // onerror-bearing <img> tag) all render as inert escaped text with zero
   // script execution, zero dialogs, and zero on* attributes anywhere in
   // the built DOM. Full results in the PR description.
+  //
+  // Rollback: this is a single-file, client-only change with no server
+  // state or migration -- if it ever needs to come out, `git revert` on
+  // the commit(s) touching this file is the whole procedure. No compose
+  // change, no restart-order concern, nothing else to coordinate.
 
   // ---- markdown-render:start ----
 
