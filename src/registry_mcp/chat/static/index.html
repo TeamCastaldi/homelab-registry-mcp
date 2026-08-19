@@ -459,8 +459,12 @@
     // Require 3+ dashes per cell (the "---" convention virtually every
     // markdown table — including model output — actually uses), not GFM's
     // bare minimum of 1. A single dash is loose enough to misfire on
-    // ordinary prose containing a "|" (e.g. "cost - | benefit -").
-    return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/.test(line);
+    // ordinary prose containing a "|" (e.g. "cost - | benefit -"). Also
+    // require an actual "|" in the line: a bare "---" (a Setext heading
+    // underline or horizontal rule) would otherwise match as a valid
+    // single-column separator, misparsing a prose line that happens to
+    // contain "|" followed by one as a table.
+    return line.includes("|") && /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/.test(line);
   }
 
   function mdSplitTableRow(line) {
