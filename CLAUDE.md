@@ -29,7 +29,8 @@ src/registry_mcp/
 │   ├── event.py           # ChangeEvent, DiscoveryEvent (audit log)
 │   ├── hardware.py        # HardwareNode, HardwareChangeEvent, NodeRole, NodeStatus
 │   ├── proposal.py        # Proposal, FindingType, ProposalStatus (Phase 8)
-│   └── adoption.py        # AdoptionDraft, DetectedSecret (Phase 7 brownfield adoption)
+│   ├── adoption.py        # AdoptionDraft, DetectedSecret (Phase 7 brownfield adoption)
+│   └── deletion.py        # PendingDeletion, DeletionEntityType — the math-gate challenge record
 ├── registry/
 │   ├── store.py           # SQLite CRUD + event recording
 │   └── reconcile.py       # Match discovered candidates → registry entries
@@ -57,6 +58,8 @@ src/registry_mcp/
 ├── adoption/              # brownfield adoption (Phase 7) — see docs/plans/updated-phases.md
 │   ├── ssh.py             # SSH docker-inspect/cat helpers against a HardwareNode
 │   └── store.py           # AdoptionDraftStore: the pause point between draft and finalize
+├── deletion/
+│   └── store.py           # DeletionGateStore: math-challenge request/confirm gate, shared by every hard-delete tool
 ├── providers/             # pluggable write-path backends (behind protocols)
 │   ├── git/               # GitProvider protocol + Gitea/GitHub impls + factory
 │   └── notification/      # NotificationProvider protocol + Ntfy/Smtp/Null + factory
@@ -65,11 +68,11 @@ src/registry_mcp/
 │   ├── authentik/         # httpx client + 8 MCP tools + resource + prompt
 │   └── komodo/            # httpx client (Basic Auth) + 7 MCP tools + resource + prompt, read-only
 ├── tools/
-│   ├── registry.py        # CRUD: add/get/list/update/delete service
+│   ├── registry.py        # CRUD: add/get/list/update/delete (math-gated, see deletion/) service
 │   ├── events.py          # query change + discovery logs
 │   ├── discovery.py       # run_now / status / list_stale + connect_traefik / connect_authentik
 │   ├── linking.py         # service_link_authentik + service_get_full_context
-│   ├── hardware.py        # hardware-add-node/get/list/update/delete + link/capacity tools
+│   ├── hardware.py        # hardware-add-node/get/list/update/delete (math-gated) + link/capacity tools
 │   ├── secrets.py         # secrets_status/encrypt/decrypt/add/rotate/list_keys (Phase C)
 │   ├── proposal.py        # proposal_create/list_open/get/cancel/verify/normalize (Phase 8)
 │   └── adoption.py        # proposal_adopt_service[_finalize/_cancel/_get] (Phase 7 brownfield)
@@ -333,6 +336,7 @@ configured is a startup error and the routes are never registered, not an open e
 | `ADOPTION_ENABLED` | `false` | Enables the `proposal_adopt_service*` brownfield adoption tools |
 | `SSH_DEFAULT_USER` | `root` | User for the ad-hoc SSH connection adoption uses to inspect a live container; reuses `SSH_KEY_PATH` |
 | `ADOPTION_DRAFT_TTL_MINUTES` | `60` | How long a drafted adoption may await the operator's keep/rotate decision before expiring |
+| `DELETE_CHALLENGE_TTL_MINUTES` | `5` | How long a `registry_delete_service`/`hardware-delete-node` math challenge stays answerable via its `*_confirm` tool before expiring |
 | `CHAT_ENABLED` | `false` | Registers `/chat` and friends (ADR-009). `true` with neither `CHAT_OIDC_*` nor `CHAT_PASSWORD` set is a startup error — routes stay unregistered, never open |
 | `CHAT_OLLAMA_URL` | unset | e.g. `http://10.0.0.203:11434`; this repo never runs Ollama itself |
 | `CHAT_OLLAMA_MODEL` | `qwen3:14b` | Must support Ollama tool calling |
@@ -367,6 +371,7 @@ Copy `.env.example` to `.env` and fill in the upstream URLs before running local
 
 - **Curated fields are sacred**: `display_name`, `category`, `tags`, `notes` set by humans are never overwritten by discovery. Discovery only updates provenance fields (`host`, `urls`, `traefik_router`, `authentik_app_slug`, `auth_mode`).
 - **Never hard-delete discovered services**: mark `stale=True` after threshold misses.
+- **Every hard delete is math-gated**: `registry_delete_service` and `hardware-delete-node` only request deletion — they return an `x + y = ?` challenge (`deletion/store.py`'s `DeletionGateStore`) that must be solved and passed to `registry_delete_service_confirm`/`hardware-delete-node-confirm` within `DELETE_CHALLENGE_TTL_MINUTES` before the row is actually removed. Not a security boundary (single digits, shown in the challenge itself) — a deliberate human-in-the-loop friction point against an agent or a fat-fingered id deleting something irreversible; a wrong answer invalidates the challenge rather than allowing retries.
 - **Upstream APIs are read-only**: Traefik, Authentik, and Docker are never modified.
 - **The write path writes to Git only**: the proposal layer opens PRs; it never merges them and never writes the filesystem Traefik/Docker watch. The PR + human merge is the safety gate. All write behavior defaults off.
 - **All patch generation goes through DSPy**: `proposal/generator.py` has no rule-based fallback. Low-confidence or invalid-YAML patches become `rejected` Proposals, never commits.

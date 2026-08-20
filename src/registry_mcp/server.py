@@ -14,6 +14,7 @@ from registry_mcp import __version__
 from registry_mcp.adoption import AdoptionDraftStore
 from registry_mcp.chat import register_chat_routes
 from registry_mcp.config import Settings, get_settings
+from registry_mcp.deletion import DeletionGateStore
 from registry_mcp.discovery.engine import DiscoveryEngine, build_sources
 from registry_mcp.discovery.scheduler import build_scheduler
 from registry_mcp.dspy import Reasoner, build_reasoner
@@ -104,6 +105,8 @@ def build_server(settings: Settings | None = None) -> FastMCP:
     # registry SQLite until the operator answers — sweep anything left over
     # from a previous run past its TTL on every startup.
     adoption_store.purge_expired()
+    deletion_gate = DeletionGateStore(store.engine)
+    deletion_gate.purge_expired()
     adoption_generator = AdoptionGenerator(
         reasoner, threshold=settings.proposal_confidence_threshold
     )
@@ -136,14 +139,16 @@ def build_server(settings: Settings | None = None) -> FastMCP:
     )
     install_tool_call_logging(mcp)
 
-    register_registry_tools(mcp, store)
+    register_registry_tools(mcp, store, deletion_gate, settings)
     register_event_tools(mcp, store)
     register_traefik_tools(mcp, settings)
     register_authentik_tools(mcp, settings, reasoner=reasoner)
     register_komodo_tools(mcp, settings)
     register_discovery_tools(mcp, engine)
     register_linking_tools(mcp, store, settings, hardware_store=hardware_store)
-    register_hardware_tools(mcp, store, hardware_store, settings, read_only=read_only)
+    register_hardware_tools(
+        mcp, store, hardware_store, settings, deletion_gate, read_only=read_only
+    )
     register_proposal_tools(
         mcp,
         proposal_engine,

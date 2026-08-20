@@ -149,6 +149,13 @@ class Settings(BaseSettings):
     # in the registry SQLite (not git-crypt encrypted) until then.
     adoption_draft_ttl_minutes: int = Field(default=60)
 
+    # Deletion confirmation gate — every hard-delete tool (registry_delete_service,
+    # hardware-delete-node) requires solving a short arithmetic challenge before
+    # the row is removed. Not a security boundary (single digits, shown in the
+    # challenge itself) — deliberate friction against an agent or a
+    # fat-fingered id deleting something irreversible.
+    delete_challenge_ttl_minutes: int = Field(default=5)
+
     # Secrets / git-crypt (Phase C) — all opt-in; off by default.
     # secrets_key_path takes priority over secrets_git_crypt_key.
     secrets_enabled: bool = Field(default=True)
