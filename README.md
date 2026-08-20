@@ -23,6 +23,9 @@ query and act on.
 - Read-only tools for Traefik and Authentik (routers, middlewares, applications,
   providers, outposts, policies, the audit log) plus a curated registry and
   append-only change and discovery logs.
+- Every hard delete of a service or hardware node is gated behind a solvable
+  arithmetic challenge (request, solve, then confirm) — deliberate friction
+  against an agent or a fat-fingered id removing something irreversible.
 - Hardware node inventory: register physical and virtual nodes with role, IP,
   CPU/RAM/storage specs, and storage-pool capacity; link services to nodes;
   query aggregate capacity across the lab.

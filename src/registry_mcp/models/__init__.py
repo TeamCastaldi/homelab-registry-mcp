@@ -5,6 +5,11 @@ from registry_mcp.models.adoption import (
     AdoptionDraftStatus,
     DetectedSecret,
 )
+from registry_mcp.models.deletion import (
+    DeletionEntityType,
+    PendingDeletion,
+    PendingDeletionStatus,
+)
 from registry_mcp.models.event import (
     FIELD_CREATED,
     FIELD_DELETED,
@@ -43,6 +48,7 @@ __all__ = [
     "AuthMode",
     "Category",
     "ChangeEvent",
+    "DeletionEntityType",
     "DetectedSecret",
     "DiscoveryEvent",
     "DiscoveryStatus",
@@ -52,6 +58,8 @@ __all__ = [
     "HardwareNode",
     "NodeRole",
     "NodeStatus",
+    "PendingDeletion",
+    "PendingDeletionStatus",
     "PoolType",
     "Proposal",
     "ProposalStatus",

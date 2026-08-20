@@ -6,7 +6,9 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from registry_mcp.models import AuthMode, Category, Service
+from registry_mcp.config import Settings
+from registry_mcp.deletion import DeletionGateError, DeletionGateStore
+from registry_mcp.models import AuthMode, Category, DeletionEntityType, Service
 from registry_mcp.registry import DuplicateServiceError, RegistryStore
 
 
@@ -24,7 +26,9 @@ def _summary(service: Service) -> dict[str, Any]:
     }
 
 
-def register_registry_tools(mcp: FastMCP, store: RegistryStore) -> None:
+def register_registry_tools(
+    mcp: FastMCP, store: RegistryStore, deletion_gate: DeletionGateStore, settings: Settings
+) -> None:
     """Register the manual registry CRUD tools and resources on the server."""
 
     @mcp.tool()
@@ -114,11 +118,48 @@ def register_registry_tools(mcp: FastMCP, store: RegistryStore) -> None:
 
     @mcp.tool()
     def registry_delete_service(id: str) -> dict[str, Any]:
-        """Hard-delete a service by id. Change logs are preserved."""
-        deleted = store.delete_service(id, actor="manual:registry_delete_service")
-        if not deleted:
+        """Request deletion of a service by id. Deletes nothing yet — returns an
+        arithmetic challenge that must be solved and passed to
+        registry_delete_service_confirm before the row is removed."""
+        service = store.get_service(id)
+        if service is None:
             return {"error": f"no service found for id {id!r}"}
-        return {"deleted": True, "id": id}
+        challenge = deletion_gate.request(
+            entity_type=DeletionEntityType.service,
+            entity_id=service.id,
+            entity_label=service.name,
+            actor="manual:registry_delete_service",
+            ttl_minutes=settings.delete_challenge_ttl_minutes,
+        )
+        return {
+            "request_id": challenge.id,
+            "challenge": f"{challenge.x} + {challenge.y} = ?",
+            "service": service.name,
+            "expires_at": challenge.expires_at.isoformat(),
+            "next_step": (
+                f"Ask the user to solve {challenge.x} + {challenge.y}, then call "
+                f"registry_delete_service_confirm(request_id={challenge.id!r}, "
+                f"answer=<their answer>) to permanently delete {service.name!r}."
+            ),
+        }
+
+    @mcp.tool()
+    def registry_delete_service_confirm(request_id: str, answer: int) -> dict[str, Any]:
+        """Complete a service deletion by answering the math challenge from
+        registry_delete_service. A wrong or expired answer invalidates the
+        challenge — call registry_delete_service again for a new one."""
+        try:
+            challenge = deletion_gate.confirm(request_id, DeletionEntityType.service, answer)
+        except DeletionGateError as exc:
+            return {"error": str(exc)}
+        deleted = store.delete_service(
+            challenge.entity_id, actor="manual:registry_delete_service_confirm"
+        )
+        if not deleted:
+            return {
+                "error": f"no service found for id {challenge.entity_id!r} (may already be deleted)"
+            }
+        return {"deleted": True, "id": challenge.entity_id, "name": challenge.entity_label}
 
     @mcp.resource("service://{service_id}")
     def service_detail(service_id: str) -> dict[str, Any]:

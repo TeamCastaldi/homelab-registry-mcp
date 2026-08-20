@@ -29,7 +29,7 @@ from registry_mcp.config import Settings
 # --- Allowlist ---------------------------------------------------------------
 #
 # Partitioned by hand against every `@mcp.tool` registration in `tools/` and
-# `integrations/*/tools.py` (68 tools total as of this writing) — see the
+# `integrations/*/tools.py` (71 tools total as of this writing) — see the
 # per-tool comments below rather than re-deriving this from a naming
 # convention, since several of these are exceptions to the obvious pattern
 # (e.g. `authentik_summarize_events` reads nothing sensitive but still isn't
@@ -140,9 +140,13 @@ DENY_ALWAYS: frozenset[str] = frozenset(
         "proposal_adopt_service_cancel",
         "proposal_adopt_service_get",
         # tools/registry.py, tools/hardware.py — hard deletes; destructive
-        # and not reversible from the chat UI
+        # and not reversible from the chat UI. The *_confirm tools are the
+        # ones that actually perform the delete once the math challenge is
+        # answered, so they're denied right alongside the request step.
         "registry_delete_service",
+        "registry_delete_service_confirm",
         "hardware-delete-node",
+        "hardware-delete-node-confirm",
         # tools/hardware.py — shells out to `ansible ... -m setup`, a
         # minutes-long blocking operation FastMCP would run inline on the
         # event loop (see routes.py for why sync tools already do this)

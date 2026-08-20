@@ -28,7 +28,13 @@ async def test_add_get_list_update_delete_flow(server):
     )
     assert updated["notes"] == "patched"
 
-    deleted = await call(server, "registry_delete_service", {"id": service_id})
+    requested = await call(server, "registry_delete_service", {"id": service_id})
+    x, _plus, y, *_rest = requested["challenge"].split(" ")
+    deleted = await call(
+        server,
+        "registry_delete_service_confirm",
+        {"request_id": requested["request_id"], "answer": int(x) + int(y)},
+    )
     assert deleted["deleted"] is True
 
     empty = await call(server, "registry_list_services", {})

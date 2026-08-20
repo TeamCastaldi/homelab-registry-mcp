@@ -8,9 +8,11 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from registry_mcp.config import Settings
+from registry_mcp.deletion import DeletionGateError, DeletionGateStore
 from registry_mcp.hardware import ansible_facts
 from registry_mcp.hardware.store import DuplicateNodeError, HardwareStore
 from registry_mcp.logging import get_logger
+from registry_mcp.models.deletion import DeletionEntityType
 from registry_mcp.models.hardware import HardwareNode, NodeRole
 from registry_mcp.registry import RegistryStore
 
@@ -116,6 +118,7 @@ def register_hardware_tools(
     store: RegistryStore,
     hardware_store: HardwareStore,
     settings: Settings,
+    deletion_gate: DeletionGateStore,
     read_only: bool = False,
 ) -> None:
     """Register hardware node CRUD and linking tools."""
@@ -179,11 +182,46 @@ def register_hardware_tools(
 
     @mcp.tool(name="hardware-delete-node")
     def hardware_delete_node(id: str) -> dict[str, Any]:
-        """Hard-delete a hardware node. Change events are preserved."""
-        deleted = hardware_store.delete_node(id)
-        if not deleted:
+        """Request deletion of a hardware node. Deletes nothing yet — returns an
+        arithmetic challenge that must be solved and passed to
+        hardware-delete-node-confirm before the row is removed."""
+        node = hardware_store.get_node(id)
+        if node is None:
             return {"error": f"no node found for {id!r}"}
-        return {"deleted": True, "id": id}
+        challenge = deletion_gate.request(
+            entity_type=DeletionEntityType.hardware_node,
+            entity_id=node.id,
+            entity_label=node.hostname,
+            actor="manual:hardware-delete-node",
+            ttl_minutes=settings.delete_challenge_ttl_minutes,
+        )
+        return {
+            "request_id": challenge.id,
+            "challenge": f"{challenge.x} + {challenge.y} = ?",
+            "node": node.hostname,
+            "expires_at": challenge.expires_at.isoformat(),
+            "next_step": (
+                f"Ask the user to solve {challenge.x} + {challenge.y}, then call "
+                f"hardware-delete-node-confirm(request_id={challenge.id!r}, "
+                f"answer=<their answer>) to permanently delete {node.hostname!r}."
+            ),
+        }
+
+    @mcp.tool(name="hardware-delete-node-confirm")
+    def hardware_delete_node_confirm(request_id: str, answer: int) -> dict[str, Any]:
+        """Complete a hardware node deletion by answering the math challenge
+        from hardware-delete-node. A wrong or expired answer invalidates the
+        challenge — call hardware-delete-node again for a new one."""
+        try:
+            challenge = deletion_gate.confirm(request_id, DeletionEntityType.hardware_node, answer)
+        except DeletionGateError as exc:
+            return {"error": str(exc)}
+        deleted = hardware_store.delete_node(
+            challenge.entity_id, actor="manual:hardware-delete-node-confirm"
+        )
+        if not deleted:
+            return {"error": f"no node found for {challenge.entity_id!r} (may already be deleted)"}
+        return {"deleted": True, "id": challenge.entity_id, "hostname": challenge.entity_label}
 
     @mcp.tool(name="hardware-link-service")
     def hardware_link_service(service_id: str, node_id: str) -> dict[str, Any]:
