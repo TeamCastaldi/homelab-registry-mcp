@@ -154,7 +154,7 @@ class Settings(BaseSettings):
     # the row is removed. Not a security boundary (single digits, shown in the
     # challenge itself) — deliberate friction against an agent or a
     # fat-fingered id deleting something irreversible.
-    delete_challenge_ttl_minutes: int = Field(default=5)
+    delete_challenge_ttl_minutes: int = Field(default=5, gt=0)
 
     # Secrets / git-crypt (Phase C) — all opt-in; off by default.
     # secrets_key_path takes priority over secrets_git_crypt_key.
