@@ -29,7 +29,7 @@ from registry_mcp.config import Settings
 # --- Allowlist ---------------------------------------------------------------
 #
 # Partitioned by hand against every `@mcp.tool` registration in `tools/` and
-# `integrations/*/tools.py` (70 tools total as of this writing) — see the
+# `integrations/*/tools.py` (71 tools total as of this writing) — see the
 # per-tool comments below rather than re-deriving this from a naming
 # convention, since several of these are exceptions to the obvious pattern
 # (e.g. `authentik_summarize_events` reads nothing sensitive but still isn't

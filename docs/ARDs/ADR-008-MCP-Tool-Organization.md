@@ -138,7 +138,9 @@ Conclusion: the mount split is technically unblocked. Not yet implemented
 Every registered tool, classified by what it does rather than its domain.
 Reconciled to 68 against the per-domain counts in §2 as of this ADR's
 original decision; `proposal_normalize` (normalization engine) landed since,
-bringing the total to 69 — see Tier 2 below.
+bringing the total to 69, and the deletion confirmation gate (PR #108) added
+`registry_delete_service_confirm`/`hardware-delete-node-confirm`, bringing
+the total to 71 — see Tier 2 below.
 
 ### Tier 1 — Read-only observability (44 tools)
 
@@ -167,7 +169,7 @@ discovery). None of the five carry a `read_only` gate in
 regardless of tier, not just Tier 1 — it's what explains why a Tier 2 tool
 just returned a read-only error.
 
-### Tier 2 — Git-write / curated-field mutation / live-infra execution (19 tools)
+### Tier 2 — Git-write / curated-field mutation / live-infra execution (21 tools)
 
 The actual Degree-3 Agency surface: a wrong call here has a durable,
 human-facing consequence even though it's PR-gated.
@@ -175,9 +177,15 @@ human-facing consequence even though it's PR-gated.
 | Domain | Tools |
 |---|---|
 | Proposals + adoption (10, unsplit) | `proposal_create`, `proposal_list_open`, `proposal_get`, `proposal_cancel`, `proposal_verify`, `proposal_normalize`, `proposal_adopt_service`, `proposal_adopt_service_finalize`, `proposal_adopt_service_cancel`, `proposal_adopt_service_get` |
-| Registry mutation (4) | `registry_add_service`, `registry_update_service`, `registry_delete_service`, `service_link_authentik` |
-| Hardware mutation (4) | `hardware-add-node`, `hardware-update-node`, `hardware-delete-node`, `hardware-link-service` |
+| Registry mutation (5) | `registry_add_service`, `registry_update_service`, `registry_delete_service`, `registry_delete_service_confirm`, `service_link_authentik` |
+| Hardware mutation (5) | `hardware-add-node`, `hardware-update-node`, `hardware-delete-node`, `hardware-delete-node-confirm`, `hardware-link-service` |
 | Hardware live discovery (1) | `hardware-discover-now` |
+
+`*_confirm` tools carry the same tier as the delete they complete, not a
+lighter one: `registry_delete_service`/`hardware-delete-node` only ever
+*request* deletion (see CLAUDE.md's deletion gate convention) — the actual
+irreversible write happens in the confirm call once the math challenge is
+answered, so that's where the Degree-3 consequence actually lands.
 
 Proposals/adoption is kept as one block, including its read-only views
 (`proposal_list_open`, `proposal_get`, `proposal_adopt_service_get`) —

@@ -505,6 +505,17 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
 
 ## Current Status
 
+- **Delete confirmation gate complete**: every hard-delete tool (`registry_delete_service`,
+  `hardware-delete-node`) now only *requests* deletion — it returns a single-digit
+  `x + y = ?` arithmetic challenge (`deletion/store.py`'s `DeletionGateStore`, backed by the
+  new `PendingDeletion` table) that a new `registry_delete_service_confirm`/
+  `hardware-delete-node-confirm` tool must be called with the correct answer within
+  `DELETE_CHALLENGE_TTL_MINUTES` (default 5) before the row is actually removed. Wrong
+  answer, expired challenge, or an already-resolved one all invalidate it outright — no
+  retries, just call the delete tool again for a fresh problem. Expired challenges are also
+  swept on every server startup, same idiom as `AdoptionDraftStore.purge_expired`. Both
+  `*_confirm` tools are denied in chat (`chat/bridge.py`'s `DENY_ALWAYS`) right alongside the
+  request tools they gate.
 - **ADR-009 complete**: web chat interface (`chat/`) — `/chat` + `/chat/auth/*` + `/chat/api/*`
   registered via `FastMCP.custom_route`, backed by an operator-run Ollama instance
   (`CHAT_OLLAMA_URL`), Authentik OIDC or static-password auth, and a fixed read/write tool
