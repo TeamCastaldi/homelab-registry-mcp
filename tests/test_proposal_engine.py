@@ -576,3 +576,18 @@ async def test_create_for_vulnerability_without_write_path_errors(store):
         service.id, image="plex", current_tag="1.0", fixed_tag="1.1"
     )
     assert "write path not configured" in result["error"]
+
+
+async def test_create_for_vulnerability_rejects_missing_image(store):
+    """Same bar as create_for_image_update: no repository, no proposal."""
+    service = _plain(store)
+    git = FakeGit()
+    engine, proposals = _engine(store, git=git)
+
+    result = await engine.create_for_vulnerability(
+        service.id, image="", current_tag="1.0", fixed_tag="1.1", severity="critical"
+    )
+
+    assert "image is required" in result["error"]
+    assert not git.opened
+    assert proposals.list_all() == []

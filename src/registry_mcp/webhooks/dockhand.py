@@ -107,7 +107,10 @@ def register_webhook_routes(
     if not settings.dockhand_webhook_enabled:
         return
 
-    secret = settings.dockhand_webhook_secret
+    # `.strip()` here too: a whitespace-only secret is an unset one, and must
+    # take the fail-closed path rather than registering a route nothing can
+    # authorize against.
+    secret = (settings.dockhand_webhook_secret or "").strip()
     if not secret:
         _log.error(
             "dockhand_webhook_disabled_no_secret",
@@ -122,16 +125,21 @@ def register_webhook_routes(
     min_severity = settings.dockhand_webhook_vulnerability_min_severity
     vuln_enabled = settings.dockhand_webhook_vulnerability_enabled
 
+    # Surrounding whitespace is stripped from both sides: a secret pasted into a
+    # config UI (Dockhand's or this server's .env) easily picks up a trailing
+    # newline, and a whitespace-only difference is never a meaningful boundary —
+    # only the secret bytes themselves are. Comparison stays exact otherwise.
     expected = secret.encode("utf-8")
 
     def _authorized(request: Request) -> bool:
         # Only a bearer-shaped Authorization counts; anything else (a stray
         # `Basic ...`) falls through to the token header rather than being
         # compared verbatim and blocking it.
-        header = request.headers.get("authorization", "")
+        header = request.headers.get("authorization", "").strip()
         provided = header[len("bearer ") :] if header.lower().startswith("bearer ") else ""
         if not provided:
             provided = request.headers.get("x-dockhand-token", "")
+        provided = provided.strip()
         if not provided:
             return False
         # Compare as bytes: compare_digest rejects non-ASCII str outright, and a

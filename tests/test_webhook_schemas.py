@@ -112,9 +112,16 @@ def test_structured_vulnerability_below_threshold_is_ignored():
 
 
 def test_vulnerability_classification_wins_over_update():
-    """'update blocked by vulnerability scan' is a CVE finding, not a bump."""
+    """'update blocked by vulnerability scan' is a CVE finding, not a bump.
+
+    Carries an image so this exercises classification precedence rather than
+    tripping the separate no-image-reference guard.
+    """
     alert = DockhandStructuredAlert(
-        event="update blocked by vulnerability scan", container="plex", severity="critical"
+        event="update blocked by vulnerability scan",
+        container="plex",
+        current_image="lscr.io/linuxserver/plex:1.32.0",
+        severity="critical",
     )
     assert alert.normalize().kind is AlertKind.vulnerability
 
@@ -201,3 +208,24 @@ def test_generic_vulnerability_collects_cves_and_severity():
 def test_generic_unrelated_title_is_ignored():
     alert = DockhandGenericAlert(title="Backup completed", message="all good")
     assert alert.normalize().kind is AlertKind.ignored
+
+
+def test_structured_vulnerability_without_image_is_ignored():
+    """No repository to anchor to — the notification and any patch would be blind."""
+    alert = DockhandStructuredAlert(
+        event="vulnerability_found", container="plex", severity="critical"
+    )
+    result = alert.normalize()
+
+    assert result.kind is AlertKind.ignored
+    assert "no image reference" in result.reason
+
+
+def test_generic_vulnerability_without_image_is_ignored():
+    alert = DockhandGenericAlert(
+        title="Vulnerability scan: plex", message="critical CVE-2026-1111 found"
+    )
+    result = alert.normalize()
+
+    assert result.kind is AlertKind.ignored
+    assert "no image reference" in result.reason

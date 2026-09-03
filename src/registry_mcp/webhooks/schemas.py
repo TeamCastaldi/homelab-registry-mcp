@@ -175,6 +175,16 @@ class DockhandStructuredAlert(BaseModel):
                 )
             repo, current_tag = parse_image_ref(self.current_image or "")
             fixed_repo, fixed_tag = parse_image_ref(self.fixed_image or self.latest_image or "")
+            if not (repo or fixed_repo):
+                # No repository to anchor the finding to: the notification would
+                # read ":<tag>", and a fixed-tag patch would have no way to pick
+                # the right image ref in a multi-image compose file.
+                return NormalizedAlert(
+                    kind=AlertKind.ignored,
+                    reason="no image reference in vulnerability alert",
+                    severity=self.severity,
+                    **base,
+                )
             return NormalizedAlert(
                 kind=AlertKind.vulnerability,
                 image=repo or fixed_repo,
@@ -234,8 +244,9 @@ class DockhandGenericAlert(BaseModel):
         new_ref = pairs.get("new_image") or pairs.get("image") or pairs.get("latest_image") or ""
         old_ref = pairs.get("old_image") or pairs.get("current_image") or ""
         if not new_ref and not old_ref:
-            # No key=value tokens; fall back to any bare `name:tag` refs, oldest
-            # first (Dockhand writes the new one first, so reverse on two hits).
+            # No key=value tokens; fall back to bare `name:tag` refs in the order
+            # they appear. Dockhand writes the new image first, so the first
+            # match is the new ref and the second (if any) is the one it replaced.
             found = _REF_RE.findall(self.message)
             if len(found) >= 2:
                 new_ref, old_ref = found[0], found[1]
@@ -251,6 +262,14 @@ class DockhandGenericAlert(BaseModel):
                 return NormalizedAlert(
                     kind=AlertKind.ignored,
                     reason=f"severity {severity or 'unset'!r} below {min_severity!r}",
+                    severity=severity,
+                    **base,
+                )
+            if not (old_repo or new_repo):
+                # Same reason as the structured path: no repository, no anchor.
+                return NormalizedAlert(
+                    kind=AlertKind.ignored,
+                    reason="no image reference in vulnerability alert",
                     severity=severity,
                     **base,
                 )

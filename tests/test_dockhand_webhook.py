@@ -290,3 +290,47 @@ async def test_non_ascii_token_is_unauthorized_not_a_500(tmp_path):
         headers={b"X-Dockhand-Token": b"s\xe9cret"},
     )
     assert resp.status_code == 403
+
+
+async def test_token_with_surrounding_whitespace_is_accepted(tmp_path):
+    """A secret pasted into a config UI easily picks up a trailing newline."""
+    settings = _healthy_settings(tmp_path, str(tmp_path / "r.db"))
+    resp = await _post(
+        build_server(settings),
+        json=_payload(container="ghost"),
+        headers={"X-Dockhand-Token": f"  {SECRET}\t"},
+    )
+    assert resp.status_code == 200
+
+
+async def test_bearer_token_with_trailing_whitespace_is_accepted(tmp_path):
+    settings = _healthy_settings(tmp_path, str(tmp_path / "r.db"))
+    resp = await _post(
+        build_server(settings),
+        json=_payload(container="ghost"),
+        headers={"Authorization": f"Bearer {SECRET}  "},
+    )
+    assert resp.status_code == 200
+
+
+async def test_whitespace_only_secret_is_treated_as_unset(tmp_path):
+    """Fail closed: it must not register a route nothing could authorize."""
+    settings = _healthy_settings(tmp_path, str(tmp_path / "r.db"), dockhand_webhook_secret="   ")
+    resp = await _post(build_server(settings), json=_payload(), headers=_auth())
+    assert resp.status_code == 404
+
+
+async def test_vulnerability_without_image_is_ignored_not_errored(tmp_path):
+    db_path = str(tmp_path / "r.db")
+    store = RegistryStore(db_path)
+    store.create_service(Service(name="plex", display_name="Plex", host="workload-01"))
+
+    settings = _healthy_settings(tmp_path, db_path)
+    resp = await _post(
+        build_server(settings),
+        json={"event": "vulnerability_found", "container": "plex", "severity": "critical"},
+        headers=_auth(),
+    )
+
+    assert resp.status_code == 200
+    assert "no image reference" in resp.json()["ignored"]

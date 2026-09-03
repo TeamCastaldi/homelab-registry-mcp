@@ -168,6 +168,12 @@ class ProposalEngine:
         """
         if not self.configured:
             return {"error": "write path not configured (set GIT_BASE_URL, GIT_TOKEN, GIT_REPO)"}
+        # Same bar as create_for_image_update. Without a repository the
+        # notification degrades to ":<tag>", and on the fixed-tag path the
+        # generator gets no anchor for *which* image ref to edit — a real risk
+        # of the wrong edit in a compose file carrying several.
+        if not image:
+            return {"error": "image is required to open a vulnerability_scan proposal"}
 
         service = self._store.get_service(service_id)
         if service is None:
