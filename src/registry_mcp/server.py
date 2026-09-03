@@ -39,6 +39,7 @@ from registry_mcp.tools import (
     register_registry_tools,
     register_secrets_tools,
 )
+from registry_mcp.webhooks import register_webhook_routes
 
 
 def build_proposal_engine(
@@ -172,6 +173,7 @@ def build_server(settings: Settings | None = None) -> FastMCP:
         read_only=read_only,
     )
     register_chat_routes(mcp, settings, read_only=read_only)
+    register_webhook_routes(mcp, settings, store, proposal_engine, read_only=read_only)
 
     @mcp.tool()
     def health() -> dict[str, str]:

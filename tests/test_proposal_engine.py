@@ -428,3 +428,151 @@ def test_store_migrates_proposal_table_missing_last_comment_id():
 
     created = proposals.create(Proposal(service_id="svc-1", finding_type="auth_mode_conflict"))
     assert created.last_comment_id is None
+
+
+# --- image_update + vulnerability_scan (ADR-010 Dockhand webhook) ---
+
+
+def _plain(store, name="plex", host="workload-01"):
+    """A service with no open finding — an update alert is the trigger here,
+    not a detected conflict."""
+    return store.create_service(
+        Service(name=name, display_name=name.title(), host=host, auth_mode_conflict=False)
+    )
+
+
+async def test_create_for_image_update_opens_pr(store):
+    service = _plain(store)
+    git = FakeGit()
+    engine, proposals = _engine(store, git=git)
+
+    result = await engine.create_for_image_update(
+        service.id, image="lscr.io/linuxserver/plex", current_tag="1.32.0", new_tag="1.32.1"
+    )
+
+    assert result["status"] == "open"
+    assert result["finding_type"] == "image_update"
+    assert result["actor"] == "dockhand-webhook"
+    assert git.branches and git.commits and git.opened
+    assert len(proposals.list_open()) == 1
+
+
+async def test_create_for_image_update_rejects_missing_image_or_tag(store):
+    service = _plain(store)
+    git = FakeGit()
+    engine, _ = _engine(store, git=git)
+
+    assert "error" in await engine.create_for_image_update(
+        service.id, image="", current_tag="1.0", new_tag="1.1"
+    )
+    assert "error" in await engine.create_for_image_update(
+        service.id, image="plex", current_tag="1.0", new_tag=""
+    )
+    assert not git.opened
+
+
+async def test_create_for_image_update_skips_duplicate_open_proposal(store):
+    service = _plain(store)
+    engine, _ = _engine(store)
+
+    first = await engine.create_for_image_update(
+        service.id, image="plex", current_tag="1.0", new_tag="1.1"
+    )
+    again = await engine.create_for_image_update(
+        service.id, image="plex", current_tag="1.0", new_tag="1.2"
+    )
+
+    assert "skipped" in again
+    # The skip carries the staged proposal so an operator can see which version
+    # is already open rather than being told only "duplicate".
+    assert again["proposal"]["pr_url"] == first["pr_url"]
+    assert again["proposal"]["branch"]
+
+
+async def test_image_update_context_reaches_the_generator(store):
+    """The exact tag must be handed to DSPy verbatim — no re-derivation."""
+    service = _plain(store)
+    seen = {}
+
+    class CapturingReasoner(FakeReasoner):
+        def generate_remediation_patch(self, **kwargs):
+            seen.update(kwargs)
+            return self.result
+
+    engine, _ = _engine(store, reasoner=CapturingReasoner())
+    await engine.create_for_image_update(
+        service.id, image="lscr.io/linuxserver/plex", current_tag="1.32.0", new_tag="1.32.1"
+    )
+
+    assert "new_tag: 1.32.1" in seen["context"]
+    assert "current_tag: 1.32.0" in seen["context"]
+    assert seen["finding_type"] == "image_update"
+
+
+async def test_image_update_dry_run_returns_patch_without_touching_git(store):
+    service = _plain(store)
+    git = FakeGit()
+    engine, proposals = _engine(store, settings=_settings(proposal_dry_run=True), git=git)
+
+    result = await engine.create_for_image_update(
+        service.id, image="plex", current_tag="1.0", new_tag="1.1"
+    )
+
+    assert result["dry_run"] is True
+    assert result["patch"] == VALID_PATCH["patch"]
+    assert not git.branches and not git.commits and not git.opened
+    assert proposals.list_all() == []
+
+
+async def test_create_for_vulnerability_with_fix_opens_pr(store):
+    service = _plain(store)
+    git = FakeGit()
+    notifier = FakeNotifier()
+    engine, proposals = _engine(store, git=git, notifier=notifier)
+
+    result = await engine.create_for_vulnerability(
+        service.id,
+        image="lscr.io/linuxserver/plex",
+        current_tag="1.32.0",
+        fixed_tag="1.32.2",
+        severity="critical",
+        cve_ids=["CVE-2026-1234"],
+    )
+
+    assert result["status"] == "open"
+    assert result["finding_type"] == "vulnerability_scan"
+    assert git.opened
+    assert proposals.get(result["id"]).status == ProposalStatus.open
+
+
+async def test_create_for_vulnerability_without_fix_records_rejected_and_opens_no_pr(store):
+    """No upstream fix means no file change to propose — record it, don't guess."""
+    service = _plain(store)
+    git = FakeGit()
+    notifier = FakeNotifier()
+    engine, proposals = _engine(store, git=git, notifier=notifier)
+
+    result = await engine.create_for_vulnerability(
+        service.id,
+        image="lscr.io/linuxserver/plex",
+        current_tag="1.32.0",
+        fixed_tag="",
+        severity="critical",
+        cve_ids=["CVE-2026-1234"],
+    )
+
+    assert "no fixed version available upstream" in result["rejected"]
+    assert "CVE-2026-1234" in result["rejected"]
+    assert not git.opened and not git.branches
+    assert proposals.get(result["proposal"]["id"]).status == ProposalStatus.rejected
+    assert notifier.sent and "no fix available" in notifier.sent[0]["title"]
+
+
+async def test_create_for_vulnerability_without_write_path_errors(store):
+    service = _plain(store)
+    engine, _ = _engine(store, git=None)
+
+    result = await engine.create_for_vulnerability(
+        service.id, image="plex", current_tag="1.0", fixed_tag="1.1"
+    )
+    assert "write path not configured" in result["error"]
