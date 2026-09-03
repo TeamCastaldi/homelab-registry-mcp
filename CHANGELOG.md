@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.26.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.25.0...v0.26.0) (2026-09-03)
+
+
+### Features
+
+* Dockhand update webhook → staged proposals (ADR-010) ([bde1bee](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/bde1bee8aa26b83e8d4452d94847c821ba3293d3))
+
+
+### Bug Fixes
+
+* address Copilot review on the Dockhand webhook ([9ba6131](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/9ba6131d1e2231911f9d8d30f63547743a863d94))
+
+
+### Documentation
+
+* SOP for connecting Dockhand, plus a raw-payload debug setting ([d08ccc5](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/d08ccc54b5fdab77e4d23aed5ff39924ac55c365))
+
 ## [0.25.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.24.0...v0.25.0) (2026-08-19)
 
 
