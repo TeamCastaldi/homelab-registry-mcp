@@ -282,14 +282,19 @@ ADR-004's unimplemented polling source.
   disabled, or enabled with no `DOCKHAND_WEBHOOK_SECRET`, leaves the route unmounted
   entirely rather than mounted-and-rejecting. Dockhand does not sign its webhook bodies, so
   auth is a bearer secret compared with `hmac.compare_digest` — there is no HMAC to verify.
-- **Dockhand's webhook channel speaks Apprise URL schemes, not plain `http(s)://`.** The
-  real-world configuration is `json://<host>:8765/webhooks/dockhand?+X-Dockhand-Token=<secret>`
-  (`jsons://` for TLS): `json://` is Apprise's generic-JSON channel, and the `+` prefix
-  promotes a query parameter into an HTTP header — which is how the secret arrives, and why
-  the `X-Dockhand-Token` alternative to `Authorization: Bearer` exists. It also means the
-  body that actually arrives is Apprise's `{version, title, message, type}`, so the
-  *generic* parse path is the one that runs in production, never the structured one.
-  `DOCKHAND_WEBHOOK_LOG_RAW_PAYLOAD=true` echoes a delivery body into the log when the
+- **Dockhand's built-in Webhooks channel is not real Apprise, despite borrowing its scheme
+  names.** Verified against a live instance: a `webhook.site` capture showed a native
+  `node`-flavored sender, a payload shape (`{title, message, type, environment, timestamp}`)
+  Apprise never produces, and a `+X-Dockhand-Token=<secret>` query parameter that lands as an
+  inert query-string entry — the `+` is stripped but never converted into a header, so this
+  endpoint can't authenticate a Dockhand channel pointed at it directly, regardless of
+  URL-encoding. Reaching it requires routing through a real Apprise engine —
+  `caronc/apprise-api` as a sidecar, with the header-carrying URL stored *there*
+  (`json://<host>:8765/webhooks/dockhand?+X-Dockhand-Token=<secret>`, `jsons://` for TLS,
+  where `+` genuinely is honored) — and pointing Dockhand at
+  `apprise://<apprise-api-host>:8000/<key>`, the escape hatch Dockhand's own UI documents for
+  a provider outside its built-in list. Since the payload apprise-api then forwards can still
+  vary, `DOCKHAND_WEBHOOK_LOG_RAW_PAYLOAD=true` echoes a delivery body into the log when the
   shape is in doubt. Setup procedure: `docs/SOPs/SOP-002-Connect-Dockhand-Webhook.md`.
 - The route only parses and dispatches. `ProposalEngine.create_for_image_update` /
   `create_for_vulnerability` feed `_open_proposal`, which already owns dedupe, target-file

@@ -353,8 +353,7 @@ If you run [Dockhand](https://github.com/Finsys/dockhand) for container
 management, it can push its update and CVE-scan alerts here and have them become
 staged pull requests instead of notifications you act on by hand. Off by default.
 
-The full procedure — including the non-obvious URL format Dockhand's webhook
-channel needs — is
+The full procedure is
 [SOP-002](SOPs/SOP-002-Connect-Dockhand-Webhook.md). The short version:
 
 ```bash
@@ -362,17 +361,13 @@ DOCKHAND_WEBHOOK_ENABLED=true
 DOCKHAND_WEBHOOK_SECRET=<a long random string>
 ```
 
-then in Dockhand, **Settings → Notifications → Add channel**, Type `Webhooks`,
-with a URL of:
-
-```
-json://<registry-host>:8765/webhooks/dockhand?+X-Dockhand-Token=<secret>
-```
-
-That field takes Apprise-style schemes rather than plain `http(s)://` URLs —
-`json://` is the generic-JSON channel, and the `+` prefix turns a query
-parameter into an HTTP header, which is how the secret travels. See
-[ADR-010](ARDs/ADR-010-Dockhand-Update-Webhook.md) for the design rationale.
+Dockhand's own built-in webhook sender can't authenticate to this endpoint
+directly — it borrows Apprise's URL scheme names without running the real
+Apprise engine, so it can't deliver the header this secret needs. Reaching
+it requires a small `caronc/apprise-api` sidecar in between, where the
+header-carrying URL is actually honored, with Dockhand pointed at that
+sidecar instead. SOP-002 walks through deploying and wiring it up; see
+[ADR-010](ARDs/ADR-010-Dockhand-Update-Webhook.md) for why.
 
 ## Setting up the chat interface
 

@@ -39,6 +39,9 @@ rationale; this SOP is just the setup steps.
 - [ ] The container names Dockhand reports match registry service names, and
       those services have a `host` set — matching is by exact name, and without
       a `host` there is no `nodes/<node>/<service>/compose.yaml` path to patch
+- [ ] A `caronc/apprise-api` instance is deployed and reachable from both
+      Dockhand and this registry (Step 4 covers why and how — Dockhand's own
+      built-in webhook sender cannot authenticate to this endpoint directly)
 
 ---
 
@@ -104,48 +107,132 @@ message:** the startup health check is failing — run `system_health_check`.
 
 ---
 
-#### Step 4: Add the notification channel in Dockhand
+#### Step 4: Route through a real Apprise instance
 
-In Dockhand: **Settings → Notifications → Add channel**.
+Dockhand's built-in **Webhooks** channel accepts Apprise-style scheme names
+(`json://`, `discord://`, ...) as a UI convenience, but does not run requests
+through the real Apprise engine — testing against a live instance (a
+`webhook.site` capture) showed a native `node`-flavored sender, a payload
+shape Apprise never produces, and a `+X-Dockhand-Token=<secret>` query
+parameter that arrives as a literal, inert query-string entry — the `+` is
+stripped, but it is never converted into a header. No URL-encoding variant
+fixes this; the capability just isn't implemented in that code path. So the
+secret has to travel through something that *does* run real Apprise.
 
-- **Name:** `homelab-registry-mcp`
-- **Type:** `Webhooks`
-- **Status:** Enabled
-- **Webhook URLs (one per line):** one of the two forms below
+**4a. Deploy `caronc/apprise-api`** somewhere both Dockhand and this registry
+can reach — a small sidecar alongside Dockhand is the natural place. As an
+ordinary `nodes/<node>/apprise-api/compose.yaml` entry in your private
+homelab repo, it should join the external `traefik` network and carry
+Traefik labels the same way every other node service here does (see this
+repo's own `docker-compose.yml` for the pattern this mirrors — ADR-006/007):
 
-Direct to the published port:
+```yaml
+services:
+  apprise-api:
+    image: caronc/apprise:latest
+    restart: unless-stopped
+    networks:
+      - traefik
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.apprise-api.rule: "Host(`apprise.<your-domain>`)"
+      traefik.http.routers.apprise-api.entrypoints: "websecure"
+      traefik.http.routers.apprise-api.tls: "true"
+      # traefik.http.routers.apprise-api.tls.certresolver: "<your-certresolver-name>"
+      traefik.http.services.apprise-api.loadbalancer.server.port: "8000"
+    volumes:
+      - apprise-config:/config
+
+volumes:
+  apprise-config:
+
+networks:
+  traefik:
+    external: true
+```
+
+A direct `ports: ["8000:8000"]` publish works too if you'd rather skip
+Traefik for an internal-only sidecar — nothing here requires it, it's just
+consistency with how this repo already deploys everything else. Adapt
+either form to your own conventions; this is not a file this public repo
+ships.
+
+**4b. Store the real Apprise URL** in apprise-api's own config UI
+(`http://<apprise-api-host>:8000/`) under a config key, e.g. `dockhand`. This
+is where the `+` header syntax actually works, because apprise-api runs the
+genuine Apprise library:
 
 ```
 json://<registry-host>:8765/webhooks/dockhand?+X-Dockhand-Token=<secret>
 ```
 
-Or through Traefik, if the registry is fronted by it:
+or, through Traefik:
 
 ```
 jsons://registry-mcp.<your-domain>/webhooks/dockhand?+X-Dockhand-Token=<secret>
 ```
 
-Two things about that URL are not obvious:
+**4c. Point Dockhand at the sidecar, not at the registry.** In Dockhand:
+**Settings → Notifications → Add channel**.
 
-- **`json://` is not a typo.** Dockhand's webhook channel takes Apprise-style
-  schemes, not plain `http(s)://` URLs. `json://` is Apprise's generic-JSON
-  channel over HTTP; `jsons://` is the same over HTTPS.
-- **The `+` prefix promotes a query parameter into an HTTP request header.**
-  `?+X-Dockhand-Token=abc` sends `X-Dockhand-Token: abc` and does not appear in
-  the query string. Without the `+` the secret travels as an ordinary query
-  parameter, the endpoint never sees a token, and every delivery 403s.
+- **Name:** `homelab-registry-mcp`
+- **Type:** `Webhooks`
+- **Status:** Enabled
+- **Webhook URLs (one per line):** one of the two forms below, matching
+  whether you fronted apprise-api with Traefik in Step 4a
 
-The secret is stored in Dockhand's own channel configuration and is readable by
-anyone with access to that UI. Treat access to Dockhand's settings as equivalent
-to holding the secret, and rotate both sides together.
+Direct to the published port:
 
-**Expected result:** The channel saves without error.
+```
+apprise://<apprise-api-host>:8000/dockhand
+```
+
+Or through Traefik (`apprises://` is the TLS variant, matching `jsons://`
+elsewhere in this SOP — no port needed, Traefik terminates on 443):
+
+```
+apprises://apprise.<your-domain>/dockhand
+```
+
+This is the exact escape hatch Dockhand's own dialog footer documents for a
+provider outside its built-in list ("Run a caronc/apprise-api server,
+configure the provider there, and point Dockhand at it with
+`apprise://host/key`").
+
+**If that doesn't produce a working header** — apprise-api's `/notify/<key>`
+endpoint requires a `body` field, and Dockhand's native payload uses
+`message` instead — point Dockhand at apprise-api's HTTP endpoint directly,
+with field remapping, as a fallback:
+
+```
+json://<apprise-api-host>:8000/notify/dockhand?:message=body
+```
+
+The secret lives in apprise-api's stored config, not in anything Dockhand
+holds. Treat access to apprise-api's UI as equivalent to holding the secret,
+and rotate both sides together if it's ever exposed.
+
+**A query-string token was considered and rejected as the default guidance
+here.** Dockhand's native sender *can* deliver `?X-Dockhand-Token=<secret>`
+as a plain query parameter with no sidecar at all — but a reverse proxy
+(Traefik included) commonly logs the full request line, query string
+included, by default, while header values are not logged unless explicitly
+configured. That trades a standing secret leak in your access logs for
+skipping one extra container. If you don't run access logging, that trade
+may be yours to make, but it is not the path this SOP walks through — see
+[ADR-010](../ARDs/ADR-010-Dockhand-Update-Webhook.md) for the full reasoning.
+
+**Expected result:** The Dockhand channel saves without error, and a Test
+notification shows as delivered in apprise-api's own log/UI.
 
 ---
 
 #### Step 5: Press Test, then read the registry log
 
-Use the dialog's **Test** button, then on the registry host:
+The delivery now makes two hops — Dockhand → apprise-api → this registry —
+so check apprise-api's own delivery log/UI first if nothing shows up on the
+registry side; that tells you which hop failed. Use the dialog's **Test**
+button, then on the registry host:
 
 ```bash
 docker compose logs -f homelab-registry-mcp | grep dockhand
@@ -153,10 +240,15 @@ docker compose logs -f homelab-registry-mcp | grep dockhand
 
 **Expected result:** A `dockhand_alert_ignored` line. That is success, not
 failure — a test notification is not an update alert, so there is nothing to
-propose. The line proves reachability, authentication, content type and payload
-parsing all at once.  
-**If nothing appears:** Dockhand cannot reach the host. Check firewall rules and
-that you used the reachable address, not `localhost`.  
+propose. The line proves apprise-api reached the registry, authenticated,
+and that content type and payload parsing all worked.  
+**If nothing appears on the registry side but apprise-api shows the delivery
+as sent:** the header still isn't reaching this endpoint — recheck the
+stored Apprise URL in apprise-api against Step 4b, and confirm apprise-api
+itself can reach the registry host.  
+**If apprise-api never shows the delivery at all:** Dockhand cannot reach
+apprise-api. Check firewall rules and that you used a reachable address, not
+`localhost`.  
 **If you see 403s:** see the Troubleshooting table below.
 
 ---
@@ -237,8 +329,10 @@ then remove the setting.
 | Symptom | Likely Cause | Fix |
 |---------|--------------|-----|
 | `404` on every delivery | Route never mounted — flag off, or secret unset/whitespace-only | Check for `dockhand_webhook_disabled_no_secret` in the startup log; see Step 2 |
-| `403 unauthorized` | `+` prefix omitted, so the token went as a query parameter instead of a header | Re-check the URL against Step 4 |
-| `403 unauthorized` | Secret mismatch between `.env` and the Dockhand channel | Re-paste both from the same source; surrounding whitespace is tolerated, so a stray newline is not the cause |
+| `403 unauthorized`, and Dockhand points directly at the registry (no apprise-api) | Dockhand's built-in Webhooks channel never delivers the header — this is expected, not a config mistake | Route through apprise-api per Step 4; no URL variant against Dockhand directly fixes this |
+| Dockhand's Test shows delivered, but apprise-api never logs a delivery | apprise-api unreachable from Dockhand, or the `apprise://host/key` URL is malformed | Confirm the host:port and key against Step 4c; check apprise-api's own log |
+| apprise-api logs an attempt but the registry never sees it (or still 403s) | The stored Apprise URL in apprise-api doesn't match Step 4b, or the secret doesn't match `.env` | Re-check the stored URL in apprise-api's config UI; re-paste both secrets from the same source |
+| apprise-api delivery fails with a body/format error | `apprise://host/key` didn't produce a request apprise-api's `/notify/<key>` accepts (it needs `body`, Dockhand sends `message`) | Use the `:message=body` remapped `json://.../notify/<key>` form from Step 4c instead |
 | `403 ... read-only mode` | Startup health check failed (missing Git repo, `ansible.cfg`, or SSH key) | Run `system_health_check`, fix what it names, restart |
 | `400 expected application/json` | Sender is not using the `json://`/`jsons://` scheme | Confirm the URL scheme; enable Step 7's logging to see the content type actually sent |
 | `400 invalid JSON body` | Body is not JSON | Enable Step 7's logging |
