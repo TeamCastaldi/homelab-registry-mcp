@@ -282,6 +282,15 @@ ADR-004's unimplemented polling source.
   disabled, or enabled with no `DOCKHAND_WEBHOOK_SECRET`, leaves the route unmounted
   entirely rather than mounted-and-rejecting. Dockhand does not sign its webhook bodies, so
   auth is a bearer secret compared with `hmac.compare_digest` — there is no HMAC to verify.
+- **Dockhand's webhook channel speaks Apprise URL schemes, not plain `http(s)://`.** The
+  real-world configuration is `json://<host>:8765/webhooks/dockhand?+X-Dockhand-Token=<secret>`
+  (`jsons://` for TLS): `json://` is Apprise's generic-JSON channel, and the `+` prefix
+  promotes a query parameter into an HTTP header — which is how the secret arrives, and why
+  the `X-Dockhand-Token` alternative to `Authorization: Bearer` exists. It also means the
+  body that actually arrives is Apprise's `{version, title, message, type}`, so the
+  *generic* parse path is the one that runs in production, never the structured one.
+  `DOCKHAND_WEBHOOK_LOG_RAW_PAYLOAD=true` echoes a delivery body into the log when the
+  shape is in doubt. Setup procedure: `docs/SOPs/SOP-002-Connect-Dockhand-Webhook.md`.
 - The route only parses and dispatches. `ProposalEngine.create_for_image_update` /
   `create_for_vulnerability` feed `_open_proposal`, which already owns dedupe, target-file
   resolution, the DSPy confidence + YAML gates, branch/commit/PR, persistence, and
@@ -374,6 +383,7 @@ ADR-004's unimplemented polling source.
 | `DOCKHAND_WEBHOOK_SECRET` | unset | Shared secret Dockhand presents as `Authorization: Bearer <secret>` or `X-Dockhand-Token`; Dockhand does not sign bodies, so there is no HMAC to verify |
 | `DOCKHAND_WEBHOOK_MAX_BODY_BYTES` | `65536` | Cap on an accepted request body |
 | `DOCKHAND_WEBHOOK_VULNERABILITY_ENABLED` | `true` | Whether CVE alerts also earn a proposal |
+| `DOCKHAND_WEBHOOK_LOG_RAW_PAYLOAD` | `false` | Logs each authorized delivery body verbatim for diagnosing an unknown payload shape; bypasses field-name redaction, so turn it back off |
 | `DOCKHAND_WEBHOOK_VULNERABILITY_MIN_SEVERITY` | `high` | `low`/`medium`/`high`/`critical`; an unrecognized label surfaces rather than being dropped |
 | `CHAT_ENABLED` | `false` | Registers `/chat` and friends (ADR-009). `true` with neither `CHAT_OIDC_*` nor `CHAT_PASSWORD` set is a startup error — routes stay unregistered, never open |
 | `CHAT_OLLAMA_URL` | unset | e.g. `http://10.0.0.203:11434`; this repo never runs Ollama itself |

@@ -192,6 +192,12 @@ class Settings(BaseSettings):
     # there is no file change to propose.
     dockhand_webhook_vulnerability_enabled: bool = Field(default=True)
     dockhand_webhook_vulnerability_min_severity: str = Field(default="high")
+    # Log the raw request body of each authorized delivery, for working out what
+    # a given Dockhand build actually sends. Off by default and meant to be
+    # turned back off after setup: the body is logged as one string, so the
+    # structlog field-name redaction (token/password/secret/...) does not reach
+    # anything inside it.
+    dockhand_webhook_log_raw_payload: bool = Field(default=False)
 
     # --- Chat interface — opt-in browser UI backed by a local/LAN Ollama instance ---
     # Off by default. When enabled, a session (Authentik OIDC if configured, else

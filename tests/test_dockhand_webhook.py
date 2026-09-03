@@ -7,6 +7,7 @@ uses.
 """
 
 import httpx
+import structlog.testing
 
 from conftest import IsolatedSettings
 from registry_mcp.models import Service
@@ -334,3 +335,136 @@ async def test_vulnerability_without_image_is_ignored_not_errored(tmp_path):
 
     assert resp.status_code == 200
     assert "no image reference" in resp.json()["ignored"]
+
+
+# --- Apprise json:// delivery shape (what production actually sends) ---
+
+
+def _apprise_payload(title="Container updated: plex", message="", type_="info"):
+    """The body Apprise's json:// posts — Dockhand's webhook channel takes
+    Apprise-style URLs, so this shape, not the structured one, is what arrives."""
+    return {"version": "1.0", "title": title, "message": message, "type": type_}
+
+
+async def test_apprise_json_payload_shape_is_accepted(tmp_path):
+    """version/type are unknown to both models; title/message still parse.
+
+    The structured model must fail first (no event/container) and the generic
+    one must take it, with `extra="ignore"` dropping version/type.
+    """
+    db_path = str(tmp_path / "r.db")
+    store = RegistryStore(db_path)
+    store.create_service(Service(name="plex", display_name="Plex", host="workload-01"))
+
+    settings = _healthy_settings(tmp_path, db_path)
+    resp = await _post(
+        build_server(settings),
+        json=_apprise_payload(message="image=sha256:new old_image=sha256:old"),
+        headers=_auth(),
+    )
+
+    assert resp.status_code == 200
+    assert "digest-only" in resp.json()["ignored"]
+
+
+async def test_apprise_payload_with_tags_reaches_the_engine(tmp_path):
+    db_path = str(tmp_path / "r.db")
+    store = RegistryStore(db_path)
+    store.create_service(Service(name="plex", display_name="Plex", host="workload-01"))
+
+    settings = _healthy_settings(tmp_path, db_path)
+    resp = await _post(
+        build_server(settings),
+        json=_apprise_payload(
+            message=(
+                "image=lscr.io/linuxserver/plex:1.32.1 old_image=lscr.io/linuxserver/plex:1.32.0"
+            )
+        ),
+        headers=_auth(),
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "ignored" not in body and "skipped" not in body
+
+
+# --- raw payload logging (DOCKHAND_WEBHOOK_LOG_RAW_PAYLOAD) ---
+
+
+def _raw_lines(logs):
+    return [entry for entry in logs if entry.get("event") == "dockhand_webhook_raw_payload"]
+
+
+async def test_raw_payload_logged_when_enabled(tmp_path):
+    settings = _healthy_settings(
+        tmp_path, str(tmp_path / "r.db"), dockhand_webhook_log_raw_payload=True
+    )
+    server = build_server(settings)
+
+    with structlog.testing.capture_logs() as logs:
+        await _post(server, json=_apprise_payload(message="hello"), headers=_auth())
+
+    entries = _raw_lines(logs)
+    assert len(entries) == 1
+    assert "hello" in entries[0]["body"]
+    assert entries[0]["content_type"] == "application/json"
+
+
+async def test_raw_payload_not_logged_by_default(tmp_path):
+    settings = _healthy_settings(tmp_path, str(tmp_path / "r.db"))
+    server = build_server(settings)
+
+    with structlog.testing.capture_logs() as logs:
+        await _post(server, json=_apprise_payload(), headers=_auth())
+
+    assert _raw_lines(logs) == []
+
+
+async def test_raw_payload_is_truncated(tmp_path):
+    settings = _healthy_settings(
+        tmp_path,
+        str(tmp_path / "r.db"),
+        dockhand_webhook_log_raw_payload=True,
+        dockhand_webhook_max_body_bytes=1_000_000,
+    )
+    server = build_server(settings)
+
+    with structlog.testing.capture_logs() as logs:
+        await _post(server, json=_apprise_payload(message="x" * 5000), headers=_auth())
+
+    assert len(_raw_lines(logs)[0]["body"]) == 2000
+
+
+async def test_raw_payload_logged_even_when_content_type_is_wrong(tmp_path):
+    """The whole point: a bad content type 400s, and without this the operator
+    would have nothing to look at."""
+    settings = _healthy_settings(
+        tmp_path, str(tmp_path / "r.db"), dockhand_webhook_log_raw_payload=True
+    )
+    server = build_server(settings)
+
+    with structlog.testing.capture_logs() as logs:
+        resp = await _post(
+            server,
+            content=b'{"title":"hi"}',
+            headers={**_auth(), "content-type": "text/plain"},
+        )
+
+    assert resp.status_code == 400
+    entries = _raw_lines(logs)
+    assert len(entries) == 1
+    assert entries[0]["content_type"] == "text/plain"
+
+
+async def test_raw_payload_not_logged_for_unauthorized_caller(tmp_path):
+    """Logging sits after auth so an unauthenticated caller can never write to it."""
+    settings = _healthy_settings(
+        tmp_path, str(tmp_path / "r.db"), dockhand_webhook_log_raw_payload=True
+    )
+    server = build_server(settings)
+
+    with structlog.testing.capture_logs() as logs:
+        resp = await _post(server, json=_apprise_payload(), headers=_auth("wrong"))
+
+    assert resp.status_code == 403
+    assert _raw_lines(logs) == []

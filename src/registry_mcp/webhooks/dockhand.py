@@ -49,6 +49,9 @@ from registry_mcp.webhooks.schemas import (
 
 _log = get_logger("webhooks.dockhand")
 
+# Cap on a raw body echoed into the log by DOCKHAND_WEBHOOK_LOG_RAW_PAYLOAD.
+_RAW_PAYLOAD_LOG_CHARS = 2000
+
 
 def _validation_detail(exc: ValidationError) -> list[dict[str, str]]:
     """Project a ValidationError into JSON-serializable detail.
@@ -124,6 +127,16 @@ def register_webhook_routes(
     max_body = settings.dockhand_webhook_max_body_bytes
     min_severity = settings.dockhand_webhook_vulnerability_min_severity
     vuln_enabled = settings.dockhand_webhook_vulnerability_enabled
+    log_raw_payload = settings.dockhand_webhook_log_raw_payload
+    if log_raw_payload:
+        _log.warning(
+            "dockhand_webhook_raw_payload_logging_enabled",
+            detail=(
+                "DOCKHAND_WEBHOOK_LOG_RAW_PAYLOAD=true logs each delivery body verbatim; "
+                "field-name secret redaction does not apply inside it. Turn it off once "
+                "you have the payload sample you needed."
+            ),
+        )
 
     # Surrounding whitespace is stripped from both sides: a secret pasted into a
     # config UI (Dockhand's or this server's .env) easily picks up a trailing
@@ -162,15 +175,29 @@ def register_webhook_routes(
             if not _authorized(request):
                 return JSONResponse({"error": "unauthorized"}, status_code=403)
 
-            content_type = request.headers.get("content-type", "").split(";")[0].strip()
-            if content_type != "application/json":
-                return JSONResponse({"error": "expected application/json"}, status_code=400)
-
             raw = await request.body()
             # Re-checked against the real body: Content-Length is a claim, and a
             # chunked request may not send one at all.
             if len(raw) > max_body:
                 return JSONResponse({"error": "payload too large"}, status_code=413)
+
+            raw_content_type = request.headers.get("content-type", "")
+            if log_raw_payload:
+                # Deliberately before the content-type gate: a sender using the
+                # wrong content type is exactly the case an operator needs to
+                # see, and it would otherwise 400 with nothing recorded. After
+                # the auth check, so an unauthenticated caller can never write
+                # here.
+                _log.info(
+                    "dockhand_webhook_raw_payload",
+                    content_type=raw_content_type,
+                    body=raw.decode("utf-8", errors="replace")[:_RAW_PAYLOAD_LOG_CHARS],
+                )
+
+            content_type = raw_content_type.split(";")[0].strip()
+            if content_type != "application/json":
+                return JSONResponse({"error": "expected application/json"}, status_code=400)
+
             try:
                 payload = json.loads(raw)
             except (json.JSONDecodeError, UnicodeDecodeError):
@@ -242,4 +269,5 @@ def register_webhook_routes(
         path=settings.dockhand_webhook_path,
         vulnerability_enabled=vuln_enabled,
         min_severity=min_severity,
+        log_raw_payload=log_raw_payload,
     )

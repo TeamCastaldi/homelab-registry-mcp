@@ -347,6 +347,33 @@ you'll add that line with the token value yourself. Add the returned lines to
 `.env` and restart — the tool never writes the file for you (the container has
 no access to the host's `.env`) and never starts discovery immediately.
 
+## Connecting Dockhand
+
+If you run [Dockhand](https://github.com/Finsys/dockhand) for container
+management, it can push its update and CVE-scan alerts here and have them become
+staged pull requests instead of notifications you act on by hand. Off by default.
+
+The full procedure — including the non-obvious URL format Dockhand's webhook
+channel needs — is
+[SOP-002](SOPs/SOP-002-Connect-Dockhand-Webhook.md). The short version:
+
+```bash
+DOCKHAND_WEBHOOK_ENABLED=true
+DOCKHAND_WEBHOOK_SECRET=<a long random string>
+```
+
+then in Dockhand, **Settings → Notifications → Add channel**, Type `Webhooks`,
+with a URL of:
+
+```
+json://<registry-host>:8765/webhooks/dockhand?+X-Dockhand-Token=<secret>
+```
+
+That field takes Apprise-style schemes rather than plain `http(s)://` URLs —
+`json://` is the generic-JSON channel, and the `+` prefix turns a query
+parameter into an HTTP header, which is how the secret travels. See
+[ADR-010](ARDs/ADR-010-Dockhand-Update-Webhook.md) for the design rationale.
+
 ## Setting up the chat interface
 
 `/chat` is off by default (`CHAT_ENABLED=false`). It doesn't need Traefik or
@@ -485,3 +512,7 @@ prompt injection could in principle steer one of those calls.
   phase this guide's scripted path precedes)
 - [docs/ARDs/ADR-009-Conversational-Chat-Interface.md](ARDs/ADR-009-Conversational-Chat-Interface.md) —
   design rationale for the `/chat` web interface
+- [docs/ARDs/ADR-010-Dockhand-Update-Webhook.md](ARDs/ADR-010-Dockhand-Update-Webhook.md) —
+  design rationale for the Dockhand update webhook
+- [docs/SOPs/SOP-002-Connect-Dockhand-Webhook.md](SOPs/SOP-002-Connect-Dockhand-Webhook.md) —
+  step-by-step runbook for wiring Dockhand up

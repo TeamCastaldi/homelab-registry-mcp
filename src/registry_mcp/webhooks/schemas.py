@@ -1,18 +1,21 @@
 """Pydantic models for inbound Dockhand alerts, plus the pure parsing helpers
 that reduce them to one internal shape.
 
-Dockhand ships two very different bodies depending on how the operator wired the
-notification, so both are accepted:
+Two bodies are accepted, and which one arrives depends on how the notification
+was wired:
 
+* **Generic** (`DockhandGenericAlert`) — **what production actually sends.**
+  Dockhand's webhook channel takes Apprise-style URLs, so a real delivery is
+  Apprise's generic-JSON body: ``{"version": "1.0", "title": ..., "message":
+  ..., "type": "info"}`` (`version`/`type` are dropped by `extra="ignore"`).
+  Dockhand's own documented sample is the same shape —
+  ``{"title": "Container updated: c1", "message": "image=sha256:new
+  old_image=sha256:old", "agent": "Dockhand"}``. Everything useful is prose, so
+  it has to be parsed out, and the image references are often digests.
 * **Structured** (`DockhandStructuredAlert`) — an explicit
   `{"event", "container", "current_image", "latest_image", "server"}` object.
-  This is what a custom payload template (or a future Dockhand build) sends, and
-  it is the shape worth designing for.
-* **Generic** (`DockhandGenericAlert`) — the flat
-  `{"title", "message", "agent"}` body Dockhand's stock *generic webhook*
-  notifier documents, e.g. ``{"title": "Container updated: c1", "message":
-  "image=sha256:new old_image=sha256:old", "agent": "Dockhand"}``. Everything
-  useful is prose, so it has to be parsed out.
+  Tried first because it carries strictly more information, but it only arrives
+  from a custom payload template or a future Dockhand build.
 
 Both normalize to `NormalizedAlert`. `AlertKind.ignored` is a first-class,
 non-error outcome: a container start/stop event, a below-threshold CVE, or —
@@ -296,8 +299,9 @@ class DockhandGenericAlert(BaseModel):
                 return NormalizedAlert(
                     kind=AlertKind.ignored,
                     reason=(
-                        "no image tag in message (digest-only payload); configure Dockhand "
-                        "to send a structured alert to enable update proposals"
+                        "no image tag in message (digest-only payload); only a tagged image "
+                        "reference can become a version bump. Set "
+                        "DOCKHAND_WEBHOOK_LOG_RAW_PAYLOAD=true to inspect the body"
                     ),
                     **base,
                 )

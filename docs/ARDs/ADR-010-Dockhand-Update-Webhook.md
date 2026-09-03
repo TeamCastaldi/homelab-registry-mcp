@@ -77,7 +77,8 @@ message yields no tag normalizes to `AlertKind.ignored` with a stated reason.
 This is the important decision in the whole change: **the endpoint refuses to guess.**
 Inventing a tag from a digest would produce a confidently wrong pull request against a
 real compose file. Acknowledging and explaining is strictly better, and the response body
-tells the operator to configure a structured payload if they want update proposals.
+names the reason and points at `DOCKHAND_WEBHOOK_LOG_RAW_PAYLOAD` so the operator can see
+the body for themselves.
 
 ### Vulnerability alerts, and the no-fix case
 
@@ -97,6 +98,34 @@ A shared secret presented as `Authorization: Bearer <secret>` (or `X-Dockhand-To
 compared with `hmac.compare_digest`, is the mechanism actually available. There is no
 signature to verify, so none is implemented — noted here so a future reader does not
 mistake its absence for an oversight.
+
+**How the secret actually travels (established after the initial decision).** Dockhand's
+webhook notification channel takes **Apprise-style URL schemes**, not plain `http(s)://`
+URLs — its "Webhook URLs" field is populated with `gotify://`, `discord://`, `ntfy://` and
+friends, and the generic-JSON channel among them is Apprise's `json://` (`jsons://` over
+TLS). Apprise promotes any query parameter prefixed with `+` into an HTTP request header,
+so the working configuration is:
+
+```
+json://<registry-host>:8765/webhooks/dockhand?+X-Dockhand-Token=<secret>
+```
+
+The `X-Dockhand-Token` header this endpoint accepts alongside `Authorization: Bearer` is
+therefore the one to document: a `+Authorization=Bearer <secret>` form would need the space
+percent-encoded. This does not change the decision above; it records how it is realized.
+
+Two consequences follow. First, the body that actually arrives is Apprise's
+`{"version": "1.0", "title": …, "message": …, "type": "info"}` — which the two-model union
+already handles (`DockhandStructuredAlert` fails on the absent `event`/`container`,
+`DockhandGenericAlert` accepts it, `extra="ignore"` drops `version`/`type`), but it means
+the **generic** parse path is the one that runs in production and the structured path exists
+for a payload template Dockhand may or may not support. Second, since the payload shape a
+given Dockhand build sends cannot be known in advance,
+`DOCKHAND_WEBHOOK_LOG_RAW_PAYLOAD` (default off) echoes one delivery body into the log so an
+operator can settle it in a single click of Dockhand's Test button. It logs the body as one
+string, so field-name secret redaction does not reach inside it — off by default, and the
+setup procedure says to turn it back off. See
+[SOP-002](../SOPs/SOP-002-Connect-Dockhand-Webhook.md).
 
 Gating is fail-closed **at registration**, one step stricter than the removed WUD route
 (which mounted unconditionally and returned 403 per request): disabled, or enabled with no
