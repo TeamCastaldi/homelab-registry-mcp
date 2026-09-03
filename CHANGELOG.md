@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.26.1](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.26.0...v0.26.1) (2026-09-03)
+
+
+### Documentation
+
+* address Copilot review — Traefik labels, superseded-note, split URL ([6d8f5c9](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/6d8f5c984e25a2af02578eee0fc68a951c8550f9))
+* correct Dockhand webhook setup — native sender isn't real Apprise ([9dc2c33](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/9dc2c33e4e1c3a53aa8ce5721590ab61436b5446))
+* correct Dockhand webhook setup — native sender isn't real Apprise ([81d50a1](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/81d50a1631cc4399eb7eced168d03ad67eca6dd7))
+
 ## [0.26.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.25.0...v0.26.0) (2026-09-03)
 
 
