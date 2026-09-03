@@ -132,6 +132,41 @@ Gating is fail-closed **at registration**, one step stricter than the removed WU
 secret configured, leaves the route unmounted entirely. An unauthenticated endpoint never
 exists, even briefly. This matches ADR-009's posture for `/chat`.
 
+**Correction: Dockhand's built-in Webhooks channel is not Apprise (established against a
+live instance, after the above).** The `+header` mechanism above is real — verified against
+Apprise's own documentation — but testing it against an actual Dockhand deployment showed it
+never reaches this endpoint at all. A direct `curl` with `X-Dockhand-Token` as a real header
+succeeded immediately, proving this endpoint's own auth logic was never the problem. Dockhand
+itself, configured with `?+X-Dockhand-Token=<secret>` (and, separately, the percent-encoded
+`?%2BX-Dockhand-Token=<secret>`), consistently produced `403 unauthorized`. A `webhook.site`
+capture of Dockhand's actual outbound request settled why: `User-Agent: node` (a native
+Node.js sender, not the Python Apprise library), a payload shape of `{title, message, type,
+environment, timestamp}` — not Apprise's own `{version, title, message, type}` — and the `+`
+character stripped from the query key but never converted into a header; `X-Dockhand-Token`
+just lands as an inert, ignored query-string parameter. Dockhand's "Webhooks" channel borrows
+Apprise's scheme *names* (`json://`, `discord://`, ...) as a UI convenience; it does not run
+requests through the real Apprise engine, so no amount of URL-encoding recovers the header.
+
+The working fix is the escape hatch Dockhand's own dialog already documents for a provider
+outside its built-in list: run a real Apprise engine — `caronc/apprise-api` — as a small
+sidecar, store the header-carrying URL there (`json://<registry-host>:8765/webhooks/dockhand
+?+X-Dockhand-Token=<secret>`, where `+` genuinely is honored because it's genuine Apprise),
+and point Dockhand at `apprise://<apprise-api-host>:8000/<key>` instead of at this endpoint
+directly. One more mismatch to plan for: `apprise-api`'s own `/notify/<key>` endpoint requires
+a `body` field, while Dockhand's native payload uses `message` — if the `apprise://` scheme
+doesn't produce a compatible request, `apprise-api` supports remapping via query parameters
+(`json://<apprise-api-host>:8000/notify/<key>?:message=body`) as a documented fallback. See
+[SOP-002](../SOPs/SOP-002-Connect-Dockhand-Webhook.md) for the full procedure.
+
+A query-string token — having this endpoint also accept the secret as a plain query
+parameter, which Dockhand's native sender *can* deliver without any sidecar — was considered
+and rejected. A header value is not written to a reverse proxy's access log by default; a
+query string is part of the logged request line. An operator running Traefik access logging
+(a common homelab setup, including the one this was tested against) would end up with the
+shared secret sitting in plaintext log files for as long as they're retained. The sidecar
+costs an extra container; the query-string path costs a standing secret leak. This ADR keeps
+the header requirement rather than relaxing it.
+
 ### Unactionable alerts answer 200
 
 An unknown container, a container-state event, a below-threshold CVE, and a digest-only
