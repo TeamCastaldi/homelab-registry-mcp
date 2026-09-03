@@ -122,21 +122,40 @@ secret has to travel through something that *does* run real Apprise.
 **4a. Deploy `caronc/apprise-api`** somewhere both Dockhand and this registry
 can reach — a small sidecar alongside Dockhand is the natural place. As an
 ordinary `nodes/<node>/apprise-api/compose.yaml` entry in your private
-homelab repo (adapt to your own conventions; this is not a file this
-public repo ships):
+homelab repo, it should join the external `traefik` network and carry
+Traefik labels the same way every other node service here does (see this
+repo's own `docker-compose.yml` for the pattern this mirrors — ADR-006/007):
 
 ```yaml
 services:
   apprise-api:
     image: caronc/apprise:latest
     restart: unless-stopped
-    ports:
-      - "8000:8000"
+    networks:
+      - traefik
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.apprise-api.rule: "Host(`apprise.<your-domain>`)"
+      traefik.http.routers.apprise-api.entrypoints: "websecure"
+      traefik.http.routers.apprise-api.tls: "true"
+      # traefik.http.routers.apprise-api.tls.certresolver: "<your-certresolver-name>"
+      traefik.http.services.apprise-api.loadbalancer.server.port: "8000"
     volumes:
       - apprise-config:/config
+
 volumes:
   apprise-config:
+
+networks:
+  traefik:
+    external: true
 ```
+
+A direct `ports: ["8000:8000"]` publish works too if you'd rather skip
+Traefik for an internal-only sidecar — nothing here requires it, it's just
+consistency with how this repo already deploys everything else. Adapt
+either form to your own conventions; this is not a file this public repo
+ships.
 
 **4b. Store the real Apprise URL** in apprise-api's own config UI
 (`http://<apprise-api-host>:8000/`) under a config key, e.g. `dockhand`. This
@@ -159,10 +178,20 @@ jsons://registry-mcp.<your-domain>/webhooks/dockhand?+X-Dockhand-Token=<secret>
 - **Name:** `homelab-registry-mcp`
 - **Type:** `Webhooks`
 - **Status:** Enabled
-- **Webhook URLs (one per line):**
+- **Webhook URLs (one per line):** one of the two forms below, matching
+  whether you fronted apprise-api with Traefik in Step 4a
+
+Direct to the published port:
 
 ```
 apprise://<apprise-api-host>:8000/dockhand
+```
+
+Or through Traefik (`apprises://` is the TLS variant, matching `jsons://`
+elsewhere in this SOP — no port needed, Traefik terminates on 443):
+
+```
+apprises://apprise.<your-domain>/dockhand
 ```
 
 This is the exact escape hatch Dockhand's own dialog footer documents for a

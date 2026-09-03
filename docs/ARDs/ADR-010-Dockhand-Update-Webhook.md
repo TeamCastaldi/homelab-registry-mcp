@@ -99,12 +99,13 @@ compared with `hmac.compare_digest`, is the mechanism actually available. There 
 signature to verify, so none is implemented — noted here so a future reader does not
 mistake its absence for an oversight.
 
-**How the secret actually travels (established after the initial decision).** Dockhand's
-webhook notification channel takes **Apprise-style URL schemes**, not plain `http(s)://`
-URLs — its "Webhook URLs" field is populated with `gotify://`, `discord://`, `ntfy://` and
-friends, and the generic-JSON channel among them is Apprise's `json://` (`jsons://` over
-TLS). Apprise promotes any query parameter prefixed with `+` into an HTTP request header,
-so the working configuration is:
+**How the secret actually travels (established after the initial decision, later corrected
+below — see "Correction" further down before configuring Dockhand from this section
+alone).** Dockhand's webhook notification channel takes **Apprise-style URL schemes**, not
+plain `http(s)://` URLs — its "Webhook URLs" field is populated with `gotify://`,
+`discord://`, `ntfy://` and friends, and the generic-JSON channel among them is Apprise's
+`json://` (`jsons://` over TLS). Apprise itself promotes any query parameter prefixed with
+`+` into an HTTP request header, so a real Apprise engine given this URL honors it:
 
 ```
 json://<registry-host>:8765/webhooks/dockhand?+X-Dockhand-Token=<secret>
@@ -149,9 +150,14 @@ requests through the real Apprise engine, so no amount of URL-encoding recovers 
 
 The working fix is the escape hatch Dockhand's own dialog already documents for a provider
 outside its built-in list: run a real Apprise engine — `caronc/apprise-api` — as a small
-sidecar, store the header-carrying URL there (`json://<registry-host>:8765/webhooks/dockhand
-?+X-Dockhand-Token=<secret>`, where `+` genuinely is honored because it's genuine Apprise),
-and point Dockhand at `apprise://<apprise-api-host>:8000/<key>` instead of at this endpoint
+sidecar, and store the header-carrying URL there, where `+` genuinely is honored because
+it's genuine Apprise:
+
+```
+json://<registry-host>:8765/webhooks/dockhand?+X-Dockhand-Token=<secret>
+```
+
+Then point Dockhand at `apprise://<apprise-api-host>:8000/<key>` instead of at this endpoint
 directly. One more mismatch to plan for: `apprise-api`'s own `/notify/<key>` endpoint requires
 a `body` field, while Dockhand's native payload uses `message` — if the `apprise://` scheme
 doesn't produce a compatible request, `apprise-api` supports remapping via query parameters
