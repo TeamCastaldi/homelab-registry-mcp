@@ -107,6 +107,10 @@ here.
   registry's SQLite or git-crypt keys.
 - No update-triggered proposal path (WUD's role) until a future ADR wires
   one up against Komodo or ADR-004's polling source.
+  **Resolved by [ADR-010](ADR-010-Dockhand-Update-Webhook.md)** (2026-09-03),
+  which restores the path via a Dockhand push webhook rather than either
+  option listed here — Dockhand supplies the exact target tag, so ADR-004's
+  `ResolveLatestTag` reasoning gate is not needed.
 
 ## Open Items
 

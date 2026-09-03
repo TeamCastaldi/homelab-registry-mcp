@@ -169,6 +169,36 @@ class Settings(BaseSettings):
     ansible_cfg_path: str | None = Field(default=None)
     ssh_key_path: str | None = Field(default=None)
 
+    # --- Dockhand webhook (ADR-010) — inbound container-update alerts ---
+    # Off by default. Dockhand pushes an alert when it detects a newer upstream
+    # image (or a CVE in one it scanned); the route turns that into a staged
+    # `image_update`/`vulnerability_scan` proposal via the existing proposal
+    # engine. It never touches the registry or a container — the PR + human
+    # merge is the gate, same as every other write path here.
+    dockhand_webhook_enabled: bool = Field(default=False)
+    dockhand_webhook_path: str = Field(default="/webhooks/dockhand")
+    # Shared secret Dockhand presents as `Authorization: Bearer <secret>` or
+    # `X-Dockhand-Token`. Fail-closed: enabled with no secret set leaves the
+    # route unregistered entirely, the same posture as CHAT_ENABLED with no
+    # auth method configured — never an open endpoint. Dockhand does not sign
+    # its webhook bodies, so a shared bearer secret is the mechanism available.
+    dockhand_webhook_secret: str | None = Field(default=None)
+    # Cap on an accepted request body. An inbound endpoint must never hand an
+    # unbounded body to json.loads.
+    dockhand_webhook_max_body_bytes: int = Field(default=65536, gt=0)
+    # Whether Dockhand's vulnerability-scan alerts also earn a proposal, and the
+    # minimum severity that does. A CVE with no fixed version upstream is
+    # recorded as a rejected proposal and notified, never opened as a PR —
+    # there is no file change to propose.
+    dockhand_webhook_vulnerability_enabled: bool = Field(default=True)
+    dockhand_webhook_vulnerability_min_severity: str = Field(default="high")
+    # Log the raw request body of each authorized delivery, for working out what
+    # a given Dockhand build actually sends. Off by default and meant to be
+    # turned back off after setup: the body is logged as one string, so the
+    # structlog field-name redaction (token/password/secret/...) does not reach
+    # anything inside it.
+    dockhand_webhook_log_raw_payload: bool = Field(default=False)
+
     # --- Chat interface — opt-in browser UI backed by a local/LAN Ollama instance ---
     # Off by default. When enabled, a session (Authentik OIDC if configured, else
     # CHAT_PASSWORD) is required to reach /chat; all lab data the assistant sees

@@ -86,6 +86,9 @@ src/registry_mcp/
 │   ├── context.py         # small live snapshot (nodes/services/stale/health) injected per turn
 │   ├── persona.py         # generic in-repo persona.md + operator overlay (CHAT_PERSONA_PATH)
 │   └── static/index.html  # the whole frontend — vanilla JS, no build step
+├── webhooks/              # inbound HTTP receivers (ADR-010) — alerts → staged proposals
+│   ├── schemas.py         # Pydantic Dockhand payload models + pure parsing helpers
+│   └── dockhand.py        # POST /webhooks/dockhand — update/CVE alert → proposal
 ├── logging/events.py      # structlog config with secret redaction
 └── seed.py                # YAML bootstrap logic
 tests/                     # mirrors src/ layout; uses in-memory SQLite
@@ -270,6 +273,44 @@ configured is a startup error and the routes are never registered, not an open e
   ever assigned once `new URL(href).protocol` is exactly `http:` or `https:`, otherwise it
   degrades to plain text. See ADR-009's "Frontend" section for the full rationale.
 
+**Dockhand webhook (ADR-010, `webhooks/`):** an opt-in `POST /webhooks/dockhand` route
+that turns Dockhand's outbound update and CVE alerts into staged proposals. Off by default
+(`DOCKHAND_WEBHOOK_ENABLED=false`); requires the same `GIT_*` as the proposal layer. This
+restores the update-triggered path ADR-006 removed with WUD, by push rather than by
+ADR-004's unimplemented polling source.
+- Registered via `FastMCP.custom_route` like `chat/`, and **fail-closed at registration**:
+  disabled, or enabled with no `DOCKHAND_WEBHOOK_SECRET`, leaves the route unmounted
+  entirely rather than mounted-and-rejecting. Dockhand does not sign its webhook bodies, so
+  auth is a bearer secret compared with `hmac.compare_digest` — there is no HMAC to verify.
+- **Dockhand's webhook channel speaks Apprise URL schemes, not plain `http(s)://`.** The
+  real-world configuration is `json://<host>:8765/webhooks/dockhand?+X-Dockhand-Token=<secret>`
+  (`jsons://` for TLS): `json://` is Apprise's generic-JSON channel, and the `+` prefix
+  promotes a query parameter into an HTTP header — which is how the secret arrives, and why
+  the `X-Dockhand-Token` alternative to `Authorization: Bearer` exists. It also means the
+  body that actually arrives is Apprise's `{version, title, message, type}`, so the
+  *generic* parse path is the one that runs in production, never the structured one.
+  `DOCKHAND_WEBHOOK_LOG_RAW_PAYLOAD=true` echoes a delivery body into the log when the
+  shape is in doubt. Setup procedure: `docs/SOPs/SOP-002-Connect-Dockhand-Webhook.md`.
+- The route only parses and dispatches. `ProposalEngine.create_for_image_update` /
+  `create_for_vulnerability` feed `_open_proposal`, which already owns dedupe, target-file
+  resolution, the DSPy confidence + YAML gates, branch/commit/PR, persistence, and
+  notification. The long-dormant `context: str` seam on `_open_proposal` and
+  `PatchGenerator.generate` carries the literal tag — it exists *because* of the removed
+  ADR-005 flow and is re-activated rather than duplicated.
+- **Two payload shapes, and a deliberate refusal to guess.** `DockhandStructuredAlert`
+  (explicit `current_image`/`latest_image`/`server`) and `DockhandGenericAlert` (Dockhand's
+  documented flat `{title, message, agent}`) are both accepted. The generic body's image
+  refs are usually *digests*, which name no version a compose file can carry — such an alert
+  normalizes to `AlertKind.ignored` with a stated reason rather than becoming a guessed tag
+  bump. Inventing a tag would open a confidently wrong PR.
+- A CVE alert above `DOCKHAND_WEBHOOK_VULNERABILITY_MIN_SEVERITY` with a known fixed image is
+  an image bump; **without one, no PR is opened** — the finding is persisted as a `rejected`
+  `Proposal` naming the CVEs and notified, since there is no file change to propose.
+- Unactionable alerts (unknown container, container-state event, below-threshold CVE,
+  digest-only payload) answer **200** with `{"skipped"/"ignored": ...}`; a non-2xx would make
+  Dockhand retry a condition that never resolves. Malformed payloads get 422, bad
+  content-type/body 400, failed auth 403, oversized body 413, internal fault a structured 500.
+
 **A source only runs when its upstream env var is set** (e.g., no Traefik discovery if `TRAEFIK_API_URL` is unset).
 
 ## Environment Variables
@@ -337,6 +378,13 @@ configured is a startup error and the routes are never registered, not an open e
 | `SSH_DEFAULT_USER` | `root` | User for the ad-hoc SSH connection adoption uses to inspect a live container; reuses `SSH_KEY_PATH` |
 | `ADOPTION_DRAFT_TTL_MINUTES` | `60` | How long a drafted adoption may await the operator's keep/rotate decision before expiring |
 | `DELETE_CHALLENGE_TTL_MINUTES` | `5` | How long a `registry_delete_service`/`hardware-delete-node` math challenge stays answerable via its `*_confirm` tool before expiring |
+| `DOCKHAND_WEBHOOK_ENABLED` | `false` | Registers `POST /webhooks/dockhand` (ADR-010). `true` with no `DOCKHAND_WEBHOOK_SECRET` leaves the route unregistered, never open |
+| `DOCKHAND_WEBHOOK_PATH` | `/webhooks/dockhand` | |
+| `DOCKHAND_WEBHOOK_SECRET` | unset | Shared secret Dockhand presents as `Authorization: Bearer <secret>` or `X-Dockhand-Token`; Dockhand does not sign bodies, so there is no HMAC to verify |
+| `DOCKHAND_WEBHOOK_MAX_BODY_BYTES` | `65536` | Cap on an accepted request body |
+| `DOCKHAND_WEBHOOK_VULNERABILITY_ENABLED` | `true` | Whether CVE alerts also earn a proposal |
+| `DOCKHAND_WEBHOOK_LOG_RAW_PAYLOAD` | `false` | Logs each authorized delivery body verbatim for diagnosing an unknown payload shape; bypasses field-name redaction, so turn it back off |
+| `DOCKHAND_WEBHOOK_VULNERABILITY_MIN_SEVERITY` | `high` | `low`/`medium`/`high`/`critical`; an unrecognized label surfaces rather than being dropped |
 | `CHAT_ENABLED` | `false` | Registers `/chat` and friends (ADR-009). `true` with neither `CHAT_OIDC_*` nor `CHAT_PASSWORD` set is a startup error — routes stay unregistered, never open |
 | `CHAT_OLLAMA_URL` | unset | e.g. `http://10.0.0.203:11434`; this repo never runs Ollama itself |
 | `CHAT_OLLAMA_MODEL` | `qwen3:14b` | Must support Ollama tool calling |
@@ -378,6 +426,7 @@ Copy `.env.example` to `.env` and fill in the upstream URLs before running local
 - **A normalization rewrite must prove behavior equivalence before it's committed**: `normalization/rules.is_equivalent()` projects both the before and after YAML to a representation-independent form and compares them; a rewrite that changes anything Docker would see differently is never committed, regardless of whether the deterministic formatter or the DSPy escalation produced it. Security patches (`proposal/generator.py`) intentionally change behavior and have no equivalent gate.
 - **Normalization and security proposals are never bundled**: `normalization/` is its own engine, never merged into `proposal/`, and opens PRs under a separate label (`NORMALIZATION_LABEL`).
 - **New tools must be registered in `server.py`** — FastMCP doesn't auto-discover them.
+- **An inbound webhook never mutates, and never guesses**: `webhooks/` receivers parse, validate, and hand off to the proposal engine — they never write the registry or touch a container. An alert that doesn't carry enough to build a correct change (a digest where a tag is needed) is acknowledged with a reason, never turned into a speculative PR. Unactionable alerts answer 200 so the sender doesn't retry forever; only malformed input or failed auth earns a non-2xx.
 - **No LLM calls in the detection layer**: `reconcile.py` and discovery sources stay deterministic. Reasoning (DSPy) lives in `dspy/` and is wired in via injected callables; those layers never `import dspy`.
 - **DSPy/`dspy/` subpackage does not shadow the library**: Python 3 absolute imports resolve `import dspy` to the top-level package; the library is imported lazily so a disabled reasoning layer adds no startup cost.
 - **Naming**: kebab-case for MCP tool names, snake_case for Python, PascalCase for classes.
@@ -516,6 +565,7 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
   swept on every server startup, same idiom as `AdoptionDraftStore.purge_expired`. Both
   `*_confirm` tools are denied in chat (`chat/bridge.py`'s `DENY_ALWAYS`) right alongside the
   request tools they gate.
+- **ADR-010 complete**: Dockhand webhook (`webhooks/`) — `POST /webhooks/dockhand` turns container-update and CVE alerts into staged `image_update`/`vulnerability_scan` proposals through the existing engine. Restores the update-triggered path ADR-006 removed with WUD and closes its Open Item. Off by default (`DOCKHAND_WEBHOOK_ENABLED=false`), fail-closed at registration when no secret is set. Accepts both Dockhand payload shapes; the stock generic body is digest-only and is deliberately ignored rather than guessed at — see ADR-010's Negative consequences.
 - **ADR-009 complete**: web chat interface (`chat/`) — `/chat` + `/chat/auth/*` + `/chat/api/*`
   registered via `FastMCP.custom_route`, backed by an operator-run Ollama instance
   (`CHAT_OLLAMA_URL`), Authentik OIDC or static-password auth, and a fixed read/write tool
@@ -536,8 +586,8 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
 - **Installer modularized into per-phase scripts**: `install.sh`'s 9 steps and `bootstrap.sh`'s 6 phases each moved into their own self-contained file under `scripts/phases/install/` and `scripts/phases/bootstrap/` respectively, sharing prompt/`.env`-write/detection helpers via `scripts/lib/common.sh`. `install.sh`/`bootstrap.sh` are now thin orchestrators that just call each phase script in order; every phase is independently runnable (`bash scripts/phases/install/06-write-env.sh`, `bash scripts/phases/bootstrap/06-static-ip.sh`, ...) for debugging or a targeted brownfield/greenfield rerun without re-driving the whole installer. Cross-phase handoff goes through a small state file (a real env var of the same name still always wins, so every documented pre-seeding trick is unchanged) — see [scripts/README.md](scripts/README.md#modular-phase-scripts). External behavior (prompts, `.env` output, CI env-var pre-seeding) is unchanged; `.github/workflows/install-validation.yml` exercises it end-to-end same as before.
 - **`docs/plans/updated-phases.md` Phases 1-6 complete** (separate numbering from the phases above): `scripts/install.sh` one-shot installer for a fresh control-plane node (Phase 1); `health.py` startup checks (Git repo/`ansible.cfg`/SSH key) + always-on `system_health_check` tool + read-only degradation of the GitOps write tools when unhealthy (Phase 2); conversational GitOps loop — `poll_pr_comments`/`apply_review_feedback` push a DSPy-generated revision commit in response to a trusted PR comment, gated by a fail-closed `PROPOSAL_COMMENT_ALLOWED_USERS` allowlist and the same confidence/YAML gates as initial patch generation (Phase 3); `ansible/roles/docker-stack-deploy` + reusable `.github/workflows/deploy.yml` — the deploy *action* ships here, each operator's private homelab repo supplies only the *config* and a thin caller workflow (Phase 4); `SmtpNotificationProvider` — templated HTML proposal email (PR summary, diff, Approve/Request Changes/View Diff buttons) via stdlib `smtplib`, validated against SMTP2GO, `NOTIFICATION_PROVIDER=smtp` (Phase 5); public release scrub — removed an accidentally-committed operator-specific `nodes/` config and genericized real hostnames/IPs/personal identifiers across scripts and docs (Phase 6)
 - **`docs/plans/updated-phases.md` Phase 7 complete** (brownfield adoption & secret interception — the final phase in that plan): `proposal_adopt_service`/`_finalize`/`_cancel`/`_get` tools, `AdoptionDraft` model/store, `DetectHardcodedSecrets` DSPy signature, and the shared `gitcrypt.py` module (extracted from `tools/secrets.py` so both features encrypt through the same local-clone path rather than the remote Git API, which bypasses git-crypt's filter). Off by default (`ADOPTION_ENABLED=false`).
-- **ADR-005 superseded by ADR-006**: the monitoring/ingress stack ADR-005 introduced (Beszel, Gatus, Dozzle, WUD, docker-socket-proxy, Homepage, Glance, traefik-kop, Autorestic, Healthchecks.io heartbeat) has been fully removed, including the WUD-driven `/webhooks/wud` → `image_update` proposal flow (`FindingType.image_update`, `ProposalEngine.create_for_image_update`) — no replacement for that update-triggered proposal path exists yet (see ADR-006's Open Items).
+- **ADR-005 superseded by ADR-006**: the monitoring/ingress stack ADR-005 introduced (Beszel, Gatus, Dozzle, WUD, docker-socket-proxy, Homepage, Glance, traefik-kop, Autorestic, Healthchecks.io heartbeat) has been fully removed, including the WUD-driven `/webhooks/wud` → `image_update` proposal flow (`FindingType.image_update`, `ProposalEngine.create_for_image_update`) — that update-triggered proposal path is **restored by ADR-010** (`webhooks/dockhand.py`), sourced from Dockhand push alerts instead of WUD polling; `FindingType.image_update` is back alongside a new `vulnerability_scan`.
 - **ADR-006 complete, deploy mechanism superseded by ADR-007**: the Pi's only non-MCP services are Komodo (container management, logs, update detection) and Traefik (this node's central ingress, moved from a workload node; other nodes' `traefik-kop` instances publish to its Redis). Komodo is operational visibility only — the Ansible + GitHub Actions GitOps pipeline (Phase 4/ADR-001) remains the only path for MCP-proposed changes, on the Pi or any other node. Per ADR-007, both are now deployed as ordinary `nodes/<node>/<service>/compose.yaml` entries in the operator's private homelab repo through that same GitOps pipeline, rather than bundled into this repo's `docker-compose.yml`/`scripts/install.sh` as Compose profiles.
-- **ARD-004 proposed**: upstream version detection — `HomelabrepoDiscoverySource`, `UpstreamRegistrySource`, `ResolveLatestTag` DSPy module — would need its own `FindingType` now that ADR-006 removed the `image_update` one WUD used; the polling-based discovery source itself is not yet implemented
+- **ARD-004 proposed, partly advanced by ADR-010**: upstream version detection — `HomelabrepoDiscoverySource`, `UpstreamRegistrySource`, `ResolveLatestTag` DSPy module — none of the polling sources are implemented. ADR-010 supplies the `image_update` `FindingType` ADR-004 asked for and covers the detection gap by push instead: Dockhand sends the exact target tag, so `ResolveLatestTag` isn't needed on that path. ADR-004's three-way drift model (intended/actual/available) still wants a repo-reading source
 - **OOBE CLI** (ARD-003): fully documented but not yet implemented; currently a manual process
 - **Deferred**: network probe discovery (`DISCOVERY_NETWORK_ENABLED=false`), real auth (Bearer/mTLS), multi-node Ansible bootstrap (Phase E)

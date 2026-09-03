@@ -117,6 +117,104 @@ class ProposalEngine:
 
         return await self._open_proposal(finding, service, actor=actor)
 
+    async def create_for_image_update(
+        self,
+        service_id: str,
+        *,
+        image: str,
+        current_tag: str,
+        new_tag: str,
+        actor: str = "dockhand-webhook",
+    ) -> dict[str, Any]:
+        """Open an image-tag-bump PR from an update alert (ADR-010).
+
+        The detector (Dockhand) already supplies the exact new tag, so unlike
+        ADR-004's polling path there is no tag-interpretation ambiguity to
+        resolve here — the finding is fed straight to the patch generator as a
+        literal context string.
+        """
+        if not self.configured:
+            return {"error": "write path not configured (set GIT_BASE_URL, GIT_TOKEN, GIT_REPO)"}
+        if not image or not new_tag:
+            return {"error": "image and new_tag are required to open an image_update proposal"}
+
+        service = self._store.get_service(service_id)
+        if service is None:
+            return {"error": f"no service found for {service_id!r}"}
+
+        context = f"image: {image}\ncurrent_tag: {current_tag}\nnew_tag: {new_tag}"
+        return await self._open_proposal(
+            FindingType.image_update, service, actor=actor, context=context
+        )
+
+    async def create_for_vulnerability(
+        self,
+        service_id: str,
+        *,
+        image: str,
+        current_tag: str,
+        fixed_tag: str,
+        severity: str = "",
+        cve_ids: list[str] | None = None,
+        actor: str = "dockhand-webhook",
+    ) -> dict[str, Any]:
+        """Stage a response to a CVE finding against a running image (ADR-010).
+
+        With a known fixed tag this is an image bump with CVE motivation, so it
+        goes through the same pipeline as any other finding. **Without one there
+        is no file change to propose** — inventing a tag would be worse than
+        saying nothing — so the finding is recorded as a rejected proposal and
+        notified, leaving an audit trail without opening an unmergeable PR.
+        """
+        if not self.configured:
+            return {"error": "write path not configured (set GIT_BASE_URL, GIT_TOKEN, GIT_REPO)"}
+        # Same bar as create_for_image_update. Without a repository the
+        # notification degrades to ":<tag>", and on the fixed-tag path the
+        # generator gets no anchor for *which* image ref to edit — a real risk
+        # of the wrong edit in a compose file carrying several.
+        if not image:
+            return {"error": "image is required to open a vulnerability_scan proposal"}
+
+        service = self._store.get_service(service_id)
+        if service is None:
+            return {"error": f"no service found for {service_id!r}"}
+
+        cves = cve_ids or []
+        cve_text = ", ".join(cves) if cves else "unspecified CVEs"
+
+        if not fixed_tag:
+            reason = f"no fixed version available upstream ({cve_text})"
+            existing = self._proposals.find_open(service.id, FindingType.vulnerability_scan)
+            if existing is not None:
+                return {
+                    "skipped": "open proposal already exists",
+                    "proposal": existing.model_dump(mode="json"),
+                }
+            proposal = self._proposals.create(
+                Proposal(
+                    service_id=service.id,
+                    finding_type=FindingType.vulnerability_scan,
+                    file_path=self._resolve_target(service) or "",
+                    status=ProposalStatus.rejected,
+                    rejection_reason=reason,
+                    actor=actor,
+                )
+            )
+            await self._notify(
+                f"WARNING: {service.name}: {severity or 'vulnerability'} finding, no fix available",
+                f"{image}:{current_tag or 'unknown'} — {cve_text}. "
+                "No upstream fixed version; needs manual review.",
+            )
+            return {"rejected": reason, "proposal": proposal.model_dump(mode="json")}
+
+        context = (
+            f"image: {image}\ncurrent_tag: {current_tag}\nnew_tag: {fixed_tag}\n"
+            f"severity: {severity or 'unknown'}\ncves: {cve_text}"
+        )
+        return await self._open_proposal(
+            FindingType.vulnerability_scan, service, actor=actor, context=context
+        )
+
     async def _open_proposal(
         self,
         finding: FindingType,
