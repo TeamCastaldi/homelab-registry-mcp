@@ -18,7 +18,8 @@ Two response conventions worth knowing before editing:
 
 * **Fail closed at registration.** Disabled, or enabled with no shared secret,
   leaves the route unmounted entirely (a real 404), rather than mounted and
-  rejecting at request time. Same posture as `chat/routes.py`.
+  rejecting at request time — an unconfigured receiver is indistinguishable
+  from one that was never built.
 * **An unactionable alert answers 200.** A non-2xx makes Dockhand retry, so an
   unknown container or a non-update event is acknowledged with `{"skipped":
   ...}` / `{"ignored": ...}`. Only a *malformed* payload or a failed auth check

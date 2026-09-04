@@ -76,16 +76,6 @@ src/registry_mcp/
 │   ├── secrets.py         # secrets_status/encrypt/decrypt/add/rotate/list_keys (Phase C)
 │   ├── proposal.py        # proposal_create/list_open/get/cancel/verify/normalize (Phase 8)
 │   └── adoption.py        # proposal_adopt_service[_finalize/_cancel/_get] (Phase 7 brownfield)
-├── chat/                  # web chat UI (ADR-009) — opt-in, CHAT_ENABLED=false by default
-│   ├── routes.py          # @mcp.custom_route handlers: /chat, /chat/auth/*, /chat/api/*
-│   ├── agent.py           # the SSE streaming loop: Ollama ⇄ MCP tool rounds
-│   ├── ollama.py          # OllamaClient — same httpx retry idiom as integrations/*, streaming
-│   ├── bridge.py          # READ_TOOLS/WRITE_TOOLS/DENY_ALWAYS allowlist — the actual security boundary
-│   ├── auth.py            # OIDC (Authentik) code+PKCE flow, static-password fallback
-│   ├── session.py         # stdlib HMAC-signed session/login-flow cookies, no server-side store
-│   ├── context.py         # small live snapshot (nodes/services/stale/health) injected per turn
-│   ├── persona.py         # generic in-repo persona.md + operator overlay (CHAT_PERSONA_PATH)
-│   └── static/index.html  # the whole frontend — vanilla JS, no build step
 ├── webhooks/              # inbound HTTP receivers (ADR-010) — alerts → staged proposals
 │   ├── schemas.py         # Pydantic Dockhand payload models + pure parsing helpers
 │   └── dockhand.py        # POST /webhooks/dockhand — update/CVE alert → proposal
@@ -233,52 +223,13 @@ GitOps-managed) under management without leaking its hardcoded secrets. Off by d
 - `AdoptionDraft` rows hold the captured live secret values only long enough for the
   operator to answer (`ADOPTION_DRAFT_TTL_MINUTES`, default 60) before expiring.
 
-**Chat interface (ADR-009, `chat/`):** an opt-in browser page at `/chat` backed by a
-local/LAN Ollama instance the operator runs — this repo never runs Ollama itself. Off by
-default (`CHAT_ENABLED=false`); `true` with neither Authentik OIDC nor `CHAT_PASSWORD`
-configured is a startup error and the routes are never registered, not an open endpoint.
-- Registered via `FastMCP.custom_route` (available since the pinned `mcp` SDK, 1.29.0) inside
-  `build_server()`, alongside `/mcp` on the same port — `/mcp` itself gains no auth from this;
-  it stays exactly as unauthenticated as before.
-- Every module under `chat/` takes only `(mcp, settings)` — no direct `RegistryStore`/
-  `HardwareStore`/engine reference. All lab data the assistant can see comes back through
-  `mcp.list_tools()`/`mcp.call_tool()`, the same surface any MCP client uses, filtered by a
-  fixed **allowlist by tool name** (`chat/bridge.py`'s `READ_TOOLS`/`WRITE_TOOLS`/`DENY_ALWAYS`)
-  — never a prefix match, and `DENY_ALWAYS` (all `secrets_*`, all `proposal_adopt_service*`,
-  both hard deletes, `discovery_connect_*`, `hardware-discover-now`) wins unconditionally,
-  regardless of `CHAT_ALLOW_WRITE`. This allowlist is the actual security boundary; the chat
-  login is a UI convenience gate, not a new boundary around the lab.
-- Auth resolves once at startup: Authentik OIDC (authorization-code + PKCE, no ID-token
-  signature verification since it's a back-channel confidential-client exchange — see
-  ADR-009) takes precedence over `CHAT_PASSWORD` whenever fully configured. Sessions are a
-  stateless HMAC-signed cookie (stdlib `hmac`, no new dependency) — no server-side session
-  store, so login survives a restart whenever `CHAT_SESSION_SECRET` is set.
-- Conversation history is client-side only; the server holds nothing between requests. A
-  small live context pack (node roster, service counts, staleness, health mode) is rebuilt on
-  a TTL and injected per turn so common questions resolve without a tool call.
-- Persona = generic in-repo `chat/persona.md` (no real hostnames — this repo is public) +
-  an optional operator overlay read from `CHAT_PERSONA_PATH`, an absolute path in the same
-  trust class as `SECRETS_KEY_PATH`/`ANSIBLE_CFG_PATH` (plain existence check, not
-  `gitcrypt.check_path`, which is for repo-relative caller-supplied paths).
-- Streaming is hand-rolled Server-Sent Events (`chat/agent.py`) over a `StreamingResponse` —
-  not `sse-starlette` (transitive-only via `mcp`), not WebSocket. The frontend
-  (`chat/static/index.html`) is one self-contained vanilla-JS file, no build step; model
-  output is rendered via `createElement`/`textContent` only, never `innerHTML`, since it can
-  echo lab-sourced data. A hand-rolled markdown parser + DOM builder (headers, bold/italic,
-  inline code, fenced code blocks, tables, lists, links) formats the completed response —
-  streamed tokens still append as flat text and get swapped for the formatted version once
-  the response finishes, so nothing during the stream is ever partially parsed. The parser
-  only produces plain-data node descriptors (no DOM access at all); the builder that turns
-  those into real nodes is the one place with a security check — a link's `href` is only
-  ever assigned once `new URL(href).protocol` is exactly `http:` or `https:`, otherwise it
-  degrades to plain text. See ADR-009's "Frontend" section for the full rationale.
-
 **Dockhand webhook (ADR-010, `webhooks/`):** an opt-in `POST /webhooks/dockhand` route
 that turns Dockhand's outbound update and CVE alerts into staged proposals. Off by default
 (`DOCKHAND_WEBHOOK_ENABLED=false`); requires the same `GIT_*` as the proposal layer. This
 restores the update-triggered path ADR-006 removed with WUD, by push rather than by
 ADR-004's unimplemented polling source.
-- Registered via `FastMCP.custom_route` like `chat/`, and **fail-closed at registration**:
+- Registered via `FastMCP.custom_route` (the only route this server mounts alongside
+  `/mcp`), and **fail-closed at registration**:
   disabled, or enabled with no `DOCKHAND_WEBHOOK_SECRET`, leaves the route unmounted
   entirely rather than mounted-and-rejecting. Dockhand does not sign its webhook bodies, so
   auth is a bearer secret compared with `hmac.compare_digest` — there is no HMAC to verify.
@@ -390,31 +341,6 @@ ADR-004's unimplemented polling source.
 | `DOCKHAND_WEBHOOK_VULNERABILITY_ENABLED` | `true` | Whether CVE alerts also earn a proposal |
 | `DOCKHAND_WEBHOOK_LOG_RAW_PAYLOAD` | `false` | Logs each authorized delivery body verbatim for diagnosing an unknown payload shape; bypasses field-name redaction, so turn it back off |
 | `DOCKHAND_WEBHOOK_VULNERABILITY_MIN_SEVERITY` | `high` | `low`/`medium`/`high`/`critical`; an unrecognized label surfaces rather than being dropped |
-| `CHAT_ENABLED` | `false` | Registers `/chat` and friends (ADR-009). `true` with neither `CHAT_OIDC_*` nor `CHAT_PASSWORD` set is a startup error — routes stay unregistered, never open |
-| `CHAT_OLLAMA_URL` | unset | e.g. `http://10.0.0.203:11434`; this repo never runs Ollama itself |
-| `CHAT_OLLAMA_MODEL` | `qwen3:14b` | Must support Ollama tool calling |
-| `CHAT_OLLAMA_TIMEOUT_SECONDS` / `CHAT_OLLAMA_RETRIES` | `300` / `3` | Retries only apply before the first streamed chunk — never mid-stream |
-| `CHAT_OLLAMA_KEEP_ALIVE` | `30m` | Avoids a model-reload stall on every idle gap |
-| `CHAT_NUM_CTX` | `8192` | `options.num_ctx`; budget against the model's actual context window |
-| `CHAT_TEMPERATURE` | `0.6` | |
-| `CHAT_THINK` | `false` | Qwen3-style thinking traces; costs context and latency |
-| `CHAT_MAX_CONCURRENT` | `2` | In-process counter; one GPU serializes generations anyway |
-| `CHAT_MAX_HISTORY_MESSAGES` | `20` | Server-enforced cap regardless of what the client posts |
-| `CHAT_ALLOW_WRITE` | `false` | Adds `WRITE_TOOLS` to the allowlist; forced off when the server's own startup health check is in read-only mode |
-| `CHAT_TOOL_DENY` | unset | Comma-separated extra denials; restrictive-only, can't re-admit a `DENY_ALWAYS` tool |
-| `CHAT_MAX_TOOL_ROUNDS` | `4` | Caps Ollama↔tool round trips per user turn |
-| `CHAT_TOOL_RESULT_MAX_CHARS` / `CHAT_CONTEXT_MAX_CHARS` | `8000` / `6000` | Truncation caps feeding the model's limited context |
-| `CHAT_CONTEXT_TTL_SECONDS` | `60` | How often the live snapshot (`context.py`) is rebuilt |
-| `CHAT_PERSONA_PATH` | unset | Absolute path to an operator overlay (e.g. a private homelab-repo skill file); same no-expansion caveat as `SECRETS_REPO_PATH` |
-| `CHAT_PERSONA_MAX_CHARS` | `8000` | |
-| `CHAT_SESSION_SECRET` | unset | HMAC signing key; unset generates an ephemeral per-process key — sessions won't survive a restart |
-| `CHAT_SESSION_TTL_SECONDS` | `43200` | |
-| `CHAT_COOKIE_SECURE` | `true` | Set `false` only for a direct `http://<ip>:8765` deployment with no TLS in front — strictly less safe |
-| `CHAT_ALLOWED_ORIGINS` | unset | Comma-separated; enforced on `POST /chat/api/send` when set |
-| `CHAT_PASSWORD` | unset | Static-password fallback; ignored whenever OIDC is fully configured below |
-| `CHAT_OIDC_ISSUER` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_REDIRECT_URL` | unset | All four required together to enable OIDC. `CHAT_OIDC_REDIRECT_URL` must be the exact URL registered on the provider — never derived from the request `Host` header |
-| `CHAT_OIDC_SCOPES` | `openid profile email` | |
-| `CHAT_OIDC_ALLOWED_GROUPS` | unset | Comma-separated; empty means any authenticated user, not "trust no one" — see the field's comment in `config.py` for why this differs from `PROPOSAL_COMMENT_ALLOWED_USERS` |
 | `EVENT_RETENTION_DAYS` | `90` | Old events purged on startup |
 | `LOG_LEVEL` | `INFO` | |
 
@@ -439,8 +365,8 @@ Copy `.env.example` to `.env` and fill in the upstream URLs before running local
 - **All repo-relative paths go through `gitcrypt.check_path`**: every user- or draft-supplied path (`secrets_*` tools, adoption's `.env` write) is validated by the shared helper in `gitcrypt.py` — reject absolute paths, reject `..` traversal, then `.resolve()` + `is_relative_to(repo)` as a final containment check (also catches symlink escapes). Never join a repo base with a caller-supplied path without it; `Path(base) / "/etc/passwd"` silently discards `base` and returns `/etc/passwd`.
 - **A secret never reaches Git through `GitProvider.commit_file()`**: that call is a raw hosting-API content write and bypasses git-crypt's local clean filter entirely. Anything that must land encrypted (the `.env` files `secrets_*` and adoption write) goes through `gitcrypt.py`'s local-clone subprocess helpers instead — see the brownfield adoption entry above.
 - **Structured logs go to stderr + file** — keeps stdio JSON-RPC transport clean.
-- **No HTTP /health endpoint on `/mcp` itself**: Dockerfile still uses a TCP probe on `MCP_PORT` for container health. `FastMCP.custom_route` (available since the pinned `mcp` SDK, 1.29.0) does let the server expose arbitrary Starlette routes alongside `/mcp` — the chat interface (`chat/routes.py`, ADR-009) is the first thing to use it — but no `/health` HTTP route has been added, and this line describes that gap, not a technical limitation.
-- **ForwardAuth in front of MCP clients breaks them** (clients don't follow redirects). This still applies to `/mcp` itself — auth strategy there is deferred; the endpoint is LAN-only. It does **not** apply to a browser client: the chat interface (`/chat`, ADR-009) authenticates in-process (Authentik OIDC or a static password) precisely because a browser *can* follow redirects, while `/mcp` remains unauthenticated on the same port exactly as before.
+- **No HTTP /health endpoint on `/mcp` itself**: Dockerfile still uses a TCP probe on `MCP_PORT` for container health. `FastMCP.custom_route` (available since the pinned `mcp` SDK, 1.29.0) does let the server expose arbitrary Starlette routes alongside `/mcp` — the Dockhand webhook (`webhooks/dockhand.py`, ADR-010) is the only thing that uses it — but no `/health` HTTP route has been added, and this line describes that gap, not a technical limitation.
+- **ForwardAuth in front of MCP clients breaks them** (clients don't follow redirects). This applies to `/mcp` itself — auth strategy there is deferred; the endpoint is LAN-only. It applies equally to `/webhooks/dockhand`, which authenticates in-process with a bearer secret rather than sitting behind a redirect-based proxy. There is no browser-facing route on this port.
 
 ## Testing
 
@@ -453,12 +379,6 @@ uv run pytest --cov=src                  # with coverage
 ```
 
 Fixtures live in `tests/conftest.py` (IsolatedSettings, in-memory store).
-
-`tests/chat_markdown.test.mjs` (+ its `tests/chat_markdown_support.mjs` helper) is the one
-exception: `node --test`, zero npm dependencies, covering the JS-only markdown parser/DOM
-builder in `chat/static/index.html`. It extracts that file's `<script>` block directly (no
-duplicated logic) and runs it against a hand-rolled fake DOM. Not wired into `uv run pytest`
-or CI — run it with `node --test tests/chat_markdown.test.mjs` when touching that renderer.
 
 ### Installer validation (two-tier)
 
@@ -567,21 +487,14 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
   `DELETE_CHALLENGE_TTL_MINUTES` (default 5) before the row is actually removed. Wrong
   answer, expired challenge, or an already-resolved one all invalidate it outright — no
   retries, just call the delete tool again for a fresh problem. Expired challenges are also
-  swept on every server startup, same idiom as `AdoptionDraftStore.purge_expired`. Both
-  `*_confirm` tools are denied in chat (`chat/bridge.py`'s `DENY_ALWAYS`) right alongside the
-  request tools they gate.
+  swept on every server startup, same idiom as `AdoptionDraftStore.purge_expired`.
 - **ADR-010 complete**: Dockhand webhook (`webhooks/`) — `POST /webhooks/dockhand` turns container-update and CVE alerts into staged `image_update`/`vulnerability_scan` proposals through the existing engine. Restores the update-triggered path ADR-006 removed with WUD and closes its Open Item. Off by default (`DOCKHAND_WEBHOOK_ENABLED=false`), fail-closed at registration when no secret is set. Accepts both Dockhand payload shapes; the stock generic body is digest-only and is deliberately ignored rather than guessed at — see ADR-010's Negative consequences.
-- **ADR-009 complete**: web chat interface (`chat/`) — `/chat` + `/chat/auth/*` + `/chat/api/*`
-  registered via `FastMCP.custom_route`, backed by an operator-run Ollama instance
-  (`CHAT_OLLAMA_URL`), Authentik OIDC or static-password auth, and a fixed read/write tool
-  allowlist. Off by default (`CHAT_ENABLED=false`). Resolves ADR-002 §4.4's Open Questions
-  1-4; corrects the "no HTTP endpoint" / "ForwardAuth breaks MCP clients" conventions that
-  predated `mcp` SDK 1.29.0's `custom_route` support (see ADR-009). DSPy-on-Ollama and a
-  confidence-gated local→Claude escalation are noted as future work, not attempted here.
-  **Follow-up landed**: safe markdown rendering for assistant responses (headers, bold/italic,
-  inline code, fenced code blocks, tables, lists, links) — still `createElement`/`textContent`
-  only, never `innerHTML`, so ADR-009's XSS guarantee is unchanged; see ADR-009's "Frontend"
-  section and `tests/chat_markdown.test.mjs`.
+- **ADR-009 removed**: the web chat interface (`chat/`) and its Ollama backend are gone —
+  `/chat`, `/chat/auth/*`, `/chat/api/*`, the `CHAT_*` settings, the `READ_TOOLS`/
+  `WRITE_TOOLS`/`DENY_ALWAYS` bridge, and the JS markdown renderer with it. `/mcp` is
+  unaffected; `webhooks/dockhand.py` is now the sole `FastMCP.custom_route` consumer, so
+  `starlette` remains a required dependency. ADR-002 §4.4's Open Questions 1-4, which
+  ADR-009 had resolved, are open again.
 - **Phase 7 complete**: cross-source linking (Authentik ↔ Traefik ↔ Docker), `service_get_full_context()`, and the DSPy reasoning layer (`ResolveServiceIdentity`, `InferServiceMetadata`, `SummarizeAccessAudit`) — off by default via `DSPY_ENABLED`
 - **Phase 8 in progress**: security write path landed — `GenerateRemediationPatch`, Gitea + Ntfy/Smtp/Null providers, `Proposal` model/store, proposal engine (create + verification sweep), and the `proposal_*` tools. Off by default (`GIT_*` unset, `PROPOSAL_AUTO_CREATE=false`); see ADR-002. Normalization path complete — `docs/specs/spec-compose-normal-form.md`, the `normalization/` engine (`ruamel.yaml` deterministic formatter + `NormalizeConfigFile` DSPy escalation + `yamllint`), and the `proposal_normalize` tool + `NORMALIZATION_SCHEDULE` scheduler job. Off by default (`NORMALIZATION_ENABLED=false`).
 - **Phase 8 remaining**: flipping `PROPOSAL_DRY_RUN=false` (and `NORMALIZATION_DRY_RUN=false`) against the homelab repo (a deliberate human step); runbooks, cold-restore testing, Ansible provisioning. (GitHub provider landed — `GitHubGitProvider` alongside Gitea, selected via `GIT_PROVIDER=github`.)

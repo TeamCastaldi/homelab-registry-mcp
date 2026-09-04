@@ -1,9 +1,7 @@
 # Tests
 
-The pytest suite for `homelab-registry-mcp`. Almost all automated tests live here as
-`test_*.py`; the one exception is `chat_markdown.test.mjs` (+ its `chat_markdown_support.mjs`
-helper), a `node --test` suite for the JS-only markdown renderer in
-`src/registry_mcp/chat/static/index.html` — see "JS tests" below.
+The pytest suite for `homelab-registry-mcp`. Every automated test lives here as
+`test_*.py`.
 
 ## Layout
 
@@ -47,23 +45,3 @@ uv run pytest --cov=src                  # with coverage (needs: uv add --dev py
 
 CI runs `ruff check`, `ruff format --check`, and `pytest -q` on every push — tests
 must pass before a PR is merged.
-
-## JS tests
-
-`chat_markdown.test.mjs` covers the markdown parser and DOM builder that render assistant
-responses in `/chat` (`chat/static/index.html`) — a hand-rolled implementation kept dependency-
-and build-step-free per that page's own constraints (see CLAUDE.md's chat section and
-ADR-009). `node --test` is a deliberate, narrow exception to "no Node toolchain": zero npm
-dependencies, and it never touches the deployed artifact or the `Dockerfile`.
-
-`chat_markdown_support.mjs` extracts the renderer's `<script>` block directly out of
-`index.html` — the single source of truth, nothing here duplicates that logic — and runs it
-via `node:vm` against a small fake `document` (`createElement`/`textContent`/
-`querySelector[All]` only, no jsdom).
-
-```bash
-node --test tests/chat_markdown.test.mjs   # parser/DOM-builder unit tests + adversarial fixtures
-```
-
-Not wired into `uv run pytest` or CI (JS-only code, JS-only test runner); run it by hand
-whenever `chat/static/index.html`'s markdown-render block changes.
