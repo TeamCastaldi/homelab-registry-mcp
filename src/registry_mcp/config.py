@@ -43,13 +43,12 @@ class Settings(BaseSettings):
     # Event log retention
     event_retention_days: int = Field(default=90)
 
-    # Discovery
+    # Discovery. A source runs when its upstream URL is set — `docker_base_url`
+    # is the Docker gate, not a separate enabled flag.
     docker_base_url: str | None = Field(default=None)
-    discovery_docker_enabled: bool = Field(default=True)
     discovery_traefik_interval_seconds: int = Field(default=300)
     discovery_docker_interval_seconds: int = Field(default=300)
     discovery_authentik_interval_seconds: int = Field(default=900)
-    discovery_network_enabled: bool = Field(default=False)
     discovery_stale_after_misses: int = Field(default=3)
 
     # Reasoning layer (DSPy) — Phase 7. Off by default: the server reasons only

@@ -33,7 +33,6 @@ class SourceType(StrEnum):
     manual = "manual"
     traefik = "traefik"
     docker = "docker"
-    network = "network"
     authentik = "authentik"
 
 
