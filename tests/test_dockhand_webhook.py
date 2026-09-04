@@ -2,8 +2,8 @@
 
 The route is mounted via FastMCP's `custom_route` on the same Starlette app as
 the MCP session, so it's exercised end-to-end with an ASGI client rather than by
-calling the handler function directly — the same approach `test_chat_routes.py`
-uses.
+calling the handler function directly — the registration gating is the point, and
+only a real request through the app proves an unmounted route 404s.
 """
 
 import httpx
