@@ -483,6 +483,9 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
   retries, just call the delete tool again for a fresh problem. Expired challenges are also
   swept on every server startup, same idiom as `AdoptionDraftStore.purge_expired`.
 - **ADR-010 complete**: Dockhand webhook (`webhooks/`) — `POST /webhooks/dockhand` turns container-update and CVE alerts into staged `image_update`/`vulnerability_scan` proposals through the existing engine. Restores the update-triggered path ADR-006 removed with WUD and closes its Open Item. Off by default (`DOCKHAND_WEBHOOK_ENABLED=false`), fail-closed at registration when no secret is set. Accepts both Dockhand payload shapes; the stock generic body is digest-only and is deliberately ignored rather than guessed at — see ADR-010's Negative consequences.
+- **ADR-011 accepted**: withdraws the Komodo integration and the `/chat` interface from the
+  server's supported surface. Supersedes ADR-009 in full and amends ADR-006 §1 (the
+  integration only — Komodo still runs on the Pi). See the two bullets below.
 - **Komodo integration removed**: `integrations/komodo/` and its 7 read-only tools
   (`komodo_health`, `komodo_list_stacks`, `komodo_get_stack`, `komodo_list_services`,
   `komodo_get_service`, `komodo_list_updates`, `komodo_get_logs`), the `komodo://stacks/{name}`

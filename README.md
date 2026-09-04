@@ -151,8 +151,9 @@ In Claude Desktop, add an MCP server with the same URL under Settings.
 - [docs/ARDs/ADR-006-Pi-Non-MCP-Services-Komodo-Traefik.md](docs/ARDs/ADR-006-Pi-Non-MCP-Services-Komodo-Traefik.md) — Pi's non-MCP services (Komodo + Traefik), superseding ADR-005; deploy mechanism superseded by ADR-007
 - [docs/ARDs/ADR-007-Komodo-Traefik-Move-To-GitOps.md](docs/ARDs/ADR-007-Komodo-Traefik-Move-To-GitOps.md) — Komodo/Traefik moved out of this repo's `docker-compose.yml` into GitOps-managed nodes
 - [docs/ARDs/ADR-008-MCP-Tool-Organization.md](docs/ARDs/ADR-008-MCP-Tool-Organization.md) — draft: how the MCP tool surface is grouped and named
-- [docs/ARDs/ADR-009-Conversational-Chat-Interface.md](docs/ARDs/ADR-009-Conversational-Chat-Interface.md) — the `/chat` web interface design
+- [docs/ARDs/ADR-009-Conversational-Chat-Interface.md](docs/ARDs/ADR-009-Conversational-Chat-Interface.md) — superseded by ADR-011; kept as the reference design for the removed `/chat` interface
 - [docs/ARDs/ADR-010-Dockhand-Update-Webhook.md](docs/ARDs/ADR-010-Dockhand-Update-Webhook.md) — Dockhand update/CVE alerts become staged proposals via `POST /webhooks/dockhand`
+- [docs/ARDs/ADR-011-Remove-Komodo-Integration-And-Chat-Interface.md](docs/ARDs/ADR-011-Remove-Komodo-Integration-And-Chat-Interface.md) — withdraws the Komodo integration and the `/chat` interface from the server's supported surface
 - [docs/SOPs/SOP-001-Deploy-New-Service.md](docs/SOPs/SOP-001-Deploy-New-Service.md) — runbook for deploying a new service to an onboarded node
 - [docs/SOPs/SOP-002-Connect-Dockhand-Webhook.md](docs/SOPs/SOP-002-Connect-Dockhand-Webhook.md) — runbook for pointing Dockhand at the update webhook
 - [docs/plans/phase-d.md](docs/plans/phase-d.md) — historical: migration from workload node to a dedicated control-plane node. The migration itself is complete; its Traefik static-backend routing model is superseded by ADR-006/ADR-007, which co-locate Traefik on the same node behind standard Docker labels

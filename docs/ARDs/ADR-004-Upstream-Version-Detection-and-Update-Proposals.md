@@ -1,8 +1,17 @@
 # ARD-004: Upstream Version Detection and Update Proposals
 
-**Status:** Proposed  
+**Status:** Proposed — partly advanced by [ADR-010](ADR-010-Dockhand-Update-Webhook.md) (2026-09-03)  
 **Date:** 2026  
 **Deciders:** the maintainer  
+
+> **Reader's note (added 2026-09-04):** the `IMAGE_UPDATE` proposal type this record asks
+> for now exists, supplied by ADR-010's Dockhand push webhook. The three components
+> designed below — `HomelabrepoDiscoverySource`, `UpstreamRegistrySource`, and the
+> `ResolveLatestTag` DSPy module — were **never implemented**, and ADR-010 §"Consequences"
+> states they stay unimplemented on the push path, since Dockhand sends the exact target
+> tag and no tag-resolution gate is needed. What remains live in this record is the
+> three-way drift model (intended / actual / available), which still wants a repo-reading
+> source that nothing currently provides.
 
 ---
 

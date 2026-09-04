@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Status** | Accepted |
+| **Status** | Superseded by [ADR-011](ADR-011-Remove-Komodo-Integration-And-Chat-Interface.md) (2026-09-04) — kept for historical context. The `/chat` interface described below has been removed; ADR-002's Open Questions 1-4 are open again. This record stands as the reference design if a conversational surface is revisited. |
 | **Amends** | ADR-002-Client-Interfaces.md §4.4 (Phase 3 — Conversational Interface) |
-| **Resolves** | ADR-002 Open Questions 1-4 (§8) |
+| **Resolves** | ADR-002 Open Questions 1-4 (§8) — reopened by ADR-011 |
 | **Date** | 2026-08-17 |
 
 ## Context
