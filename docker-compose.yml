@@ -18,11 +18,10 @@ services:
     # Traefik now runs on this same node (ADR-006), GitOps-managed as its own
     # nodes/<node>/traefik/compose.yaml in the operator's private homelab repo
     # (ADR-007) — it reads the local Docker socket directly and discovers
-    # routes via labels, the same pattern already used in
-    # vagrant/workload-node's fixture. Supersedes the old cross-host static
-    # backend from docs/plans/phase-d.md, written back when Traefik lived on
-    # a separate workload node. Requires the external `traefik` Docker
-    # network to already exist (created by that Traefik compose project) —
+    # routes via labels. Supersedes the old cross-host static backend from
+    # docs/plans/phase-d.md, written back when Traefik lived on a separate
+    # workload node. Requires the external `traefik` Docker network to
+    # already exist (normally created by that Traefik compose project) —
     # see CLAUDE.md's Docker/Homelab Deploy pre-reqs.
     networks:
       - traefik

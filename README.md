@@ -53,44 +53,21 @@ query and act on.
 
 ## How to run
 
-See [docs/SETUP.md](docs/SETUP.md) for the full step-by-step setup guide,
-including exactly what each install command does and what software it
-installs. Quick version:
+See [docs/SETUP.md](docs/SETUP.md) for the full step-by-step setup guide.
 
-### Option A: fresh control-plane node (recommended)
+This project ships an MCP server, not a node provisioner — it assumes you
+already have a Docker host. The image is pulled from GHCR and no source
+checkout is required on that host.
 
-For a brand-new Raspberry Pi (or other Debian/Ubuntu host) that will run
-homelab-registry-mcp as its dedicated control plane, `scripts/install.sh` does
-everything in one shot: installs Git, clones this repo, provisions the OS
-(Docker, Ansible, `uv`, `git-crypt`, the GitHub CLI, an SSH key), prompts you for
-the Traefik/Authentik/Git config and an optional DSPy (Advanced AI Reasoning)
-opt-in, writes `.env`, brings the server up with `docker compose up -d`, and
-only then applies a static IP — so the server is already running by the time
-the SSH session drops.
-
-```bash
-export VERSION=main  # or the latest tagged release, e.g. v0.11.0
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/${VERSION}/scripts/install.sh)"
-```
-
-Every prompt can be pre-seeded with an environment variable of the same name
-for non-interactive use. See [scripts/README.md](scripts/README.md) for the
-full step-by-step and `scripts/bootstrap.sh`, the lower-level provisioning
-script it calls.
-
-### Option B: existing Docker host
-
-If Docker is already set up on the host, skip straight to the compose file —
-the image is pulled from GHCR and no source checkout is required.
-
-#### Prerequisites
+### Prerequisites
 
 - A host with Docker and the Compose plugin.
 - If you want it fronted by Traefik: the shipped `docker-compose.yml` carries
   Traefik Docker labels (`traefik.enable`, a `registry-mcp.<your-domain>`
   router, `websecure` entrypoint, TLS on with Traefik's default self-signed
-  cert) and joins an external `traefik` Docker network — create that network
-  first and make sure your Traefik instance is on it too
+  cert) and joins an external `traefik` Docker network. Create that network
+  first (`docker network inspect traefik >/dev/null 2>&1 || docker network
+  create traefik`) and make sure your Traefik instance is on it too
   (`--providers.docker=true`), plus DNS for `registry-mcp.<your-domain>`.
   Uncomment the commented-out
   `traefik.http.routers.registry-mcp.tls.certresolver` label and set it to
@@ -98,7 +75,7 @@ the image is pulled from GHCR and no source checkout is required.
   8765 is also published directly for LAN/debug access regardless.
 - A read-only Authentik service-account token (never an admin token).
 
-#### 1. Get the compose file and configure
+### 1. Get the compose file and configure
 
 Download just the two files you need — no full repo clone required:
 
@@ -115,7 +92,7 @@ cp .env.example .env
 `.env.example` documents every option. The write path and the reasoning layer
 are off by default.
 
-#### 2. Deploy on the target host
+### 2. Deploy on the target host
 
 ```bash
 docker compose pull
