@@ -15,9 +15,9 @@ withdrawn, for different reasons.
 
 **Komodo** entered the codebase through ADR-006, which chose it as the Pi's container
 management, log, and update-detection tool after the ADR-005 stack was removed. The
-integration built on that choice was deliberately thin: seven read-only tools, a
-Basic-Auth httpx client, a `komodo://stacks/{name}` resource, and a `diagnose_stack`
-prompt. It was never a discovery source — it has no `SourceType` member, no reconciler
+integration built on that choice was deliberately thin: seven read-only tools, an httpx
+client authenticating with `X-Api-Key` / `X-Api-Secret` headers, a `komodo://stacks/{name}`
+resource, and a `diagnose_stack` prompt. It was never a discovery source — it has no `SourceType` member, no reconciler
 path, and never wrote a row to the registry. Its update-detection role, the one function
 that could have fed the write path, was taken over by ADR-010's Dockhand webhook, which
 pushes an exact target tag rather than requiring a poll. What remained was a read-only

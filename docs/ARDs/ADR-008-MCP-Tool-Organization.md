@@ -146,6 +146,11 @@ the total to 71 — see Tier 2 below.
 
 Low stakes if over-connected to an unrelated session.
 
+> **Reader's note (added 2026-09-04):** the Komodo row below no longer exists.
+> [ADR-011](ADR-011-Remove-Komodo-Integration-And-Chat-Interface.md) withdrew the Komodo
+> integration, taking all seven of its tools with it, so Tier 1 is 37 tools. The tiering
+> model this record proposes is unaffected — only the inventory is dated.
+
 | Domain | Tools |
 |---|---|
 | Traefik (7) | `traefik_get_overview`, `traefik_get_entrypoints`, `traefik_list_routers`, `traefik_get_router`, `traefik_list_services`, `traefik_list_middlewares`, `traefik_list_tls_certificates` |

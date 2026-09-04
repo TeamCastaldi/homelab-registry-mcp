@@ -65,7 +65,7 @@ src/registry_mcp/
 │   └── notification/      # NotificationProvider protocol + Ntfy/Smtp/Null + factory
 ├── integrations/
 │   ├── traefik/           # httpx client + 7 MCP tools + resource + prompt
-│   └── authentik/         # httpx client + 8 MCP tools + resource + prompt
+│   └── authentik/         # httpx client + 10 MCP tools + resource + prompt
 ├── tools/
 │   ├── registry.py        # CRUD: add/get/list/update/delete (math-gated, see deletion/) service
 │   ├── events.py          # query change + discovery logs
@@ -108,11 +108,11 @@ nodes, stored in the same SQLite database as services.
 - `HardwareNode` — one row per node: hostname, role (`pve_host`, `docker_host`, `nas`, `pi`, etc.),
   status (`confirmed`/`unconfirmed`/`stale`/`offline`), IP/MAC, CPU, RAM, GPU, structured disk and
   storage-pool lists, Ansible inventory fields, and a `HardwareChangeEvent` audit log.
-- 11 MCP tools: `hardware-add-node`, `hardware-get-node`, `hardware-list-nodes`,
-  `hardware-update-node`, `hardware-delete-node`, `hardware-link-service`,
-  `hardware-node-services`, `hardware-list-unconfirmed`, `hardware-list-stale`,
-  `hardware-capacity-summary`, and `hardware-discover-now` (Phase 9b — live Ansible
-  fact-gather).
+- 13 MCP tools: `hardware-add-node`, `hardware-get-node`, `hardware-list-nodes`,
+  `hardware-update-node`, `hardware-delete-node`, `hardware-delete-node-confirm`,
+  `hardware-link-service`, `hardware-node-services`, `hardware-list-unconfirmed`,
+  `hardware-list-stale`, `hardware-capacity-summary`, `hardware-discover-now`
+  (Phase 9b — live Ansible fact-gather), and `hardware-discovery-status`.
 - Two MCP resources: `hardware://all` (index) and `hardware://{node_id}` (detail).
 - Services can be manually linked to nodes via `hardware-link-service`; the link is
   surfaced in `service_get_full_context()`.
@@ -504,7 +504,7 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
 - **Phase 7 complete**: cross-source linking (Authentik ↔ Traefik ↔ Docker), `service_get_full_context()`, and the DSPy reasoning layer (`ResolveServiceIdentity`, `InferServiceMetadata`, `SummarizeAccessAudit`) — off by default via `DSPY_ENABLED`
 - **Phase 8 in progress**: security write path landed — `GenerateRemediationPatch`, Gitea + Ntfy/Smtp/Null providers, `Proposal` model/store, proposal engine (create + verification sweep), and the `proposal_*` tools. Off by default (`GIT_*` unset, `PROPOSAL_AUTO_CREATE=false`); see ADR-002. Normalization path complete — `docs/specs/spec-compose-normal-form.md`, the `normalization/` engine (`ruamel.yaml` deterministic formatter + `NormalizeConfigFile` DSPy escalation + `yamllint`), and the `proposal_normalize` tool + `NORMALIZATION_SCHEDULE` scheduler job. Off by default (`NORMALIZATION_ENABLED=false`).
 - **Phase 8 remaining**: flipping `PROPOSAL_DRY_RUN=false` (and `NORMALIZATION_DRY_RUN=false`) against the homelab repo (a deliberate human step); runbooks, cold-restore testing, Ansible provisioning. (GitHub provider landed — `GitHubGitProvider` alongside Gitea, selected via `GIT_PROVIDER=github`.)
-- **Phase 9a-9b complete**: hardware node registry — `HardwareNode` model + `HardwareStore` + 11 MCP tools registered in `server.py`; `hardware-discover-now` runs a live Ansible `setup` fact-gather against `ANSIBLE_CFG_PATH`'s inventory and upserts provenance fields (curated fields untouched). `scripts/setup-ansible-inventory.sh` bootstraps the `ansible.cfg`/inventory prerequisite itself (seeds the control-plane node, then prompts for more hosts) until the OOBE CLI replaces it — also folded inline into `scripts/install.sh` (opt-in, only offered when a homelab config repo already exists) so hardware onboarding can start from a fresh install rather than a separate manual step; the standalone script remains the way to add more hosts later.
+- **Phase 9a-9b complete**: hardware node registry — `HardwareNode` model + `HardwareStore` + 13 MCP tools registered in `server.py`; `hardware-discover-now` runs a live Ansible `setup` fact-gather against `ANSIBLE_CFG_PATH`'s inventory and upserts provenance fields (curated fields untouched). `scripts/setup-ansible-inventory.sh` bootstraps the `ansible.cfg`/inventory prerequisite itself (seeds the control-plane node, then prompts for more hosts) until the OOBE CLI replaces it — also folded inline into `scripts/install.sh` (opt-in, only offered when a homelab config repo already exists) so hardware onboarding can start from a fresh install rather than a separate manual step; the standalone script remains the way to add more hosts later.
 - **Phase C complete**: git-crypt secrets integration — 6 `secrets_*` MCP tools, `scripts/setup-homelab-repo.sh` bootstrap, `git-crypt` in Dockerfile. Path validation hardened against arbitrary file read/write via absolute paths (`check_path` in `gitcrypt.py`, shared with Phase 7 adoption); `setup-homelab-repo.sh` and `.env.example` work cross-platform (macOS/Linux/WSL), defaulting to `$HOME`-relative paths instead of `/opt/homelab` — also folded inline into `scripts/install.sh` (Pi defaults there) so a fresh install can create the repo without a separate manual step; `setup-homelab-repo.sh` remains the standalone/cross-platform path
 - **Phase D complete, routing model since moved to Docker labels**: migrated registry-mcp off the workload node onto the dedicated control-plane node; GitHub Actions self-hosted runner operational; first automated CD deploy proven end-to-end; `docker-compose.yml` binds `0.0.0.0:8765`. Originally routed via a Traefik static backend (`docs/plans/phase-d.md`, written when Traefik lived on a separate workload node); now that Traefik runs co-located on this same node (ADR-006/ADR-007), `docker-compose.yml` carries standard Traefik Docker labels and joins the external `traefik` network instead — see the Docker/Homelab Deploy section above.
 - **Installer modularized into per-phase scripts**: `install.sh`'s 9 steps and `bootstrap.sh`'s 6 phases each moved into their own self-contained file under `scripts/phases/install/` and `scripts/phases/bootstrap/` respectively, sharing prompt/`.env`-write/detection helpers via `scripts/lib/common.sh`. `install.sh`/`bootstrap.sh` are now thin orchestrators that just call each phase script in order; every phase is independently runnable (`bash scripts/phases/install/06-write-env.sh`, `bash scripts/phases/bootstrap/06-static-ip.sh`, ...) for debugging or a targeted brownfield/greenfield rerun without re-driving the whole installer. Cross-phase handoff goes through a small state file (a real env var of the same name still always wins, so every documented pre-seeding trick is unchanged) — see [scripts/README.md](scripts/README.md#modular-phase-scripts). External behavior (prompts, `.env` output, CI env-var pre-seeding) is unchanged; `.github/workflows/install-validation.yml` exercises it end-to-end same as before.
