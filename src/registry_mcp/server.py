@@ -20,7 +20,6 @@ from registry_mcp.dspy import Reasoner, build_reasoner
 from registry_mcp.hardware import HardwareStore
 from registry_mcp.health import check_health
 from registry_mcp.integrations.authentik import register_authentik_tools
-from registry_mcp.integrations.komodo import register_komodo_tools
 from registry_mcp.integrations.traefik import register_traefik_tools
 from registry_mcp.logging import configure_logging, get_logger, install_tool_call_logging
 from registry_mcp.normalization import NormalizationEngine, NormalizationGenerator, schedule_seconds
@@ -143,7 +142,6 @@ def build_server(settings: Settings | None = None) -> FastMCP:
     register_event_tools(mcp, store)
     register_traefik_tools(mcp, settings)
     register_authentik_tools(mcp, settings, reasoner=reasoner)
-    register_komodo_tools(mcp, settings)
     register_discovery_tools(mcp, engine)
     register_linking_tools(mcp, store, settings, hardware_store=hardware_store)
     register_hardware_tools(

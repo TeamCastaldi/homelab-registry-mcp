@@ -1,6 +1,6 @@
 # homelab-registry-mcp
 
-Python MCP server that is the authoritative service catalog for a homelab. It discovers services from Traefik, Docker, and Authentik; maintains a curated SQLite registry; and exposes the data — plus read-only Komodo stack/service queries — as MCP tools, resources, and prompts for AI agents.
+Python MCP server that is the authoritative service catalog for a homelab. It discovers services from Traefik, Docker, and Authentik; maintains a curated SQLite registry; and exposes the data as MCP tools, resources, and prompts for AI agents.
 
 ## Commands
 
@@ -65,8 +65,7 @@ src/registry_mcp/
 │   └── notification/      # NotificationProvider protocol + Ntfy/Smtp/Null + factory
 ├── integrations/
 │   ├── traefik/           # httpx client + 7 MCP tools + resource + prompt
-│   ├── authentik/         # httpx client + 8 MCP tools + resource + prompt
-│   └── komodo/            # httpx client (Basic Auth) + 7 MCP tools + resource + prompt, read-only
+│   └── authentik/         # httpx client + 8 MCP tools + resource + prompt
 ├── tools/
 │   ├── registry.py        # CRUD: add/get/list/update/delete (math-gated, see deletion/) service
 │   ├── events.py          # query change + discovery logs
@@ -280,11 +279,6 @@ ADR-004's unimplemented polling source.
 | `AUTHENTIK_TOKEN` | unset | **Read-only service-account token only** (never admin) |
 | `AUTHENTIK_TIMEOUT_SECONDS` | `10` | |
 | `AUTHENTIK_RETRIES` | `3` | |
-| `KOMODO_API_URL` | unset | Enables read-only Komodo stack/service tools; e.g. `https://komodo.lan` |
-| `KOMODO_API_KEY` | unset | Paired with `KOMODO_API_SECRET` for Basic Auth against the Komodo API |
-| `KOMODO_API_SECRET` | unset | |
-| `KOMODO_TIMEOUT_SECONDS` | `10` | |
-| `KOMODO_RETRIES` | `3` | |
 | `DOCKER_BASE_URL` | unset | Enables Docker discovery; e.g. `unix:///var/run/docker.sock` |
 | `REGISTRY_DB_PATH` | `/data/registry.db` | SQLite location |
 | `REGISTRY_LOG_PATH` | `/data/events.log` | JSON event log |
@@ -489,6 +483,15 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
   retries, just call the delete tool again for a fresh problem. Expired challenges are also
   swept on every server startup, same idiom as `AdoptionDraftStore.purge_expired`.
 - **ADR-010 complete**: Dockhand webhook (`webhooks/`) — `POST /webhooks/dockhand` turns container-update and CVE alerts into staged `image_update`/`vulnerability_scan` proposals through the existing engine. Restores the update-triggered path ADR-006 removed with WUD and closes its Open Item. Off by default (`DOCKHAND_WEBHOOK_ENABLED=false`), fail-closed at registration when no secret is set. Accepts both Dockhand payload shapes; the stock generic body is digest-only and is deliberately ignored rather than guessed at — see ADR-010's Negative consequences.
+- **Komodo integration removed**: `integrations/komodo/` and its 7 read-only tools
+  (`komodo_health`, `komodo_list_stacks`, `komodo_get_stack`, `komodo_list_services`,
+  `komodo_get_service`, `komodo_list_updates`, `komodo_get_logs`), the `komodo://stacks/{name}`
+  resource, the `diagnose_stack` prompt, and the five `KOMODO_*` settings are gone. Komodo was
+  never a discovery source — no `SourceType` member, no reconciler path, no registry rows — so
+  nothing in the database references it. **ADR-006 §1's decision to run Komodo on the Pi for
+  operational visibility still stands**; per ADR-007 that deployment lives in the operator's
+  private homelab repo as a `nodes/<node>/<service>/compose.yaml` entry, and only this server's
+  integration with it was withdrawn.
 - **ADR-009 removed**: the web chat interface (`chat/`) and its Ollama backend are gone —
   `/chat`, `/chat/auth/*`, `/chat/api/*`, the `CHAT_*` settings, the `READ_TOOLS`/
   `WRITE_TOOLS`/`DENY_ALWAYS` bridge, and the JS markdown renderer with it. `/mcp` is
