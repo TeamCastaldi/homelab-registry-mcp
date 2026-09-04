@@ -145,14 +145,17 @@ In Claude Desktop, add an MCP server with the same URL under Settings.
   variables, key conventions, and current phase status. Start here.
 - [docs/ARDs/ADR-001-Homelab-Control-Plane.md](docs/ARDs/ADR-001-Homelab-Control-Plane.md) — architecture, design decisions, and phased roadmap
 - [docs/ARDs/ADR-002-Client-Interfaces.md](docs/ARDs/ADR-002-Client-Interfaces.md) — MCP client integration and Discord bot interface decisions
-- [docs/ARDs/ARD-003-OOBE-Decisions.md](docs/ARDs/ARD-003-OOBE-Decisions.md) — out-of-box experience decisions
-- [docs/ARDs/ARD-004-Upstream-Version-Detection-and-Update-Proposals.md](docs/ARDs/ARD-004-Upstream-Version-Detection-and-Update-Proposals.md) — upstream version detection and update proposal design
+- [docs/ARDs/ADR-003-OOBE-Decisions.md](docs/ARDs/ADR-003-OOBE-Decisions.md) — out-of-box experience decisions
+- [docs/ARDs/ADR-004-Upstream-Version-Detection-and-Update-Proposals.md](docs/ARDs/ADR-004-Upstream-Version-Detection-and-Update-Proposals.md) — upstream version detection and update proposal design; its polling sources were never implemented, and ADR-010 advances it by push instead
+- [docs/ARDs/ADR-005-Monitoring-Alerting-Recovery-Ingress-Architecture.md](docs/ARDs/ADR-005-Monitoring-Alerting-Recovery-Ingress-Architecture.md) — superseded by ADR-006; kept as the historical record of the removed monitoring stack
 - [docs/ARDs/ADR-006-Pi-Non-MCP-Services-Komodo-Traefik.md](docs/ARDs/ADR-006-Pi-Non-MCP-Services-Komodo-Traefik.md) — Pi's non-MCP services (Komodo + Traefik), superseding ADR-005; deploy mechanism superseded by ADR-007
 - [docs/ARDs/ADR-007-Komodo-Traefik-Move-To-GitOps.md](docs/ARDs/ADR-007-Komodo-Traefik-Move-To-GitOps.md) — Komodo/Traefik moved out of this repo's `docker-compose.yml` into GitOps-managed nodes
+- [docs/ARDs/ADR-008-MCP-Tool-Organization.md](docs/ARDs/ADR-008-MCP-Tool-Organization.md) — draft: how the MCP tool surface is grouped and named
+- [docs/ARDs/ADR-009-Conversational-Chat-Interface.md](docs/ARDs/ADR-009-Conversational-Chat-Interface.md) — the `/chat` web interface design
 - [docs/ARDs/ADR-010-Dockhand-Update-Webhook.md](docs/ARDs/ADR-010-Dockhand-Update-Webhook.md) — Dockhand update/CVE alerts become staged proposals via `POST /webhooks/dockhand`
 - [docs/SOPs/SOP-001-Deploy-New-Service.md](docs/SOPs/SOP-001-Deploy-New-Service.md) — runbook for deploying a new service to an onboarded node
 - [docs/SOPs/SOP-002-Connect-Dockhand-Webhook.md](docs/SOPs/SOP-002-Connect-Dockhand-Webhook.md) — runbook for pointing Dockhand at the update webhook
-- [docs/plans/phase-d.md](docs/plans/phase-d.md) — migration plan: workload node → dedicated control-plane node deployment with Traefik static backend
+- [docs/plans/phase-d.md](docs/plans/phase-d.md) — historical: migration from workload node to a dedicated control-plane node. The migration itself is complete; its Traefik static-backend routing model is superseded by ADR-006/ADR-007, which co-locate Traefik on the same node behind standard Docker labels
 - [CONTRIBUTING.md](CONTRIBUTING.md) — branch naming, commit format, and the local checks to run before a PR
 - [SECURITY.md](SECURITY.md) — security posture, supported versions, and how to report a vulnerability
 - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — expected conduct in project spaces

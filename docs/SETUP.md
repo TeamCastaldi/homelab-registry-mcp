@@ -43,8 +43,8 @@ variable of the same name (e.g. `GIT_PROVIDER=github`) for a non-interactive run
 
 `VERSION` pins the entire install, not just which copy of `install.sh` the
 `curl` fetches: `install.sh` reads the same variable from its own environment
-and clones the rest of the repo (`bootstrap.sh`, `scripts/`, `monitoring/`)
-from that same ref, so a tagged release stays self-consistent end-to-end —
+and clones the rest of the repo (`bootstrap.sh` and `scripts/`) from that
+same ref, so a tagged release stays self-consistent end-to-end —
 this also works with a branch name, not just a tag, if you're testing an
 unreleased change. It must be `export`ed (as above), not just assigned: the
 `curl` line's own `${VERSION}` expands correctly either way, but only an

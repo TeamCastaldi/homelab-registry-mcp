@@ -3,7 +3,7 @@
 **Status:** In Progress  
 **Date:** 2026  
 **Deciders:** the maintainer  
-**Location:** `docs/ARDs/ARD-003-OOBE-Decisions.md`
+**Location:** `docs/ARDs/ADR-003-OOBE-Decisions.md`
 
 ---
 

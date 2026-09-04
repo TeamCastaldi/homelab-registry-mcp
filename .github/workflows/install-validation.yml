@@ -128,9 +128,9 @@ jobs:
           # operator's private homelab repo instead, so this fast loop only
           # needs to check the one container it actually brings up.
           EXPECTED_UP=(homelab-registry-mcp)
-          # No conditionally-absent container in this stack (unlike the old
-          # beszel-agent gate) -- kept as an empty array so the check/summary
-          # loops below don't need a separate no-EXPECT_ABSENT code path.
+          # No conditionally-absent container in this stack -- kept as an empty
+          # array so the check/summary loops below don't need a separate
+          # no-EXPECT_ABSENT code path.
           EXPECT_ABSENT=()
 
           check_once() {
