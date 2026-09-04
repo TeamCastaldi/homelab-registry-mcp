@@ -1,4 +1,4 @@
-# ARD-004: Upstream Version Detection and Update Proposals
+# ADR-004: Upstream Version Detection and Update Proposals
 
 **Status:** Proposed — partly advanced by [ADR-010](ADR-010-Dockhand-Update-Webhook.md) (2026-09-03)  
 **Date:** 2026  

@@ -8,9 +8,10 @@ Records are written when a decision is made and updated if circumstances change.
 They are not deleted — superseded decisions are marked as such and kept for
 historical context.
 
-> **Naming note:** existing files use a mix of `ADR-` and `ARD-` prefixes for
-> historical reasons. Prefer the `ADR-NNN-` convention below for new records;
-> existing files are not renamed.
+> **Naming note:** the directory is called `ARDs/` for historical reasons, but every
+> record in it uses the `ADR-NNN-` convention below — filename, H1 and cross-references
+> alike. Use `ADR-` for new records; the directory itself is not renamed, because every
+> link in the repo points at this path.
 
 ## What belongs here
 

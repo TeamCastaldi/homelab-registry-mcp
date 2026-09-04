@@ -1,4 +1,4 @@
-# ARD-003: Out-of-Box Experience (OOBE) Design
+# ADR-003: Out-of-Box Experience (OOBE) Design
 
 **Status:** In Progress  
 **Date:** 2026  
