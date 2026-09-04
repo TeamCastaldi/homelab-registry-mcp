@@ -173,9 +173,9 @@ class Settings(BaseSettings):
     dockhand_webhook_path: str = Field(default="/webhooks/dockhand")
     # Shared secret Dockhand presents as `Authorization: Bearer <secret>` or
     # `X-Dockhand-Token`. Fail-closed: enabled with no secret set leaves the
-    # route unregistered entirely, the same posture as CHAT_ENABLED with no
-    # auth method configured — never an open endpoint. Dockhand does not sign
-    # its webhook bodies, so a shared bearer secret is the mechanism available.
+    # route unregistered entirely rather than mounted and rejecting — never an
+    # open endpoint. Dockhand does not sign its webhook bodies, so a shared
+    # bearer secret is the mechanism available.
     dockhand_webhook_secret: str | None = Field(default=None)
     # Cap on an accepted request body. An inbound endpoint must never hand an
     # unbounded body to json.loads.
