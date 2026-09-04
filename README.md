@@ -80,7 +80,7 @@ checkout is required on that host.
 Download just the two files you need — no full repo clone required:
 
 ```bash
-VERSION=main  # or the latest tagged release, e.g. v0.11.0
+VERSION=main  # or the latest tagged release, e.g. v0.26.1
 mkdir homelab-registry-mcp && cd homelab-registry-mcp
 curl -fsSL "https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/${VERSION}/docker-compose.yml" -o docker-compose.yml
 curl -fsSL "https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/${VERSION}/.env.example" -o .env.example
@@ -115,14 +115,14 @@ In Claude Desktop, add an MCP server with the same URL under Settings.
 
 ## Documentation
 
-- [docs/SETUP.md](docs/SETUP.md) — dedicated setup guide: which install path
-  to pick, exactly what each command does, what software gets installed, and
-  troubleshooting.
+- [docs/SETUP.md](docs/SETUP.md) — dedicated setup guide: prerequisites, the
+  container deploy, connecting a client, pointing the server at your homelab
+  config repo, hardware discovery, and troubleshooting.
 - [CLAUDE.md](CLAUDE.md) — project structure, architecture, all environment
   variables, key conventions, and current phase status. Start here.
 - [docs/ARDs/ADR-001-Homelab-Control-Plane.md](docs/ARDs/ADR-001-Homelab-Control-Plane.md) — architecture, design decisions, and phased roadmap
 - [docs/ARDs/ADR-002-Client-Interfaces.md](docs/ARDs/ADR-002-Client-Interfaces.md) — MCP client integration and Discord bot interface decisions
-- [docs/ARDs/ADR-003-OOBE-Decisions.md](docs/ARDs/ADR-003-OOBE-Decisions.md) — out-of-box experience decisions
+- [docs/ARDs/ADR-003-OOBE-Decisions.md](docs/ARDs/ADR-003-OOBE-Decisions.md) — superseded by ADR-012; kept as the historical record of the OOBE design that was never implemented
 - [docs/ARDs/ADR-004-Upstream-Version-Detection-and-Update-Proposals.md](docs/ARDs/ADR-004-Upstream-Version-Detection-and-Update-Proposals.md) — upstream version detection and update proposal design; its polling sources were never implemented, and ADR-010 advances it by push instead
 - [docs/ARDs/ADR-005-Monitoring-Alerting-Recovery-Ingress-Architecture.md](docs/ARDs/ADR-005-Monitoring-Alerting-Recovery-Ingress-Architecture.md) — superseded by ADR-006; kept as the historical record of the removed monitoring stack
 - [docs/ARDs/ADR-006-Pi-Non-MCP-Services-Komodo-Traefik.md](docs/ARDs/ADR-006-Pi-Non-MCP-Services-Komodo-Traefik.md) — Pi's non-MCP services (Komodo + Traefik), superseding ADR-005; deploy mechanism superseded by ADR-007
@@ -131,6 +131,7 @@ In Claude Desktop, add an MCP server with the same URL under Settings.
 - [docs/ARDs/ADR-009-Conversational-Chat-Interface.md](docs/ARDs/ADR-009-Conversational-Chat-Interface.md) — superseded by ADR-011; kept as the reference design for the removed `/chat` interface
 - [docs/ARDs/ADR-010-Dockhand-Update-Webhook.md](docs/ARDs/ADR-010-Dockhand-Update-Webhook.md) — Dockhand update/CVE alerts become staged proposals via `POST /webhooks/dockhand`
 - [docs/ARDs/ADR-011-Remove-Komodo-Integration-And-Chat-Interface.md](docs/ARDs/ADR-011-Remove-Komodo-Integration-And-Chat-Interface.md) — withdraws the Komodo integration and the `/chat` interface from the server's supported surface
+- [docs/ARDs/ADR-012-Scope-The-Repo-To-The-MCP-Server.md](docs/ARDs/ADR-012-Scope-The-Repo-To-The-MCP-Server.md) — removes the provisioning scripts; this repo ships the MCP server and the deploy action, not a node installer
 - [docs/SOPs/SOP-001-Deploy-New-Service.md](docs/SOPs/SOP-001-Deploy-New-Service.md) — runbook for deploying a new service to an onboarded node
 - [docs/SOPs/SOP-002-Connect-Dockhand-Webhook.md](docs/SOPs/SOP-002-Connect-Dockhand-Webhook.md) — runbook for pointing Dockhand at the update webhook
 - [docs/plans/phase-d.md](docs/plans/phase-d.md) — historical: migration from workload node to a dedicated control-plane node. The migration itself is complete; its Traefik static-backend routing model is superseded by ADR-006/ADR-007, which co-locate Traefik on the same node behind standard Docker labels

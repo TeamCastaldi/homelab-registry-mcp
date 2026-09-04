@@ -170,6 +170,15 @@ A GitHub Actions workflow builds and pushes the image on every tagged release. T
 
 ## 5. Out-of-Box Experience (OOBE)
 
+> **Withdrawn by [ADR-012](ADR-012-Scope-The-Repo-To-The-MCP-Server.md) (2026-09-04).**
+> This section is kept as a historical record. The OOBE was never implemented as
+> designed, the shell scripts that stood in for it have been removed, and provisioning a
+> host, installing Docker/Ansible, distributing SSH keys, and creating the operator's
+> private config repo are all out of this repository's scope. Statements elsewhere in
+> this record that assign work to "the OOBE" (§3's Docker and SSH prerequisites, §4.2's
+> repo creation, §4.4's git-crypt key generation) are withdrawn on the same basis. The
+> rest of ADR-001 — topology, tooling, security posture, and the GitOps model — stands.
+
 The OOBE runs automatically when no configuration is detected on first start. It is conversational — driven by an AI assistant via MCP tool calls. The operator answers questions; the MCP does the work. No config files are edited manually during onboarding.
 
 The OOBE covers the full path from a fresh Debian install to a running, configured lab registry. It assumes:
