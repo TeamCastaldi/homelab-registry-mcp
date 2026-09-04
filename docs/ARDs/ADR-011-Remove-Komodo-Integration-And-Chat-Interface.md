@@ -46,8 +46,8 @@ the burden is real and ongoing, and it is carried by a feature that was off by d
    operational visibility. Per ADR-007 that deployment is an ordinary
    `nodes/<node>/<service>/compose.yaml` entry in the operator's private homelab repo,
    reached through the GitOps pipeline — nothing about it depends on this server. Only
-   this server's API integration with Komodo is withdrawn, so `docs/SETUP.md` and
-   `scripts/README.md` keep their Komodo deployment guidance unchanged.
+   this server's API integration with Komodo is withdrawn — how the operator deploys and
+   runs Komodo itself is unchanged and out of this repo's scope.
 
 4. **`/mcp` is unaffected.** It stays exactly as unauthenticated and LAN-only as before;
    no auth posture changes in either direction.
@@ -68,7 +68,10 @@ the burden is real and ongoing, and it is carried by a feature that was off by d
 - `chat/bridge.py`'s allowlist no longer has to be updated in step with every new tool —
   a correctness obligation that grew with the tool surface and had no test that would
   fail if it were forgotten.
-- ~6,300 lines removed across source, tests, config and docs; 14 fewer registered tools.
+- ~6,300 lines removed across source, tests, config and docs, and seven fewer registered
+  tools — all seven Komodo's. The chat interface registered no MCP tools at all: it was
+  Starlette routes plus a bridge onto the tools that already existed, which is why a
+  surface that large leaves the tool count untouched at 71 until Komodo goes too.
 
 ### Negative
 
