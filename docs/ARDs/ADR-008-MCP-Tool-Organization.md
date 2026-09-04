@@ -146,10 +146,12 @@ the total to 71 — see Tier 2 below.
 
 Low stakes if over-connected to an unrelated session.
 
-> **Reader's note (added 2026-09-04):** the Komodo row below no longer exists.
-> [ADR-011](ADR-011-Remove-Komodo-Integration-And-Chat-Interface.md) withdrew the Komodo
-> integration, taking all seven of its tools with it, so Tier 1 is 37 tools. The tiering
-> model this record proposes is unaffected — only the inventory is dated.
+> **Reader's note (added 2026-09-04):** the table below is the inventory as it stood when
+> this record was drafted, and is kept unedited per `docs/ARDs/README.md`. The Komodo row
+> is the stale part: those seven tools were withdrawn by
+> [ADR-011](ADR-011-Remove-Komodo-Integration-And-Chat-Interface.md) and are no longer
+> registered, which makes the current Tier 1 count 37 rather than the 44 in the heading.
+> The tiering model this record proposes is unaffected — only the inventory is dated.
 
 | Domain | Tools |
 |---|---|
