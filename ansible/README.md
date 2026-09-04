@@ -14,9 +14,5 @@ that repo's GitHub Actions workflow calls the reusable
 - **`playbooks/deploy.yml`** — thin playbook wrapping the role, parameterized
   by `target_node` / `target_service`.
 
-`scripts/bootstrap.sh` writes its own validation logs and hardware-fact
-archives to `ansible/archive/` (gitignored, created at runtime) — that
-directory is unrelated to the role/playbook above.
-
 See `.github/workflows/deploy.yml` for the reusable CD workflow and
 `CLAUDE.md` for the snippet an operator pastes into their private repo.

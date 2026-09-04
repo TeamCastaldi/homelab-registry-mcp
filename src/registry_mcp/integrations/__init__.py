@@ -1,1 +1,1 @@
-"""Upstream API integrations (Traefik, Authentik, Komodo)."""
+"""Upstream API integrations (Traefik, Authentik)."""

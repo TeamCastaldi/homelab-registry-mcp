@@ -1,9 +1,9 @@
-# ARD-003: Out-of-Box Experience (OOBE) Design
+# ADR-003: Out-of-Box Experience (OOBE) Design
 
-**Status:** In Progress  
+**Status:** Superseded by [ADR-012](ADR-012-Scope-The-Repo-To-The-MCP-Server.md) (2026-09-04) — kept for historical context. The OOBE CLI designed below was never implemented; the shell scripts that stood in for it have been removed, and provisioning a host or creating an operator's config repo is now out of this repository's scope entirely. The inputs and repo-structure contract this record defines are still an accurate description of *what the server expects to find* — see `docs/SETUP.md` for that contract restated.  
 **Date:** 2026  
 **Deciders:** the maintainer  
-**Location:** `docs/ARDs/ARD-003-OOBE-Decisions.md`
+**Location:** `docs/ARDs/ADR-003-OOBE-Decisions.md`
 
 ---
 

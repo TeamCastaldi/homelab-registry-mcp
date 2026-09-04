@@ -18,9 +18,6 @@ from registry_mcp.models.service import new_uuid, utcnow
 
 class FindingType(StrEnum):
     auth_mode_conflict = "auth_mode_conflict"
-    missing_auth = "missing_auth"
-    missing_security_headers = "missing_security_headers"
-    exposed_dashboard = "exposed_dashboard"
     normalization = "normalization"
     legacy_adoption = "legacy_adoption"
     image_update = "image_update"

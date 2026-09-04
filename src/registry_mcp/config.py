@@ -34,11 +34,6 @@ class Settings(BaseSettings):
     authentik_token: str | None = Field(default=None)
     authentik_timeout_seconds: float = Field(default=10.0)
     authentik_retries: int = Field(default=3)
-    komodo_api_url: str | None = Field(default=None)
-    komodo_api_key: str | None = Field(default=None)
-    komodo_api_secret: str | None = Field(default=None)
-    komodo_timeout_seconds: float = Field(default=10.0)
-    komodo_retries: int = Field(default=3)
 
     # MCP transport
     mcp_transport: Transport = Field(default="streamable-http")
@@ -48,13 +43,12 @@ class Settings(BaseSettings):
     # Event log retention
     event_retention_days: int = Field(default=90)
 
-    # Discovery
+    # Discovery. A source runs when its upstream URL is set — `docker_base_url`
+    # is the Docker gate, not a separate enabled flag.
     docker_base_url: str | None = Field(default=None)
-    discovery_docker_enabled: bool = Field(default=True)
     discovery_traefik_interval_seconds: int = Field(default=300)
     discovery_docker_interval_seconds: int = Field(default=300)
     discovery_authentik_interval_seconds: int = Field(default=900)
-    discovery_network_enabled: bool = Field(default=False)
     discovery_stale_after_misses: int = Field(default=3)
 
     # Reasoning layer (DSPy) — Phase 7. Off by default: the server reasons only
@@ -179,9 +173,9 @@ class Settings(BaseSettings):
     dockhand_webhook_path: str = Field(default="/webhooks/dockhand")
     # Shared secret Dockhand presents as `Authorization: Bearer <secret>` or
     # `X-Dockhand-Token`. Fail-closed: enabled with no secret set leaves the
-    # route unregistered entirely, the same posture as CHAT_ENABLED with no
-    # auth method configured — never an open endpoint. Dockhand does not sign
-    # its webhook bodies, so a shared bearer secret is the mechanism available.
+    # route unregistered entirely rather than mounted and rejecting — never an
+    # open endpoint. Dockhand does not sign its webhook bodies, so a shared
+    # bearer secret is the mechanism available.
     dockhand_webhook_secret: str | None = Field(default=None)
     # Cap on an accepted request body. An inbound endpoint must never hand an
     # unbounded body to json.loads.
@@ -198,69 +192,6 @@ class Settings(BaseSettings):
     # structlog field-name redaction (token/password/secret/...) does not reach
     # anything inside it.
     dockhand_webhook_log_raw_payload: bool = Field(default=False)
-
-    # --- Chat interface — opt-in browser UI backed by a local/LAN Ollama instance ---
-    # Off by default. When enabled, a session (Authentik OIDC if configured, else
-    # CHAT_PASSWORD) is required to reach /chat; all lab data the assistant sees
-    # flows through the same MCP tools any other client uses, via a fixed
-    # read-only allowlist — CHAT_ALLOW_WRITE opts into a small write allowlist,
-    # and never when the server is in read-only mode. Ollama itself is untouched
-    # by this — no upstream write.
-    chat_enabled: bool = Field(default=False)
-    chat_ollama_url: str | None = Field(default=None)
-    chat_ollama_model: str = Field(default="qwen3:14b")
-    chat_ollama_timeout_seconds: float = Field(default=300.0)
-    chat_ollama_retries: int = Field(default=3)
-    chat_ollama_keep_alive: str = Field(default="30m")
-    chat_num_ctx: int = Field(default=8192)
-    chat_temperature: float = Field(default=0.6)
-    chat_think: bool = Field(default=False)
-    chat_max_concurrent: int = Field(default=2)
-    chat_max_history_messages: int = Field(default=20)
-    chat_allow_write: bool = Field(default=False)
-    # Comma-separated tool names to additionally deny, on top of the built-in
-    # DENY_ALWAYS set. Restrictive-only — cannot re-admit a hard-denied tool.
-    chat_tool_deny: str = Field(default="")
-    chat_max_tool_rounds: int = Field(default=4)
-    chat_tool_result_max_chars: int = Field(default=8000)
-    chat_context_max_chars: int = Field(default=6000)
-    chat_context_ttl_seconds: int = Field(default=60)
-    # Absolute path to an operator-specific persona overlay (e.g. a homelab
-    # skill file) appended to the generic in-repo persona. Same no-expansion
-    # caveat as SECRETS_REPO_PATH/ANSIBLE_CFG_PATH — pydantic-settings reads
-    # this as a literal string, so `~`/`$HOME` are not expanded.
-    chat_persona_path: str | None = Field(default=None)
-    chat_persona_max_chars: int = Field(default=8000)
-    # HMAC key signing the session cookie. Unset generates an ephemeral
-    # per-process key — sessions won't survive a restart — rather than ever
-    # falling open. Set it for a stable login across restarts.
-    chat_session_secret: str | None = Field(default=None)
-    chat_session_ttl_seconds: int = Field(default=43200)
-    # Cookies are Secure by default; only disable for a direct http://<ip>:8765
-    # deployment with no TLS in front, which is strictly less safe.
-    chat_cookie_secure: bool = Field(default=True)
-    # Comma-separated allowed Origin values for POST /chat/api/send. Unset skips
-    # the check (SameSite=Lax + the JSON content-type requirement still apply).
-    chat_allowed_origins: str = Field(default="")
-    # Static-password fallback. Ignored when Authentik OIDC is configured below —
-    # OIDC always takes precedence when both are set.
-    chat_password: str | None = Field(default=None)
-    # Authentik OIDC (or any OIDC provider) — takes precedence over CHAT_PASSWORD
-    # when set. All four of issuer/client_id/client_secret/redirect_url are
-    # required together. CHAT_OIDC_REDIRECT_URL must be the exact absolute URL
-    # registered on the provider — never derived from the request Host header.
-    chat_oidc_issuer: str | None = Field(default=None)
-    chat_oidc_client_id: str | None = Field(default=None)
-    chat_oidc_client_secret: str | None = Field(default=None)
-    chat_oidc_redirect_url: str | None = Field(default=None)
-    chat_oidc_scopes: str = Field(default="openid profile email")
-    # Comma-separated group names; empty (the default) means any user who
-    # successfully authenticates with the IdP is allowed — unlike
-    # PROPOSAL_COMMENT_ALLOWED_USERS, this gates an *already-authenticated*
-    # principal rather than an anonymous public commenter, so failing open
-    # here means "no extra restriction", not "no auth". Set one or more
-    # group names to require membership in at least one of them.
-    chat_oidc_allowed_groups: str = Field(default="")
 
     log_level: str = Field(default="INFO")
 

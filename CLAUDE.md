@@ -1,6 +1,6 @@
 # homelab-registry-mcp
 
-Python MCP server that is the authoritative service catalog for a homelab. It discovers services from Traefik, Docker, and Authentik; maintains a curated SQLite registry; and exposes the data — plus read-only Komodo stack/service queries — as MCP tools, resources, and prompts for AI agents.
+Python MCP server that is the authoritative service catalog for a homelab. It discovers services from Traefik, Docker, and Authentik; maintains a curated SQLite registry; and exposes the data as MCP tools, resources, and prompts for AI agents.
 
 ## Commands
 
@@ -65,8 +65,7 @@ src/registry_mcp/
 │   └── notification/      # NotificationProvider protocol + Ntfy/Smtp/Null + factory
 ├── integrations/
 │   ├── traefik/           # httpx client + 7 MCP tools + resource + prompt
-│   ├── authentik/         # httpx client + 8 MCP tools + resource + prompt
-│   └── komodo/            # httpx client (Basic Auth) + 7 MCP tools + resource + prompt, read-only
+│   └── authentik/         # httpx client + 10 MCP tools + resource + prompt
 ├── tools/
 │   ├── registry.py        # CRUD: add/get/list/update/delete (math-gated, see deletion/) service
 │   ├── events.py          # query change + discovery logs
@@ -76,16 +75,6 @@ src/registry_mcp/
 │   ├── secrets.py         # secrets_status/encrypt/decrypt/add/rotate/list_keys (Phase C)
 │   ├── proposal.py        # proposal_create/list_open/get/cancel/verify/normalize (Phase 8)
 │   └── adoption.py        # proposal_adopt_service[_finalize/_cancel/_get] (Phase 7 brownfield)
-├── chat/                  # web chat UI (ADR-009) — opt-in, CHAT_ENABLED=false by default
-│   ├── routes.py          # @mcp.custom_route handlers: /chat, /chat/auth/*, /chat/api/*
-│   ├── agent.py           # the SSE streaming loop: Ollama ⇄ MCP tool rounds
-│   ├── ollama.py          # OllamaClient — same httpx retry idiom as integrations/*, streaming
-│   ├── bridge.py          # READ_TOOLS/WRITE_TOOLS/DENY_ALWAYS allowlist — the actual security boundary
-│   ├── auth.py            # OIDC (Authentik) code+PKCE flow, static-password fallback
-│   ├── session.py         # stdlib HMAC-signed session/login-flow cookies, no server-side store
-│   ├── context.py         # small live snapshot (nodes/services/stale/health) injected per turn
-│   ├── persona.py         # generic in-repo persona.md + operator overlay (CHAT_PERSONA_PATH)
-│   └── static/index.html  # the whole frontend — vanilla JS, no build step
 ├── webhooks/              # inbound HTTP receivers (ADR-010) — alerts → staged proposals
 │   ├── schemas.py         # Pydantic Dockhand payload models + pure parsing helpers
 │   └── dockhand.py        # POST /webhooks/dockhand — update/CVE alert → proposal
@@ -119,11 +108,11 @@ nodes, stored in the same SQLite database as services.
 - `HardwareNode` — one row per node: hostname, role (`pve_host`, `docker_host`, `nas`, `pi`, etc.),
   status (`confirmed`/`unconfirmed`/`stale`/`offline`), IP/MAC, CPU, RAM, GPU, structured disk and
   storage-pool lists, Ansible inventory fields, and a `HardwareChangeEvent` audit log.
-- 11 MCP tools: `hardware-add-node`, `hardware-get-node`, `hardware-list-nodes`,
-  `hardware-update-node`, `hardware-delete-node`, `hardware-link-service`,
-  `hardware-node-services`, `hardware-list-unconfirmed`, `hardware-list-stale`,
-  `hardware-capacity-summary`, and `hardware-discover-now` (Phase 9b — live Ansible
-  fact-gather).
+- 13 MCP tools: `hardware-add-node`, `hardware-get-node`, `hardware-list-nodes`,
+  `hardware-update-node`, `hardware-delete-node`, `hardware-delete-node-confirm`,
+  `hardware-link-service`, `hardware-node-services`, `hardware-list-unconfirmed`,
+  `hardware-list-stale`, `hardware-capacity-summary`, `hardware-discover-now`
+  (Phase 9b — live Ansible fact-gather), and `hardware-discovery-status`.
 - Two MCP resources: `hardware://all` (index) and `hardware://{node_id}` (detail).
 - Services can be manually linked to nodes via `hardware-link-service`; the link is
   surfaced in `service_get_full_context()`.
@@ -233,52 +222,13 @@ GitOps-managed) under management without leaking its hardcoded secrets. Off by d
 - `AdoptionDraft` rows hold the captured live secret values only long enough for the
   operator to answer (`ADOPTION_DRAFT_TTL_MINUTES`, default 60) before expiring.
 
-**Chat interface (ADR-009, `chat/`):** an opt-in browser page at `/chat` backed by a
-local/LAN Ollama instance the operator runs — this repo never runs Ollama itself. Off by
-default (`CHAT_ENABLED=false`); `true` with neither Authentik OIDC nor `CHAT_PASSWORD`
-configured is a startup error and the routes are never registered, not an open endpoint.
-- Registered via `FastMCP.custom_route` (available since the pinned `mcp` SDK, 1.29.0) inside
-  `build_server()`, alongside `/mcp` on the same port — `/mcp` itself gains no auth from this;
-  it stays exactly as unauthenticated as before.
-- Every module under `chat/` takes only `(mcp, settings)` — no direct `RegistryStore`/
-  `HardwareStore`/engine reference. All lab data the assistant can see comes back through
-  `mcp.list_tools()`/`mcp.call_tool()`, the same surface any MCP client uses, filtered by a
-  fixed **allowlist by tool name** (`chat/bridge.py`'s `READ_TOOLS`/`WRITE_TOOLS`/`DENY_ALWAYS`)
-  — never a prefix match, and `DENY_ALWAYS` (all `secrets_*`, all `proposal_adopt_service*`,
-  both hard deletes, `discovery_connect_*`, `hardware-discover-now`) wins unconditionally,
-  regardless of `CHAT_ALLOW_WRITE`. This allowlist is the actual security boundary; the chat
-  login is a UI convenience gate, not a new boundary around the lab.
-- Auth resolves once at startup: Authentik OIDC (authorization-code + PKCE, no ID-token
-  signature verification since it's a back-channel confidential-client exchange — see
-  ADR-009) takes precedence over `CHAT_PASSWORD` whenever fully configured. Sessions are a
-  stateless HMAC-signed cookie (stdlib `hmac`, no new dependency) — no server-side session
-  store, so login survives a restart whenever `CHAT_SESSION_SECRET` is set.
-- Conversation history is client-side only; the server holds nothing between requests. A
-  small live context pack (node roster, service counts, staleness, health mode) is rebuilt on
-  a TTL and injected per turn so common questions resolve without a tool call.
-- Persona = generic in-repo `chat/persona.md` (no real hostnames — this repo is public) +
-  an optional operator overlay read from `CHAT_PERSONA_PATH`, an absolute path in the same
-  trust class as `SECRETS_KEY_PATH`/`ANSIBLE_CFG_PATH` (plain existence check, not
-  `gitcrypt.check_path`, which is for repo-relative caller-supplied paths).
-- Streaming is hand-rolled Server-Sent Events (`chat/agent.py`) over a `StreamingResponse` —
-  not `sse-starlette` (transitive-only via `mcp`), not WebSocket. The frontend
-  (`chat/static/index.html`) is one self-contained vanilla-JS file, no build step; model
-  output is rendered via `createElement`/`textContent` only, never `innerHTML`, since it can
-  echo lab-sourced data. A hand-rolled markdown parser + DOM builder (headers, bold/italic,
-  inline code, fenced code blocks, tables, lists, links) formats the completed response —
-  streamed tokens still append as flat text and get swapped for the formatted version once
-  the response finishes, so nothing during the stream is ever partially parsed. The parser
-  only produces plain-data node descriptors (no DOM access at all); the builder that turns
-  those into real nodes is the one place with a security check — a link's `href` is only
-  ever assigned once `new URL(href).protocol` is exactly `http:` or `https:`, otherwise it
-  degrades to plain text. See ADR-009's "Frontend" section for the full rationale.
-
 **Dockhand webhook (ADR-010, `webhooks/`):** an opt-in `POST /webhooks/dockhand` route
 that turns Dockhand's outbound update and CVE alerts into staged proposals. Off by default
 (`DOCKHAND_WEBHOOK_ENABLED=false`); requires the same `GIT_*` as the proposal layer. This
 restores the update-triggered path ADR-006 removed with WUD, by push rather than by
 ADR-004's unimplemented polling source.
-- Registered via `FastMCP.custom_route` like `chat/`, and **fail-closed at registration**:
+- Registered via `FastMCP.custom_route` (the only route this server mounts alongside
+  `/mcp`), and **fail-closed at registration**:
   disabled, or enabled with no `DOCKHAND_WEBHOOK_SECRET`, leaves the route unmounted
   entirely rather than mounted-and-rejecting. Dockhand does not sign its webhook bodies, so
   auth is a bearer secret compared with `hmac.compare_digest` — there is no HMAC to verify.
@@ -329,11 +279,6 @@ ADR-004's unimplemented polling source.
 | `AUTHENTIK_TOKEN` | unset | **Read-only service-account token only** (never admin) |
 | `AUTHENTIK_TIMEOUT_SECONDS` | `10` | |
 | `AUTHENTIK_RETRIES` | `3` | |
-| `KOMODO_API_URL` | unset | Enables read-only Komodo stack/service tools; e.g. `https://komodo.lan` |
-| `KOMODO_API_KEY` | unset | Paired with `KOMODO_API_SECRET` for Basic Auth against the Komodo API |
-| `KOMODO_API_SECRET` | unset | |
-| `KOMODO_TIMEOUT_SECONDS` | `10` | |
-| `KOMODO_RETRIES` | `3` | |
 | `DOCKER_BASE_URL` | unset | Enables Docker discovery; e.g. `unix:///var/run/docker.sock` |
 | `REGISTRY_DB_PATH` | `/data/registry.db` | SQLite location |
 | `REGISTRY_LOG_PATH` | `/data/events.log` | JSON event log |
@@ -390,31 +335,6 @@ ADR-004's unimplemented polling source.
 | `DOCKHAND_WEBHOOK_VULNERABILITY_ENABLED` | `true` | Whether CVE alerts also earn a proposal |
 | `DOCKHAND_WEBHOOK_LOG_RAW_PAYLOAD` | `false` | Logs each authorized delivery body verbatim for diagnosing an unknown payload shape; bypasses field-name redaction, so turn it back off |
 | `DOCKHAND_WEBHOOK_VULNERABILITY_MIN_SEVERITY` | `high` | `low`/`medium`/`high`/`critical`; an unrecognized label surfaces rather than being dropped |
-| `CHAT_ENABLED` | `false` | Registers `/chat` and friends (ADR-009). `true` with neither `CHAT_OIDC_*` nor `CHAT_PASSWORD` set is a startup error — routes stay unregistered, never open |
-| `CHAT_OLLAMA_URL` | unset | e.g. `http://10.0.0.203:11434`; this repo never runs Ollama itself |
-| `CHAT_OLLAMA_MODEL` | `qwen3:14b` | Must support Ollama tool calling |
-| `CHAT_OLLAMA_TIMEOUT_SECONDS` / `CHAT_OLLAMA_RETRIES` | `300` / `3` | Retries only apply before the first streamed chunk — never mid-stream |
-| `CHAT_OLLAMA_KEEP_ALIVE` | `30m` | Avoids a model-reload stall on every idle gap |
-| `CHAT_NUM_CTX` | `8192` | `options.num_ctx`; budget against the model's actual context window |
-| `CHAT_TEMPERATURE` | `0.6` | |
-| `CHAT_THINK` | `false` | Qwen3-style thinking traces; costs context and latency |
-| `CHAT_MAX_CONCURRENT` | `2` | In-process counter; one GPU serializes generations anyway |
-| `CHAT_MAX_HISTORY_MESSAGES` | `20` | Server-enforced cap regardless of what the client posts |
-| `CHAT_ALLOW_WRITE` | `false` | Adds `WRITE_TOOLS` to the allowlist; forced off when the server's own startup health check is in read-only mode |
-| `CHAT_TOOL_DENY` | unset | Comma-separated extra denials; restrictive-only, can't re-admit a `DENY_ALWAYS` tool |
-| `CHAT_MAX_TOOL_ROUNDS` | `4` | Caps Ollama↔tool round trips per user turn |
-| `CHAT_TOOL_RESULT_MAX_CHARS` / `CHAT_CONTEXT_MAX_CHARS` | `8000` / `6000` | Truncation caps feeding the model's limited context |
-| `CHAT_CONTEXT_TTL_SECONDS` | `60` | How often the live snapshot (`context.py`) is rebuilt |
-| `CHAT_PERSONA_PATH` | unset | Absolute path to an operator overlay (e.g. a private homelab-repo skill file); same no-expansion caveat as `SECRETS_REPO_PATH` |
-| `CHAT_PERSONA_MAX_CHARS` | `8000` | |
-| `CHAT_SESSION_SECRET` | unset | HMAC signing key; unset generates an ephemeral per-process key — sessions won't survive a restart |
-| `CHAT_SESSION_TTL_SECONDS` | `43200` | |
-| `CHAT_COOKIE_SECURE` | `true` | Set `false` only for a direct `http://<ip>:8765` deployment with no TLS in front — strictly less safe |
-| `CHAT_ALLOWED_ORIGINS` | unset | Comma-separated; enforced on `POST /chat/api/send` when set |
-| `CHAT_PASSWORD` | unset | Static-password fallback; ignored whenever OIDC is fully configured below |
-| `CHAT_OIDC_ISSUER` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_REDIRECT_URL` | unset | All four required together to enable OIDC. `CHAT_OIDC_REDIRECT_URL` must be the exact URL registered on the provider — never derived from the request `Host` header |
-| `CHAT_OIDC_SCOPES` | `openid profile email` | |
-| `CHAT_OIDC_ALLOWED_GROUPS` | unset | Comma-separated; empty means any authenticated user, not "trust no one" — see the field's comment in `config.py` for why this differs from `PROPOSAL_COMMENT_ALLOWED_USERS` |
 | `EVENT_RETENTION_DAYS` | `90` | Old events purged on startup |
 | `LOG_LEVEL` | `INFO` | |
 
@@ -439,8 +359,8 @@ Copy `.env.example` to `.env` and fill in the upstream URLs before running local
 - **All repo-relative paths go through `gitcrypt.check_path`**: every user- or draft-supplied path (`secrets_*` tools, adoption's `.env` write) is validated by the shared helper in `gitcrypt.py` — reject absolute paths, reject `..` traversal, then `.resolve()` + `is_relative_to(repo)` as a final containment check (also catches symlink escapes). Never join a repo base with a caller-supplied path without it; `Path(base) / "/etc/passwd"` silently discards `base` and returns `/etc/passwd`.
 - **A secret never reaches Git through `GitProvider.commit_file()`**: that call is a raw hosting-API content write and bypasses git-crypt's local clean filter entirely. Anything that must land encrypted (the `.env` files `secrets_*` and adoption write) goes through `gitcrypt.py`'s local-clone subprocess helpers instead — see the brownfield adoption entry above.
 - **Structured logs go to stderr + file** — keeps stdio JSON-RPC transport clean.
-- **No HTTP /health endpoint on `/mcp` itself**: Dockerfile still uses a TCP probe on `MCP_PORT` for container health. `FastMCP.custom_route` (available since the pinned `mcp` SDK, 1.29.0) does let the server expose arbitrary Starlette routes alongside `/mcp` — the chat interface (`chat/routes.py`, ADR-009) is the first thing to use it — but no `/health` HTTP route has been added, and this line describes that gap, not a technical limitation.
-- **ForwardAuth in front of MCP clients breaks them** (clients don't follow redirects). This still applies to `/mcp` itself — auth strategy there is deferred; the endpoint is LAN-only. It does **not** apply to a browser client: the chat interface (`/chat`, ADR-009) authenticates in-process (Authentik OIDC or a static password) precisely because a browser *can* follow redirects, while `/mcp` remains unauthenticated on the same port exactly as before.
+- **No HTTP /health endpoint on `/mcp` itself**: Dockerfile still uses a TCP probe on `MCP_PORT` for container health. `FastMCP.custom_route` (available since the pinned `mcp` SDK, 1.29.0) does let the server expose arbitrary Starlette routes alongside `/mcp` — the Dockhand webhook (`webhooks/dockhand.py`, ADR-010) is the only thing that uses it — but no `/health` HTTP route has been added, and this line describes that gap, not a technical limitation.
+- **ForwardAuth in front of MCP clients breaks them** (clients don't follow redirects). This applies to `/mcp` itself — auth strategy there is deferred; the endpoint is LAN-only. It applies equally to `/webhooks/dockhand`, which authenticates in-process with a bearer secret rather than sitting behind a redirect-based proxy. There is no browser-facing route on this port.
 
 ## Testing
 
@@ -454,44 +374,15 @@ uv run pytest --cov=src                  # with coverage
 
 Fixtures live in `tests/conftest.py` (IsolatedSettings, in-memory store).
 
-`tests/chat_markdown.test.mjs` (+ its `tests/chat_markdown_support.mjs` helper) is the one
-exception: `node --test`, zero npm dependencies, covering the JS-only markdown parser/DOM
-builder in `chat/static/index.html`. It extracts that file's `<script>` block directly (no
-duplicated logic) and runs it against a hand-rolled fake DOM. Not wired into `uv run pytest`
-or CI — run it with `node --test tests/chat_markdown.test.mjs` when touching that renderer.
-
-### Installer validation (two-tier)
-
-`scripts/install.sh` / `scripts/bootstrap.sh` have two separate test loops, each catching a different class of bug. Run the fast one first; reach for the slow one only when a change needs fidelity the fast one structurally can't provide.
-
-- **Fast loop — `.github/workflows/install-validation.yml`** (GitHub Actions, `ubuntu-latest`). Runs `install.sh` non-interactively — every prompt pre-seeded via env vars of the same name, `INSTALL_SKIP_NETWORK=true` skips the static-IP swap (which would otherwise risk severing the runner's own network connectivity mid-job) — and asserts the `homelab-registry-mcp` container comes up healthy. Triggers on `workflow_dispatch` (`gh workflow run install-validation.yml --ref <branch>` — test a change without opening a PR) and on `pull_request` touching `scripts/**`. Catches logic bugs, env-var plumbing issues, and container-health regressions in minutes, without a merge to `main`.
-- **Slow loop — `vagrant/slow-loop/` (Vagrant + libvirt, Debian trixie64)**. `cd vagrant/slow-loop && vagrant up && vagrant ssh`, then run the installer by hand inside — see `vagrant/slow-loop/README.md` for the full walkthrough. Real systemd and real network-interface ownership catch what the fast loop structurally can't — e.g. the ifupdown-vs-netplan detection bug: `ubuntu-latest` ships netplan, not ifupdown, so only a real Debian VM reproduces that class of failure — and it's the only place the static-IP step (`bootstrap.sh` Phase 6) actually runs at all, since the fast loop always skips it. `vagrant destroy -f` between rounds; both scripts assume a genuinely fresh node.
-
-Both loops clone from GitHub rather than a local working tree, so push your branch before testing either one. `install.sh` honors `VERSION` (the same variable the documented `curl -fsSL .../${VERSION}/scripts/install.sh` one-liner already uses) for its own internal clone too — `export VERSION=your-branch-name` first (must be exported, not just assigned, or the `bash -c` subprocess running `install.sh` never sees it) and both loops test that branch end-to-end (`bootstrap.sh`, `scripts/`, `monitoring/` included), not just main with a different `install.sh` grafted on top.
-
-`vagrant/` also holds `vagrant/workload-node/`, an unrelated fixture — a live Traefik + demo-services VM for testing discovery/linking code against something real, not part of this installer-validation strategy. See `vagrant/README.md` for the full fixture index.
-
-Both loops are required for full confidence; neither replaces the other.
-
 ## Docker / Homelab Deploy
 
-**Fresh control-plane node**: `curl -fsSL .../scripts/install.sh | bash` — clones
-the repo, provisions the OS (`scripts/bootstrap.sh --skip-network`: Docker,
-Ansible, `uv`, `git-crypt`, `gh`, SSH key), prompts for Git config and a DSPy
-opt-in, then optionally creates the private homelab config repo itself
-(folded in from `scripts/setup-homelab-repo.sh`; offers to run the one-time
-`gh auth login` device-code flow right there if needed, reuses the
-`owner/name` from the Git config prompt when it was answered `github`, skips
-cleanly with guidance if `gh`/`git-crypt` aren't available or the login isn't
-completed) — and if that repo now exists,
-optionally seeds this node into the Ansible inventory `hardware-discover-now`
-reads (folded in from `scripts/setup-ansible-inventory.sh`; skips cleanly with
-guidance if no repo exists at all). Writes `.env`, brings the server up, then
-applies the static IP last (`bootstrap.sh --network-only`) so the server is
-already running when the SSH session drops. See `scripts/README.md`.
+**This repo ships the MCP server, not a node provisioner.** Provisioning a host,
+creating the operator's private homelab config repo, and building its Ansible
+inventory are the operator's own concern — there are no installer or bootstrap
+scripts here. `docs/SETUP.md` covers the container deploy; the operator supplies
+everything upstream of it.
 
-Assumes a **greenfield** setup — no Traefik or Authentik yet, so `install.sh`
-doesn't ask about them. Once those exist, connect them via the
+Once Traefik and Authentik exist, connect them via the
 `discovery_connect_traefik` / `discovery_connect_authentik` MCP tools
 (`tools/discovery.py`): each live-tests the URL/credentials and hands back the
 `.env` lines to add plus a restart — they never write a file themselves (the
@@ -503,7 +394,7 @@ server startup).
 `docker-compose.yml` in this repo defines only `homelab-registry-mcp` — Komodo
 (container management, logs, update detection) and Traefik (this node's
 central ingress; other nodes' `traefik-kop` instances publish routes to its
-Redis) are no longer bundled into this repo's compose file or `install.sh`.
+Redis) are no longer bundled into this repo's compose file.
 They're deployed instead as ordinary `nodes/<node>/<service>/compose.yaml`
 entries in the operator's private homelab repo, through the same Ansible +
 GitHub Actions GitOps pipeline (Phase 4/ADR-001) every other node service
@@ -567,32 +458,37 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
   `DELETE_CHALLENGE_TTL_MINUTES` (default 5) before the row is actually removed. Wrong
   answer, expired challenge, or an already-resolved one all invalidate it outright — no
   retries, just call the delete tool again for a fresh problem. Expired challenges are also
-  swept on every server startup, same idiom as `AdoptionDraftStore.purge_expired`. Both
-  `*_confirm` tools are denied in chat (`chat/bridge.py`'s `DENY_ALWAYS`) right alongside the
-  request tools they gate.
+  swept on every server startup, same idiom as `AdoptionDraftStore.purge_expired`.
 - **ADR-010 complete**: Dockhand webhook (`webhooks/`) — `POST /webhooks/dockhand` turns container-update and CVE alerts into staged `image_update`/`vulnerability_scan` proposals through the existing engine. Restores the update-triggered path ADR-006 removed with WUD and closes its Open Item. Off by default (`DOCKHAND_WEBHOOK_ENABLED=false`), fail-closed at registration when no secret is set. Accepts both Dockhand payload shapes; the stock generic body is digest-only and is deliberately ignored rather than guessed at — see ADR-010's Negative consequences.
-- **ADR-009 complete**: web chat interface (`chat/`) — `/chat` + `/chat/auth/*` + `/chat/api/*`
-  registered via `FastMCP.custom_route`, backed by an operator-run Ollama instance
-  (`CHAT_OLLAMA_URL`), Authentik OIDC or static-password auth, and a fixed read/write tool
-  allowlist. Off by default (`CHAT_ENABLED=false`). Resolves ADR-002 §4.4's Open Questions
-  1-4; corrects the "no HTTP endpoint" / "ForwardAuth breaks MCP clients" conventions that
-  predated `mcp` SDK 1.29.0's `custom_route` support (see ADR-009). DSPy-on-Ollama and a
-  confidence-gated local→Claude escalation are noted as future work, not attempted here.
-  **Follow-up landed**: safe markdown rendering for assistant responses (headers, bold/italic,
-  inline code, fenced code blocks, tables, lists, links) — still `createElement`/`textContent`
-  only, never `innerHTML`, so ADR-009's XSS guarantee is unchanged; see ADR-009's "Frontend"
-  section and `tests/chat_markdown.test.mjs`.
+- **ADR-011 accepted**: withdraws the Komodo integration and the `/chat` interface from the
+  server's supported surface. Supersedes ADR-009 in full and amends ADR-006 §1 (the
+  integration only — Komodo still runs on the Pi). See the two bullets below.
+- **Komodo integration removed**: `integrations/komodo/` and its 7 read-only tools
+  (`komodo_health`, `komodo_list_stacks`, `komodo_get_stack`, `komodo_list_services`,
+  `komodo_get_service`, `komodo_list_updates`, `komodo_get_logs`), the `komodo://stacks/{name}`
+  resource, the `diagnose_stack` prompt, and the five `KOMODO_*` settings are gone. Komodo was
+  never a discovery source — no `SourceType` member, no reconciler path, no registry rows — so
+  nothing in the database references it. **ADR-006 §1's decision to run Komodo on the Pi for
+  operational visibility still stands**; per ADR-007 that deployment lives in the operator's
+  private homelab repo as a `nodes/<node>/<service>/compose.yaml` entry, and only this server's
+  integration with it was withdrawn.
+- **ADR-009 removed**: the web chat interface (`chat/`) and its Ollama backend are gone —
+  `/chat`, `/chat/auth/*`, `/chat/api/*`, the `CHAT_*` settings, the `READ_TOOLS`/
+  `WRITE_TOOLS`/`DENY_ALWAYS` bridge, and the JS markdown renderer with it. `/mcp` is
+  unaffected; `webhooks/dockhand.py` is now the sole `FastMCP.custom_route` consumer, so
+  `starlette` remains a required dependency. ADR-002 §4.4's Open Questions 1-4, which
+  ADR-009 had resolved, are open again.
 - **Phase 7 complete**: cross-source linking (Authentik ↔ Traefik ↔ Docker), `service_get_full_context()`, and the DSPy reasoning layer (`ResolveServiceIdentity`, `InferServiceMetadata`, `SummarizeAccessAudit`) — off by default via `DSPY_ENABLED`
 - **Phase 8 in progress**: security write path landed — `GenerateRemediationPatch`, Gitea + Ntfy/Smtp/Null providers, `Proposal` model/store, proposal engine (create + verification sweep), and the `proposal_*` tools. Off by default (`GIT_*` unset, `PROPOSAL_AUTO_CREATE=false`); see ADR-002. Normalization path complete — `docs/specs/spec-compose-normal-form.md`, the `normalization/` engine (`ruamel.yaml` deterministic formatter + `NormalizeConfigFile` DSPy escalation + `yamllint`), and the `proposal_normalize` tool + `NORMALIZATION_SCHEDULE` scheduler job. Off by default (`NORMALIZATION_ENABLED=false`).
 - **Phase 8 remaining**: flipping `PROPOSAL_DRY_RUN=false` (and `NORMALIZATION_DRY_RUN=false`) against the homelab repo (a deliberate human step); runbooks, cold-restore testing, Ansible provisioning. (GitHub provider landed — `GitHubGitProvider` alongside Gitea, selected via `GIT_PROVIDER=github`.)
-- **Phase 9a-9b complete**: hardware node registry — `HardwareNode` model + `HardwareStore` + 11 MCP tools registered in `server.py`; `hardware-discover-now` runs a live Ansible `setup` fact-gather against `ANSIBLE_CFG_PATH`'s inventory and upserts provenance fields (curated fields untouched). `scripts/setup-ansible-inventory.sh` bootstraps the `ansible.cfg`/inventory prerequisite itself (seeds the control-plane node, then prompts for more hosts) until the OOBE CLI replaces it — also folded inline into `scripts/install.sh` (opt-in, only offered when a homelab config repo already exists) so hardware onboarding can start from a fresh install rather than a separate manual step; the standalone script remains the way to add more hosts later.
-- **Phase C complete**: git-crypt secrets integration — 6 `secrets_*` MCP tools, `scripts/setup-homelab-repo.sh` bootstrap, `git-crypt` in Dockerfile. Path validation hardened against arbitrary file read/write via absolute paths (`check_path` in `gitcrypt.py`, shared with Phase 7 adoption); `setup-homelab-repo.sh` and `.env.example` work cross-platform (macOS/Linux/WSL), defaulting to `$HOME`-relative paths instead of `/opt/homelab` — also folded inline into `scripts/install.sh` (Pi defaults there) so a fresh install can create the repo without a separate manual step; `setup-homelab-repo.sh` remains the standalone/cross-platform path
+- **Phase 9a-9b complete**: hardware node registry — `HardwareNode` model + `HardwareStore` + 13 MCP tools registered in `server.py`; `hardware-discover-now` runs a live Ansible `setup` fact-gather against `ANSIBLE_CFG_PATH`'s inventory and upserts provenance fields (curated fields untouched). The `ansible.cfg`/inventory it reads is the operator's own, maintained in their private homelab repo — this project consumes it and never generates it.
+- **Phase C complete**: git-crypt secrets integration — 6 `secrets_*` MCP tools, `git-crypt` in Dockerfile. Path validation hardened against arbitrary file read/write via absolute paths (`check_path` in `gitcrypt.py`, shared with Phase 7 adoption). Creating the private homelab repo and initialising git-crypt in it is the operator's own setup step; `SECRETS_REPO_PATH` + one of `SECRETS_KEY_PATH`/`SECRETS_GIT_CRYPT_KEY` point the server at the result.
 - **Phase D complete, routing model since moved to Docker labels**: migrated registry-mcp off the workload node onto the dedicated control-plane node; GitHub Actions self-hosted runner operational; first automated CD deploy proven end-to-end; `docker-compose.yml` binds `0.0.0.0:8765`. Originally routed via a Traefik static backend (`docs/plans/phase-d.md`, written when Traefik lived on a separate workload node); now that Traefik runs co-located on this same node (ADR-006/ADR-007), `docker-compose.yml` carries standard Traefik Docker labels and joins the external `traefik` network instead — see the Docker/Homelab Deploy section above.
-- **Installer modularized into per-phase scripts**: `install.sh`'s 9 steps and `bootstrap.sh`'s 6 phases each moved into their own self-contained file under `scripts/phases/install/` and `scripts/phases/bootstrap/` respectively, sharing prompt/`.env`-write/detection helpers via `scripts/lib/common.sh`. `install.sh`/`bootstrap.sh` are now thin orchestrators that just call each phase script in order; every phase is independently runnable (`bash scripts/phases/install/06-write-env.sh`, `bash scripts/phases/bootstrap/06-static-ip.sh`, ...) for debugging or a targeted brownfield/greenfield rerun without re-driving the whole installer. Cross-phase handoff goes through a small state file (a real env var of the same name still always wins, so every documented pre-seeding trick is unchanged) — see [scripts/README.md](scripts/README.md#modular-phase-scripts). External behavior (prompts, `.env` output, CI env-var pre-seeding) is unchanged; `.github/workflows/install-validation.yml` exercises it end-to-end same as before.
-- **`docs/plans/updated-phases.md` Phases 1-6 complete** (separate numbering from the phases above): `scripts/install.sh` one-shot installer for a fresh control-plane node (Phase 1); `health.py` startup checks (Git repo/`ansible.cfg`/SSH key) + always-on `system_health_check` tool + read-only degradation of the GitOps write tools when unhealthy (Phase 2); conversational GitOps loop — `poll_pr_comments`/`apply_review_feedback` push a DSPy-generated revision commit in response to a trusted PR comment, gated by a fail-closed `PROPOSAL_COMMENT_ALLOWED_USERS` allowlist and the same confidence/YAML gates as initial patch generation (Phase 3); `ansible/roles/docker-stack-deploy` + reusable `.github/workflows/deploy.yml` — the deploy *action* ships here, each operator's private homelab repo supplies only the *config* and a thin caller workflow (Phase 4); `SmtpNotificationProvider` — templated HTML proposal email (PR summary, diff, Approve/Request Changes/View Diff buttons) via stdlib `smtplib`, validated against SMTP2GO, `NOTIFICATION_PROVIDER=smtp` (Phase 5); public release scrub — removed an accidentally-committed operator-specific `nodes/` config and genericized real hostnames/IPs/personal identifiers across scripts and docs (Phase 6)
+- **ADR-012 accepted — operator scripts removed**: the one-shot `install.sh`/`bootstrap.sh` installer, its per-phase scripts, the homelab-repo and Ansible-inventory bootstrappers, the `vagrant/` fixtures, and the `install-validation.yml` workflow that exercised them have all been deleted. They provisioned a node and scaffolded an operator's private repo — neither is this project's job. What ships here is the MCP server plus the deploy *action* (`ansible/roles/docker-stack-deploy` + the reusable `.github/workflows/deploy.yml`); provisioning, repo creation, and inventory management live in the operator's own homelab repo. Supersedes ADR-003 in full and withdraws ADR-001 §5's OOBE duties.
+- **`docs/plans/updated-phases.md` Phases 1-6 complete** (separate numbering from the phases above): the one-shot installer for a fresh control-plane node (Phase 1 — since removed, see above); `health.py` startup checks (Git repo/`ansible.cfg`/SSH key) + always-on `system_health_check` tool + read-only degradation of the GitOps write tools when unhealthy (Phase 2); conversational GitOps loop — `poll_pr_comments`/`apply_review_feedback` push a DSPy-generated revision commit in response to a trusted PR comment, gated by a fail-closed `PROPOSAL_COMMENT_ALLOWED_USERS` allowlist and the same confidence/YAML gates as initial patch generation (Phase 3); `ansible/roles/docker-stack-deploy` + reusable `.github/workflows/deploy.yml` — the deploy *action* ships here, each operator's private homelab repo supplies only the *config* and a thin caller workflow (Phase 4); `SmtpNotificationProvider` — templated HTML proposal email (PR summary, diff, Approve/Request Changes/View Diff buttons) via stdlib `smtplib`, validated against SMTP2GO, `NOTIFICATION_PROVIDER=smtp` (Phase 5); public release scrub — removed an accidentally-committed operator-specific `nodes/` config and genericized real hostnames/IPs/personal identifiers across scripts and docs (Phase 6)
 - **`docs/plans/updated-phases.md` Phase 7 complete** (brownfield adoption & secret interception — the final phase in that plan): `proposal_adopt_service`/`_finalize`/`_cancel`/`_get` tools, `AdoptionDraft` model/store, `DetectHardcodedSecrets` DSPy signature, and the shared `gitcrypt.py` module (extracted from `tools/secrets.py` so both features encrypt through the same local-clone path rather than the remote Git API, which bypasses git-crypt's filter). Off by default (`ADOPTION_ENABLED=false`).
-- **ADR-005 superseded by ADR-006**: the monitoring/ingress stack ADR-005 introduced (Beszel, Gatus, Dozzle, WUD, docker-socket-proxy, Homepage, Glance, traefik-kop, Autorestic, Healthchecks.io heartbeat) has been fully removed, including the WUD-driven `/webhooks/wud` → `image_update` proposal flow (`FindingType.image_update`, `ProposalEngine.create_for_image_update`) — that update-triggered proposal path is **restored by ADR-010** (`webhooks/dockhand.py`), sourced from Dockhand push alerts instead of WUD polling; `FindingType.image_update` is back alongside a new `vulnerability_scan`.
-- **ADR-006 complete, deploy mechanism superseded by ADR-007**: the Pi's only non-MCP services are Komodo (container management, logs, update detection) and Traefik (this node's central ingress, moved from a workload node; other nodes' `traefik-kop` instances publish to its Redis). Komodo is operational visibility only — the Ansible + GitHub Actions GitOps pipeline (Phase 4/ADR-001) remains the only path for MCP-proposed changes, on the Pi or any other node. Per ADR-007, both are now deployed as ordinary `nodes/<node>/<service>/compose.yaml` entries in the operator's private homelab repo through that same GitOps pipeline, rather than bundled into this repo's `docker-compose.yml`/`scripts/install.sh` as Compose profiles.
-- **ARD-004 proposed, partly advanced by ADR-010**: upstream version detection — `HomelabrepoDiscoverySource`, `UpstreamRegistrySource`, `ResolveLatestTag` DSPy module — none of the polling sources are implemented. ADR-010 supplies the `image_update` `FindingType` ADR-004 asked for and covers the detection gap by push instead: Dockhand sends the exact target tag, so `ResolveLatestTag` isn't needed on that path. ADR-004's three-way drift model (intended/actual/available) still wants a repo-reading source
-- **OOBE CLI** (ARD-003): fully documented but not yet implemented; currently a manual process
-- **Deferred**: network probe discovery (`DISCOVERY_NETWORK_ENABLED=false`), real auth (Bearer/mTLS), multi-node Ansible bootstrap (Phase E)
+- **ADR-005 superseded by ADR-006**: the monitoring/ingress stack ADR-005 introduced (Beszel, Gatus, Dozzle, WUD, docker-socket-proxy, Homepage, Glance, Autorestic, Healthchecks.io heartbeat) has been fully removed — **except `traefik-kop` + Redis, which ADR-006 §2 explicitly kept**: cross-node routing still works exactly as ADR-005 §4 described, just re-centered on the Pi. The removal included the WUD-driven `/webhooks/wud` → `image_update` proposal flow (`FindingType.image_update`, `ProposalEngine.create_for_image_update`) — that update-triggered proposal path is **restored by ADR-010** (`webhooks/dockhand.py`), sourced from Dockhand push alerts instead of WUD polling; `FindingType.image_update` is back alongside a new `vulnerability_scan`.
+- **ADR-006 complete, deploy mechanism superseded by ADR-007**: the Pi's only non-MCP services are Komodo (container management, logs, update detection) and Traefik (this node's central ingress, moved from a workload node; other nodes' `traefik-kop` instances publish to its Redis). Komodo is operational visibility only — the Ansible + GitHub Actions GitOps pipeline (Phase 4/ADR-001) remains the only path for MCP-proposed changes, on the Pi or any other node. Per ADR-007, both are now deployed as ordinary `nodes/<node>/<service>/compose.yaml` entries in the operator's private homelab repo through that same GitOps pipeline, rather than bundled into this repo's `docker-compose.yml` as Compose profiles.
+- **ADR-004 proposed, partly advanced by ADR-010**: upstream version detection — `HomelabrepoDiscoverySource`, `UpstreamRegistrySource`, `ResolveLatestTag` DSPy module — none of the polling sources are implemented. ADR-010 supplies the `image_update` `FindingType` ADR-004 asked for and covers the detection gap by push instead: Dockhand sends the exact target tag, so `ResolveLatestTag` isn't needed on that path. ADR-004's three-way drift model (intended/actual/available) still wants a repo-reading source
+- **OOBE CLI** (ADR-003): never implemented, and now out of scope — ADR-012 supersedes ADR-003 in full and withdraws ADR-001 §5's OOBE duties. The shell scripts that stood in for it are deleted; provisioning a host and creating the operator's config repo happen outside this repo. ADR-003's repo-structure contract survives as a description of what the server *expects to find* (still cited by `docs/specs/spec-compose-normal-form.md`), restated operationally in `docs/SETUP.md`.
+- **Deferred**: network probe discovery (no source, no `SourceType` member, and no setting — it was never implemented, so the placeholders were removed rather than left looking wired), real auth (Bearer/mTLS), multi-node Ansible bootstrap (Phase E)

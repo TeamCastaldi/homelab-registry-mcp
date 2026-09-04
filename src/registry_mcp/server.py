@@ -12,7 +12,6 @@ from mcp.server.fastmcp import FastMCP
 
 from registry_mcp import __version__
 from registry_mcp.adoption import AdoptionDraftStore
-from registry_mcp.chat import register_chat_routes
 from registry_mcp.config import Settings, get_settings
 from registry_mcp.deletion import DeletionGateStore
 from registry_mcp.discovery.engine import DiscoveryEngine, build_sources
@@ -21,7 +20,6 @@ from registry_mcp.dspy import Reasoner, build_reasoner
 from registry_mcp.hardware import HardwareStore
 from registry_mcp.health import check_health
 from registry_mcp.integrations.authentik import register_authentik_tools
-from registry_mcp.integrations.komodo import register_komodo_tools
 from registry_mcp.integrations.traefik import register_traefik_tools
 from registry_mcp.logging import configure_logging, get_logger, install_tool_call_logging
 from registry_mcp.normalization import NormalizationEngine, NormalizationGenerator, schedule_seconds
@@ -144,7 +142,6 @@ def build_server(settings: Settings | None = None) -> FastMCP:
     register_event_tools(mcp, store)
     register_traefik_tools(mcp, settings)
     register_authentik_tools(mcp, settings, reasoner=reasoner)
-    register_komodo_tools(mcp, settings)
     register_discovery_tools(mcp, engine)
     register_linking_tools(mcp, store, settings, hardware_store=hardware_store)
     register_hardware_tools(
@@ -172,7 +169,6 @@ def build_server(settings: Settings | None = None) -> FastMCP:
         build_notification_provider(settings),
         read_only=read_only,
     )
-    register_chat_routes(mcp, settings, read_only=read_only)
     register_webhook_routes(mcp, settings, store, proposal_engine, read_only=read_only)
 
     @mcp.tool()

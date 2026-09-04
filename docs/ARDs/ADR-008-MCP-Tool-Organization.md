@@ -146,6 +146,13 @@ the total to 71 — see Tier 2 below.
 
 Low stakes if over-connected to an unrelated session.
 
+> **Reader's note (added 2026-09-04):** the table below is the inventory as it stood when
+> this record was drafted, and is kept unedited per `docs/ARDs/README.md`. The Komodo row
+> is the stale part: those seven tools were withdrawn by
+> [ADR-011](ADR-011-Remove-Komodo-Integration-And-Chat-Interface.md) and are no longer
+> registered, which makes the current Tier 1 count 37 rather than the 44 in the heading.
+> The tiering model this record proposes is unaffected — only the inventory is dated.
+
 | Domain | Tools |
 |---|---|
 | Traefik (7) | `traefik_get_overview`, `traefik_get_entrypoints`, `traefik_list_routers`, `traefik_get_router`, `traefik_list_services`, `traefik_list_middlewares`, `traefik_list_tls_certificates` |

@@ -18,8 +18,8 @@ any other non-compose YAML. ADR-001 and ADR-003 currently disagree on where thes
 what they're named — see "Open question" below. Normalizing them is deferred until that's
 settled in an ADR, not silently absorbed here.
 
-**Label scope:** every label namespace in a compose file — `traefik.*`, `homepage.*`,
-`wud.*`, or any other tool's labels — is normalized by the same structural rules (N-007
+**Label scope:** every label namespace in a compose file — `traefik.*`, `com.docker.*`,
+`org.opencontainers.*`, or any other tool's labels — is normalized by the same structural rules (N-007
 through N-009). Normalization has no per-app special-casing; it operates on YAML shape, not
 on what a label means to the container reading it.
 

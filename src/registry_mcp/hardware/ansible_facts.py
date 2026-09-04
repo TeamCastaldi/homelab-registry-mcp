@@ -97,8 +97,8 @@ async def gather_facts(
     plain `-o KEY=VALUE` token, crashing the whole worker with "A worker was
     found in a dead state" — reproduced directly against ansible-core
     2.21.1. `ansible_ssh_timeout` (a plain int, never touches that code
-    path) covers the connect timeout; `host_key_checking = False` in
-    `ansible.cfg` (see `setup-ansible-inventory.sh`) already covers what
+    path) covers the connect timeout; `host_key_checking = False` in the
+    operator's own `ansible.cfg` (`ANSIBLE_CFG_PATH`) already covers what
     `StrictHostKeyChecking` would have.
     """
     env = {

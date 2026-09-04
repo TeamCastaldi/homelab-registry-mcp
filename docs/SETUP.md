@@ -4,193 +4,38 @@ This is the step-by-step guide to getting `homelab-registry-mcp` running.
 For a quick overview see the [README](../README.md); for environment variables,
 architecture, and conventions see [CLAUDE.md](../CLAUDE.md).
 
-## Which path do I want?
-
-| | Option A: fresh control-plane node | Option B: existing Docker host |
-|---|---|---|
-| Use when | You have a spare Raspberry Pi, mini PC, or VM with a fresh Debian/Ubuntu install and nothing else on it | You already run Docker somewhere (NAS, server, existing homelab host) and just want the container |
-| What it does | Provisions the whole node (packages, SSH key, static IP) *and* stands up the server | Only starts the container — you manage the host yourself |
-| Time | ~10-15 minutes, one command | ~2 minutes if Docker is already set up |
-
-If you're not sure, and you have a device to dedicate to this, use **Option A** —
-it is the tested, documented path and does the most for you.
+This project ships an **MCP server**, not a node provisioner. It assumes you
+already have a Docker host and, if you want the GitOps features, a private
+homelab config repo. Provisioning the host, creating that repo, and building
+its Ansible inventory are your infrastructure's concern, not this project's.
 
 ---
 
-## Option A: Fresh control-plane node
-
-### Prerequisites
-
-- A Debian or Ubuntu host (Raspberry Pi OS Bookworm+, Debian 12, Ubuntu 22.04/24.04,
-  x86_64 or ARM64 — VM or bare metal) with a fresh OS install and nothing important
-  on it yet.
-- SSH access to it with a sudo-capable user.
-- Its current DHCP IP (for the initial SSH connection) and the static IP you want
-  to give it long-term, on the same subnet.
-- A GitHub account, if you plan to use the write path (opens PRs against your
-  private homelab config repo) — you can skip this during install and add it later.
-
-### The command
-
-```bash
-export VERSION=main  # or the latest tagged release, e.g. v0.11.0
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/${VERSION}/scripts/install.sh)"
-```
-
-Run this over SSH on the target node. It's interactive — you'll answer a handful
-of prompts (see below) — but every prompt can be pre-seeded with an environment
-variable of the same name (e.g. `GIT_PROVIDER=github`) for a non-interactive run.
-
-`VERSION` pins the entire install, not just which copy of `install.sh` the
-`curl` fetches: `install.sh` reads the same variable from its own environment
-and clones the rest of the repo (`bootstrap.sh`, `scripts/`, `monitoring/`)
-from that same ref, so a tagged release stays self-consistent end-to-end —
-this also works with a branch name, not just a tag, if you're testing an
-unreleased change. It must be `export`ed (as above), not just assigned: the
-`curl` line's own `${VERSION}` expands correctly either way, but only an
-exported `VERSION` reaches the `bash -c` subprocess that `install.sh` itself
-runs as — a plain (non-exported) assignment still fetches the right
-`install.sh`, but that script won't see `VERSION`, so its internal clone
-silently falls back to `main`.
-
-### What it does
-
-The command runs `scripts/install.sh`, which drives `scripts/bootstrap.sh` under
-the hood. Numbered here exactly as install.sh's own `[STEP N]` output numbers
-them — including starting at 0 — so this list, the script's log output, and
-its own top-of-file comment never drift out of sync with each other. Each step
-is also its own self-contained script under `scripts/phases/install/` (and
-each `bootstrap.sh` phase under `scripts/phases/bootstrap/`) — see
-[scripts/README.md](../scripts/README.md#modular-phase-scripts) if you want to
-re-run just one of them (e.g. re-writing `.env`, or re-applying the static IP)
-instead of the whole installer:
-
-0. **Installs `git`** if it isn't already present (needed to clone the repo).
-1. **Sparse-clones this repository** to `~/homelab-registry-mcp` (or a directory
-   you choose when prompted) — root-level files (`docker-compose.yml`,
-   `.env.example`, etc.) plus `scripts/`, skipping `src/`, `ansible/`, `tests/`,
-   and other build/CI-time directories, since the app runs from the GHCR image
-   rather than a source checkout. Re-running against an existing checkout pulls
-   latest instead of re-cloning.
-2. **Provisions the OS** by handing off to `bootstrap.sh --skip-network`, which
-   installs:
-   - **Docker** (`docker-ce`, `docker-ce-cli`, `containerd.io`,
-     `docker-compose-plugin`) — runs the MCP server and any services it manages
-   - **Ansible** + `ansible-lint` — powers the automated deploy pipeline
-     (Phase 4 GitOps CD) once you connect your homelab repo
-   - **`uv`** (via the official astral.sh installer) — the Python package
-     manager `registry-mcp` itself uses
-   - **`git-crypt`** — encrypts secrets (`.env` files) committed to your
-     private homelab repo
-   - **`gh`** (GitHub CLI) — used by the write path when `GIT_PROVIDER=github`,
-     and by step 4 below to create your homelab config repo
-   - **NetworkManager** (if missing) — needed to apply the static IP in the
-     last step
-   - a handful of utility packages (`vim`, `htop`, `wget`, `nfs-common`,
-     `net-tools`, `dnsutils`)
-
-   It also sets the hostname to `homelab-control-plane`, generates an ED25519
-   SSH key at `~/.ssh/id_ed25519` if one doesn't already exist (printing the
-   public key so you can add it to GitHub), and creates `/mnt/appdata` and
-   `/mnt/media` mount-point stubs. The static IP is *collected* here but not
-   yet applied — see step 8.
-3. **Prompts you for configuration**:
-   - Git provider for the write path (`github` or `gitea`, or blank to skip
-     entirely — you can enable this later by hand)
-   - If a provider is set: the repo (`owner/name`), a Git token, and the Git
-     base URL
-   - Whether to enable the optional DSPy reasoning layer, and your Anthropic
-     API key if so
-
-   `docker-compose.yml` brings up only `homelab-registry-mcp` — Komodo and
-   Traefik (formerly ADR-006's Pi non-MCP services) are no longer bundled
-   here. Deploy them instead as ordinary `nodes/<node>/<service>/compose.yaml`
-   entries in your private homelab repo, through the same GitOps pipeline
-   described in [`ansible/README.md`](../ansible/README.md) — see
-   [ADR-007](ARDs/ADR-007-Komodo-Traefik-Move-To-GitOps.md) for why they
-   were pulled out of this repo's compose file.
-
-   This installer assumes a **greenfield** setup — no Traefik discovery or
-   Authentik yet — so it doesn't ask about connecting to an existing Traefik
-   instance elsewhere in your lab. Connect those once they exist (see
-   [Connecting Traefik and Authentik later](#connecting-traefik-and-authentik-later)
-   below).
-4. **Optionally creates your private homelab config repo** — the same one
-   `scripts/setup-homelab-repo.sh` creates standalone, folded in here.
-   `gh`/`git-crypt` not being on `PATH` skips this step with instructions
-   rather than blocking the rest of the install (bootstrap.sh should have
-   installed both). If `gh` isn't authenticated yet, this step offers to run
-   the one-time `gh auth login` device-code login right here (safe over SSH —
-   it prints a URL and code you open on any device's browser); declining, or
-   the login not completing, skips the rest of this step the same way. If you
-   already answered the Git
-   provider prompt in step 3 with `github`, this reuses that same
-   `owner/name` instead of asking again — otherwise it asks for a repo name
-   and creates it under your account. Creates the target directory with
-   `sudo` first if it isn't writable by your user (the `/opt` default
-   commonly isn't, for a non-root operator). Clones it, initialises
-   `git-crypt`, writes `.gitattributes` (encrypts `**/.env`) and a
-   `.gitignore` entry for the exported key if it lands inside the repo (the
-   Pi default does), scaffolds `nodes/`, exports the git-crypt key, commits,
-   and pushes — a push failure only warns, it doesn't abort the rest of the
-   installer. **Back up the printed key to your password manager before
-   doing anything else** — it's the only way to decrypt secrets if this node
-   is lost.
-5. **Sets up the Ansible inventory, if a homelab config repo now exists** at
-   `SECRETS_REPO_PATH` (`/opt/homelab` by default — either just created in
-   step 4, or one you already had). If it does, and you opt in: writes
-   `ansible.cfg` + `ansible/inventory.yml`, seeds this node into the
-   inventory itself (auto-detects hostname/LAN IP, authorizes its own SSH
-   key over real SSH — not a local connection, so it's reachable the same
-   way any other host is), then prompts for more hosts (blank name to
-   finish). Commits and pushes — a push failure only warns, it doesn't abort
-   the rest of the installer. This is what gives `hardware-discover-now` a
-   real, verified node to fact-gather once the server is up. No homelab repo
-   at all → this step prints how to run it later and skips cleanly; nothing
-   else in the installer depends on it.
-6. **Writes `.env`** from everything collected in steps 3–5.
-7. **Starts the server**: `docker compose pull && docker compose up -d`, then
-   waits for it to report running.
-8. **Applies the static IP** last, by handing off to
-   `bootstrap.sh --network-only` — this is deliberately the final step, so the
-   server is already up and running by the time this drops your SSH session.
-   Reconnect at the new IP afterward: `ssh <user>@<new-ip>`.
-
-Everything above is idempotent — re-running the command on the same node skips
-whatever's already installed or configured.
-
-### After it finishes
-
-- Reconnect: `ssh <your-user>@<the-static-ip-you-chose>`
-- Check it's healthy: `docker compose logs -f homelab-registry-mcp` (look for a
-  `scheduler_started` line) from the install directory
-- [Set up your homelab config repo](#setting-up-your-homelab-config-repo)
-- [Discover your hardware](#discovering-your-hardware)
-- [Connect an MCP client](#connecting-an-mcp-client)
-
----
-
-## Option B: Existing Docker host
-
-Use this if Docker is already running somewhere and you just want the
-container — no OS provisioning, no source checkout.
-
-### Prerequisites
+## 1. Prerequisites
 
 - A host with Docker and the Compose plugin.
-- Traefik reachable from this host, if you want it fronted by Traefik. The
-  shipped `docker-compose.yml` publishes port 8765 directly and does not join
-  a Docker network — Traefik routes to it via a static backend (an IP:port
-  entry in Traefik's dynamic file config), not Docker label discovery. Point a
-  `websecure` TLS entrypoint and DNS for `registry-mcp.<your-domain>` at
-  `<this-host>:8765`.
-- A read-only Authentik service-account token (never an admin token), if you
-  want Authentik discovery.
+- If you want it fronted by Traefik: the shipped `docker-compose.yml` carries
+  Traefik Docker labels (`traefik.enable`, a `registry-mcp.<your-domain>`
+  router, `websecure` entrypoint, TLS with Traefik's default certificate) and
+  joins an **external** Docker network named `traefik`. That network must
+  already exist and your Traefik instance must be on it with
+  `--providers.docker=true`, plus DNS for `registry-mcp.<your-domain>`. Create
+  it once if it doesn't exist yet:
 
-### 1. Get the compose file and configure
+  ```bash
+  docker network inspect traefik >/dev/null 2>&1 || docker network create traefik
+  ```
+
+  If you'd rather not use Traefik at all, drop the `networks:` block and the
+  `labels:` block from `docker-compose.yml` and reach the server directly on
+  port 8765.
+- A **read-only** Authentik service-account token (never an admin token), if
+  you want Authentik discovery.
+
+## 2. Get the compose file and configure
 
 ```bash
-VERSION=main  # or the latest tagged release, e.g. v0.11.0
+VERSION=main  # or the latest tagged release, e.g. v0.26.1
 mkdir homelab-registry-mcp && cd homelab-registry-mcp
 curl -fsSL "https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/${VERSION}/docker-compose.yml" -o docker-compose.yml
 curl -fsSL "https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/${VERSION}/.env.example" -o .env.example
@@ -203,7 +48,7 @@ cp .env.example .env
 table in [CLAUDE.md](../CLAUDE.md#environment-variables). The write path and
 the reasoning layer are off by default.
 
-### 2. Deploy
+## 3. Deploy
 
 ```bash
 docker compose pull
@@ -211,113 +56,14 @@ docker compose up -d
 docker compose logs -f homelab-registry-mcp   # expect a scheduler_started line
 ```
 
-No other software gets installed for you on this path — only the one
-container image is pulled from GHCR.
+Only the one container image is pulled, from GHCR. No source checkout is
+needed on the host.
 
----
-
-## Setting up your homelab config repo
-
-`hardware-discover-now`, the `secrets_*` tools, and the automated deploy
-pipeline all read from (or write to) a private Git repo you control —
-`SECRETS_REPO_PATH`, `/opt/homelab` by default. This project never creates
-that repo or its contents for you; do this once before
-[Discovering your hardware](#discovering-your-hardware) below.
-
-### 1. Authenticate the GitHub CLI
-
-`bootstrap.sh` installs the `gh` binary, but can't log it in for you — unlike
-the plain `read -rp` text prompts `install.sh` asks, `gh auth login` opens a
-browser OAuth flow or a device-code flow, either of which needs a human to
-click through somewhere, and it writes to its own credential store
-(`~/.config/gh/hosts.yml`), not `.env`. Run it once, manually:
+Optionally seed the registry from a YAML file:
 
 ```bash
-gh auth login
+docker compose exec homelab-registry-mcp registry-mcp-seed /path/to/services.yaml
 ```
-
-Don't confuse this with `GIT_TOKEN` in `.env` — that's a *different*
-credential, used by registry-mcp's own code (inside the container) to open
-PRs for the Phase 8 write path. Authenticating `gh` on the host doesn't set
-`GIT_TOKEN`, and setting `GIT_TOKEN` doesn't authenticate `gh`.
-
-### 2. Create the repo (first time only), or re-clone it (every other time)
-
-The very first time, on any machine:
-
-```bash
-scripts/setup-homelab-repo.sh
-```
-
-This creates a private GitHub repo, clones it to `/opt/homelab`, initializes
-git-crypt, and exports the encryption key — follow its printed instructions
-to back that key up (Bitwarden, 1Password, etc.) *before* doing anything
-else. If you lose it, every `.env` file it encrypts becomes unrecoverable.
-
-If the repo already exists on GitHub (e.g. you're re-provisioning a node, or
-reflashing an SD card) **don't re-run `setup-homelab-repo.sh`** — it creates
-the repo itself, not just the local clone, and running it again against an
-existing repo is not what you want. Just re-clone:
-
-```bash
-gh repo clone <your-github-user>/homelab /opt/homelab
-```
-
-`ansible.cfg`/`ansible/inventory.yml` aren't git-crypt-encrypted (only
-`**/.env` files are, per `.gitattributes`), so they're readable immediately
-from a plain clone — you only need the git-crypt key restored (from wherever
-you backed it up in step 2 above) if you also want the `secrets_*` tools or
-adoption features working on this node.
-
-### 3. Point registry-mcp at it
-
-Add to `.env` (adjust the path to wherever you cloned it):
-
-```
-SECRETS_REPO_PATH=/opt/homelab
-SECRETS_KEY_PATH=/opt/homelab/.git-crypt.key
-# OR, if you'd rather not keep the key as a file on disk:
-# SECRETS_GIT_CRYPT_KEY=<base64 of the key, from your password manager>
-```
-
-Recreate the container (`docker compose up -d --force-recreate`), then
-continue to [Discovering your hardware](#discovering-your-hardware).
-
-## Discovering your hardware
-
-Once your homelab config repo is set up (previous section), the next step is
-to have the server fact-gather the nodes it's going to manage, rather than
-typing each one in by hand — control-plane path only, it needs the SSH key
-`install.sh` set up:
-
-1. Make sure `ansible.cfg` and an inventory listing your nodes exist in your
-   homelab config repo (the OOBE CLI that will generate these automatically
-   is planned but not built yet — [ADR-001](ARDs/ADR-001-Homelab-Control-Plane.md)
-   step 7). Run `scripts/setup-ansible-inventory.sh` from the control-plane
-   node to bootstrap them: it seeds the inventory with the control-plane node
-   itself (auto-detected, connects over SSH to its own LAN IP like any other
-   host — so it needs its own key authorized on itself too), then prompts
-   you for any other hosts to add — and for each one, runs `ssh-copy-id` so
-   its SSH key is actually authorized there (falling back to printing the
-   manual command if that fails). Idempotent — re-run it any time to add
-   more.
-2. Set `ANSIBLE_CFG_PATH` and `SSH_KEY_PATH` in `.env` — the script prints the
-   exact values to use — and recreate the container
-   (`docker compose up -d --force-recreate`; a plain restart won't reread
-   `.env`). These are also the two prerequisites `system_health_check` looks
-   for to leave read-only mode.
-3. From an MCP client, call the `hardware-discover-now` tool (optionally with
-   `host: "<name-or-group>"` to target one node/group instead of the whole
-   inventory). It runs `ansible <pattern> -m setup` over SSH and upserts each
-   host's OS, CPU, RAM, and disks into the hardware registry as a `confirmed`
-   `HardwareNode` — nothing is written back to the nodes themselves.
-4. Re-run it any time (e.g. after adding a node to the inventory) — it's
-   idempotent, and any `display_name`/`role`/`tags`/`notes` you've set by hand
-   via `hardware-update-node` are never overwritten.
-
-Nodes registered manually via `hardware-add-node` stay as-is until the next
-`hardware-discover-now` pass confirms them; `hardware-list-unconfirmed` and
-`hardware-discovery-status` show what's still pending.
 
 ---
 
@@ -335,17 +81,93 @@ In VS Code, add it to `.vscode/mcp.json`:
 
 In Claude Desktop, add an MCP server with the same URL under Settings.
 
-## Connecting Traefik and Authentik later
+## Connecting Traefik and Authentik
 
-Both installer paths assume you may not have Traefik/Authentik set up yet.
-Once they exist, don't guess at the values yourself — ask your MCP client to
-run `discovery_connect_traefik` / `discovery_connect_authentik` (see
-`src/registry_mcp/tools/discovery.py`) first. Each one live-tests the URL and
+Don't guess at the values yourself — ask your MCP client to run
+`discovery_connect_traefik` / `discovery_connect_authentik` (see
+`src/registry_mcp/tools/discovery.py`). Each one live-tests the URL and
 credentials and hands back the validated `.env` lines to add. `AUTHENTIK_TOKEN`
 is the one exception: the tool never echoes it back (only a placeholder), so
 you'll add that line with the token value yourself. Add the returned lines to
 `.env` and restart — the tool never writes the file for you (the container has
 no access to the host's `.env`) and never starts discovery immediately.
+
+## Pointing at your homelab config repo
+
+`hardware-discover-now`, the `secrets_*` tools, the proposal write path, and
+brownfield adoption all read from (or open PRs against) a private Git repo you
+control. **This project never creates that repo or its contents** — build it
+however you like, then point the server at it.
+
+What the repo needs to contain:
+
+| Path | Used by | Notes |
+|---|---|---|
+| `nodes/<node>/<service>/compose.yaml` | proposal + normalization engines | The path template is configurable via `PROPOSAL_COMPOSE_PATH_TEMPLATE` |
+| `**/.env` | `secrets_*` tools, adoption | git-crypt-encrypted, enforced by `.gitattributes` |
+| `ansible.cfg` + an inventory | `hardware-discover-now` | Plain text; not encrypted |
+| `.github/workflows/deploy.yml` | GitOps CD | A thin caller — see [the deploy pipeline](#the-deploy-pipeline) below |
+
+Then add to `.env`:
+
+```
+SECRETS_REPO_PATH=/opt/homelab
+SECRETS_KEY_PATH=/opt/homelab/.git-crypt.key
+# OR, if you'd rather not keep the key as a file on disk:
+# SECRETS_GIT_CRYPT_KEY=<base64 of the key, from your password manager>
+ANSIBLE_CFG_PATH=/opt/homelab/ansible.cfg
+SSH_KEY_PATH=/root/.ssh/id_ed25519
+```
+
+`ANSIBLE_CFG_PATH` and `SSH_KEY_PATH` are two of the three prerequisites
+`system_health_check` looks for to leave read-only mode. Recreate the container
+after editing (`docker compose up -d --force-recreate`) — a plain restart won't
+reread `.env`.
+
+> Back up your git-crypt key somewhere safe (Bitwarden, 1Password, …) before
+> encrypting anything with it. If you lose it, every `.env` file it encrypts
+> becomes unrecoverable.
+
+Note that `GIT_TOKEN` in `.env` is a *different* credential from anything `gh`
+holds on the host — it's used by registry-mcp's own code, inside the container,
+to open PRs for the write path.
+
+## Discovering your hardware
+
+With `ANSIBLE_CFG_PATH` and `SSH_KEY_PATH` set and an inventory in place:
+
+1. From an MCP client, call `hardware-discover-now` (optionally with
+   `host: "<name-or-group>"` to target one node or group instead of the whole
+   inventory). It runs `ansible <pattern> -m setup` over SSH and upserts each
+   host's OS, CPU, RAM, and disks into the hardware registry as a `confirmed`
+   `HardwareNode` — nothing is written back to the nodes themselves.
+2. Re-run it any time (e.g. after adding a node to the inventory). It's
+   idempotent, and any `display_name`/`role`/`tags`/`notes` you've set by hand
+   via `hardware-update-node` are never overwritten.
+
+Nodes registered manually via `hardware-add-node` stay as-is until the next
+`hardware-discover-now` pass confirms them; `hardware-list-unconfirmed` and
+`hardware-discovery-status` show what's still pending.
+
+## The deploy pipeline
+
+This repo ships the deploy *action* — `ansible/roles/docker-stack-deploy` and
+a reusable `.github/workflows/deploy.yml`. Your homelab repo supplies only the
+config and a thin caller workflow:
+
+```yaml
+# <your-homelab-repo>/.github/workflows/deploy.yml
+name: Deploy
+on:
+  push:
+    branches: [main]
+jobs:
+  deploy:
+    uses: TeamCastaldi/homelab-registry-mcp/.github/workflows/deploy.yml@main
+```
+
+It runs on a self-hosted runner registered to *your* repo. See
+[ansible/README.md](../ansible/README.md) for the full variable contract.
 
 ## Connecting Dockhand
 
@@ -369,144 +191,28 @@ header-carrying URL is actually honored, with Dockhand pointed at that
 sidecar instead. SOP-002 walks through deploying and wiring it up; see
 [ADR-010](ARDs/ADR-010-Dockhand-Update-Webhook.md) for why.
 
-## Setting up the chat interface
-
-`/chat` is off by default (`CHAT_ENABLED=false`). It doesn't need Traefik or
-Authentik to work at all — a static password is enough to get started — but
-it does need somewhere to run inference. See
-[ADR-009](ARDs/ADR-009-Conversational-Chat-Interface.md) for the full design
-rationale; this section is just the setup steps.
-
-### 1. Run Ollama somewhere on your LAN
-
-This repo never runs Ollama itself — `docker-compose.yml` gets no changes
-for this feature. Install Ollama on any machine with enough GPU headroom for
-reliable tool calling (a Pi 5 control plane can *coordinate* chat, but
-shouldn't try to *run* the model — CPU-only inference is both too slow and
-too unreliable at tool calling below roughly 8B parameters). Then:
-
-```bash
-ollama pull qwen3:14b
-ollama show qwen3:14b        # confirm it lists "tools" under capabilities
-```
-
-Make sure Ollama is reachable from the control-plane node
-(`curl http://<ollama-host>:11434/api/tags`) — and be aware Ollama has no
-authentication of its own, so if that host is reachable beyond your own LAN
-you need to firewall it yourself.
-
-### 2. Minimum config: a static password
-
-```bash
-CHAT_ENABLED=true
-CHAT_OLLAMA_URL=http://<ollama-host>:11434
-CHAT_PASSWORD=<a real password, not this one>
-```
-
-Restart, then open `https://registry-mcp.<your-domain>/chat` (or
-`http://<host>:8765/chat`, with `CHAT_COOKIE_SECURE=false` if you're not
-behind TLS — see the caveat on that setting in `.env.example`).
-
-### 3. Optional: Authentik OIDC instead of a password
-
-OIDC takes precedence over `CHAT_PASSWORD` whenever it's fully configured —
-you don't need to unset the password, it just stops being used. In
-Authentik, add a new **OAuth2/OpenID Provider**:
-
-- **Redirect URI**: `https://registry-mcp.<your-domain>/chat/auth/callback`
-  (exact match — this is also what you'll set as `CHAT_OIDC_REDIRECT_URL`)
-- **Client type**: Confidential
-- **Scopes**: at least `openid`, `profile`, `email`
-
-Then bind it to an **Application** and note the application's slug — the
-issuer URL follows the pattern
-`https://sso.<your-domain>/application/o/<app-slug>/`. Set:
-
-```bash
-CHAT_OIDC_ISSUER=https://sso.<your-domain>/application/o/<app-slug>/
-CHAT_OIDC_CLIENT_ID=<from the Authentik provider>
-CHAT_OIDC_CLIENT_SECRET=<from the Authentik provider>
-CHAT_OIDC_REDIRECT_URL=https://registry-mcp.<your-domain>/chat/auth/callback
-```
-
-`CHAT_OIDC_ALLOWED_GROUPS` is optional — unset means any user who
-successfully authenticates with Authentik is allowed; set it
-(comma-separated group names) to restrict access to specific groups. It only
-takes effect if your provider's scope mapping actually includes a `groups`
-claim — an easy thing to miss, and the failure mode is a confusing "you are
-not a member of an allowed group" for every user if it's forgotten.
-
-### 4. Optional: teach it about your actual lab
-
-The shipped persona is generic on purpose (this repo is public, so it can't
-carry your real hostnames). If you keep a personal DevOps/SRE reference doc
-— hostnames, topology, house safety rules — drop it in your private homelab
-repo and point `CHAT_PERSONA_PATH` at it:
-
-```bash
-CHAT_PERSONA_PATH=/opt/homelab/docs/devops-sre.md
-```
-
-`/opt/homelab` is already bind-mounted read-write into the container (see
-`docker-compose.yml`), so no compose change is needed. Two things worth
-knowing: the file is re-read (by mtime) on the next request after you edit
-it, no restart required; and if that repo is git-crypt encrypted, keep this
-file **out of** your `.gitattributes` encryption patterns, or it only reads
-correctly while the repo happens to be unlocked.
-
-### 5. Enabling writes
-
-`CHAT_ALLOW_WRITE=false` is the default — chat can look things up but can't
-change anything. Setting it `true` adds a small set of write tools (add/
-update a service or hardware node, trigger a discovery pass, open/cancel/
-verify a proposal PR) to what the assistant can call — still never
-`secrets_*`, never a delete, never the brownfield-adoption tools, regardless
-of this setting. Understand before enabling it: lab data the assistant reads
-(a Traefik router rule, a service note) is attacker-influenced the moment
-anything in your lab is internet-facing, and with writes on, a successful
-prompt injection could in principle steer one of those calls.
-
 ## Troubleshooting
 
 - **`docker compose ps` never shows the container running** — check
   `docker compose logs homelab-registry-mcp` for a startup error; a missing or
   malformed `.env` value is the most common cause.
-- **Lost the SSH session after step 8 (Option A) and can't reconnect** — the
-  static IP may not match what you entered, or the gateway/subnet was wrong.
-  Reconnect via console/serial if available and re-run
-  `bash scripts/bootstrap.sh --network-only`.
-- **`nmcli` errors about an unmanaged interface** — something else already owns
-  the interface. On Ubuntu Server this is usually netplan + systemd-networkd:
-  add `renderer: NetworkManager` to `/etc/netplan/*.yaml`, `sudo netplan
-  apply`, then re-run bootstrap. On Debian/Raspberry Pi OS it's usually
-  ifupdown via `/etc/network/interfaces` instead: set `managed=true` under the
-  `[ifupdown]` section in `/etc/NetworkManager/NetworkManager.conf`, `sudo
-  systemctl restart NetworkManager`, then re-run bootstrap. `bootstrap.sh`
-  Phase 6 detects which of the two applies and prints the matching guidance
-  in its error message. If you're inside a container (LXC, etc.), this
-  doesn't apply to you — see below.
-- **Running Option A inside an LXC container (e.g. a Proxmox community-scripts
-  Ubuntu template)** — `bootstrap.sh` detects this and automatically skips the
-  step 8 static-IP application, since a container's address is normally owned
-  by the host (Proxmox's own `net0` config for that container), not the guest.
-  You'll see a "network owned by host" completion message instead of an SSH
-  drop. If the earlier install already errored out before this detection was
-  added, that's fine — steps 0-7 (packages, `.env`, the running server) still
-  completed; only the redundant network step failed, and you can ignore it.
-- **Re-running `install.sh`** is safe — it skips already-installed packages,
-  pulls latest instead of re-cloning, and leaves an existing `.env` untouched
-  rather than overwriting it.
+- **`network traefik declared as external, but could not be found`** — the
+  shared Traefik network doesn't exist on this host yet. Create it (see
+  [Prerequisites](#1-prerequisites)) or remove the `networks:`/`labels:` blocks
+  from `docker-compose.yml`.
+- **The server starts in read-only mode** — `system_health_check` reports which
+  of the three prerequisites (Git repo, `ansible.cfg`, SSH key) is missing. The
+  GitOps write tools stay disabled until all three resolve.
+- **A `.env` change had no effect** — a plain `docker compose restart` doesn't
+  reread `.env`. Use `docker compose up -d --force-recreate`.
 
 ## Related docs
 
-- [scripts/README.md](../scripts/README.md) — what each script does, in brief
 - [CLAUDE.md](../CLAUDE.md) — architecture, full environment variable
   reference, and current project status
+- [ansible/README.md](../ansible/README.md) — the deploy role's variable contract
 - [docs/ARDs/ADR-001-Homelab-Control-Plane.md](ARDs/ADR-001-Homelab-Control-Plane.md) —
-  design rationale and the full OOBE conversation flow (a later, conversational
-  phase this guide's scripted path precedes)
-- [docs/ARDs/ADR-009-Conversational-Chat-Interface.md](ARDs/ADR-009-Conversational-Chat-Interface.md) —
-  design rationale for the `/chat` web interface
+  design rationale for the control-plane architecture
 - [docs/ARDs/ADR-010-Dockhand-Update-Webhook.md](ARDs/ADR-010-Dockhand-Update-Webhook.md) —
   design rationale for the Dockhand update webhook
 - [docs/SOPs/SOP-002-Connect-Dockhand-Webhook.md](SOPs/SOP-002-Connect-Dockhand-Webhook.md) —

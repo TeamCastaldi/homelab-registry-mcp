@@ -18,7 +18,8 @@ that someone unfamiliar with the project can follow it without guesswork. See
 
 ## What does not belong here
 
-- One-off scripts (those go in `scripts/`)
+- One-off scripts (this repo ships no operator scripts — they belong in your
+  own homelab config repo)
 - Architecture decisions behind the procedures (those go in `docs/ARDs/`)
 - High-level plans or roadmaps (those go in `docs/plans/`)
 
