@@ -1,5 +1,38 @@
 # Changelog
 
+## [1.0.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.26.1...v1.0.0) (2026-09-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* the `curl -fsSL .../scripts/install.sh | bash` one-liner no longer exists, and neither do `bootstrap.sh`, `setup-homelab-repo.sh`, `setup-ansible-inventory.sh`, or `reset-node.sh`. Existing deployments are unaffected — the server, its image, and the deploy pipeline are unchanged.
+* the seven `komodo_*` tools, the `komodo://stacks/{name}` resource and the `diagnose_stack` prompt are no longer registered, and every `KOMODO_*` environment variable is ignored. `Settings` uses `extra="ignore"`, so a deployed `.env` still carrying them starts fine.
+* `/chat`, `/chat/auth/*` and `/chat/api/*` no longer exist, and every `CHAT_*` environment variable is ignored. `Settings` uses `extra="ignore"`, so a deployed `.env` still carrying them starts fine.
+
+### Features
+
+* remove the /chat web interface and its Ollama backend ([7c4ba18](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/7c4ba18c09577941cc15a949336fa939ed11c0be))
+* remove the Komodo integration ([64d2667](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/64d26675c2bdc0e7695c0556f2ce72ff8c9229af))
+
+
+### Documentation
+
+* add ADR-011 recording the Komodo and /chat withdrawals ([2838d71](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/2838d71daf47b324b7820587df92dea18ac923d8))
+* add ADR-012 scoping this repo to the MCP server ([dfb7e94](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/dfb7e9456956c63ce50b41854211a90f5a3441cf))
+* align ADR H1 prefixes with their filenames ([6a51fa0](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/6a51fa0fbb91a7f5be53e539505551748c69a22b))
+* clarify the ADR-008 reader's note against the table it annotates ([753c974](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/753c97424d7b8de6f207c555178b1793e8b0a364))
+* correct ADR-011's tool-count arithmetic and a stale scripts/ link ([53124e8](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/53124e8ab09f843134192906879a6baf24fbad61))
+* correct residue left by the ADR-005 stack removal ([66d0f55](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/66d0f55b9e10dcc6a0b9104a58d44296fd82cd44))
+* correct three stale tool-surface claims found in review ([dcd229d](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/dcd229d0fedfbf8a01b6bbc508aadd2cb18865e8))
+* drop a stale CHAT_ENABLED reference in the Dockhand secret comment ([07673e8](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/07673e8ddb70be1494bcf49ef9da4aede462c3cf))
+* drop a stale test_chat_routes.py reference in the webhook test docstring ([1d60764](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/1d60764763179316186c0f4c6e1a5a261f0ba9e1))
+* resolve a self-contradiction in CLAUDE.md's OOBE status line ([7912283](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/7912283da75a9180f367348aab98b760e828a904))
+
+
+### Code Refactoring
+
+* remove the operator provisioning scripts and their fixtures ([7733ed5](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/7733ed56e09754cc9a901b1a2833f0785aeb562e))
+
 ## [0.26.1](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.26.0...v0.26.1) (2026-09-03)
 
 
