@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.0.0...v1.1.0) (2026-09-05)
+
+
+### Features
+
+* add new skills for project management and documentation ([f6d5b37](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/f6d5b37557588e20a94eb3029f09cfb5a6676786))
+
 ## [1.0.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v0.26.1...v1.0.0) (2026-09-04)
 
 
