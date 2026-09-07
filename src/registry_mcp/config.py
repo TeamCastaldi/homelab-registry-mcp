@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     authentik_token: str | None = Field(default=None)
     authentik_timeout_seconds: float = Field(default=10.0)
     authentik_retries: int = Field(default=3)
+    docs_mcp_url: str | None = Field(default=None)
+    docs_mcp_token: str | None = Field(default=None)
+    docs_mcp_timeout_seconds: float = Field(default=30.0)
 
     # MCP transport
     mcp_transport: Transport = Field(default="streamable-http")
