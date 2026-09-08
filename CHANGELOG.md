@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.1.0...v1.2.0) (2026-09-08)
+
+
+### Features
+
+* annotate MCP tools with read-only/write-delete hints ([8337081](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/8337081fda56188c2a4e97b8523d5265f331e90b))
+
 ## [1.1.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.0.0...v1.1.0) (2026-09-07)
 
 
