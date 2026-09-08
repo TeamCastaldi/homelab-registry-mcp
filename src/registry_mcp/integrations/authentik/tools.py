@@ -7,12 +7,15 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from registry_mcp.config import Settings
 from registry_mcp.integrations.authentik.client import AuthentikClient, AuthentikError
 
 if TYPE_CHECKING:
     from registry_mcp.dspy import Reasoner
+
+_READ_ONLY = ToolAnnotations(readOnlyHint=True)
 
 
 def _within_hours(events: list[dict[str, Any]], hours: int) -> list[dict[str, Any]]:
@@ -68,27 +71,27 @@ def register_authentik_tools(
             return data
         return {"items": data}
 
-    @mcp.tool()
+    @mcp.tool(annotations=_READ_ONLY)
     async def authentik_list_applications() -> dict[str, Any]:
         """List Authentik applications, under `items`."""
         return await _call_list("list_applications")
 
-    @mcp.tool()
+    @mcp.tool(annotations=_READ_ONLY)
     async def authentik_get_application(slug: str) -> dict[str, Any]:
         """Fetch a single Authentik application by slug, including its bound provider."""
         return await _call("get_application", slug)
 
-    @mcp.tool()
+    @mcp.tool(annotations=_READ_ONLY)
     async def authentik_list_providers() -> dict[str, Any]:
         """List all Authentik providers (proxy, oauth2, ldap, etc.), under `items`."""
         return await _call_list("list_providers")
 
-    @mcp.tool()
+    @mcp.tool(annotations=_READ_ONLY)
     async def authentik_list_outposts() -> dict[str, Any]:
         """List Authentik outpost instances, under `items`."""
         return await _call_list("list_outposts")
 
-    @mcp.tool()
+    @mcp.tool(annotations=_READ_ONLY)
     async def authentik_get_outpost_status(name: str) -> dict[str, Any]:
         """Find an outpost by name and return it together with its health status."""
         outposts = await _call("list_outposts")
@@ -102,12 +105,12 @@ def register_authentik_tools(
             return {"error": f"failed to get health for outpost {name!r}: {health['error']}"}
         return {"outpost": match, "health": health}
 
-    @mcp.tool()
+    @mcp.tool(annotations=_READ_ONLY)
     async def authentik_list_policies() -> dict[str, Any]:
         """List all Authentik policies, under `items`."""
         return await _call_list("list_policies")
 
-    @mcp.tool()
+    @mcp.tool(annotations=_READ_ONLY)
     async def authentik_search_events(
         action: str | None = None,
         search: str | None = None,
@@ -127,7 +130,7 @@ def register_authentik_tools(
             events = _within_hours(events, within_hours)
         return {"items": events}
 
-    @mcp.tool()
+    @mcp.tool(annotations=_READ_ONLY)
     async def authentik_summarize_events(
         slug: str, within_hours: int = 24, limit: int = 200
     ) -> dict[str, Any]:
@@ -149,12 +152,12 @@ def register_authentik_tools(
             reasoner.summarize_access, slug=slug, events=events, hours=within_hours
         )
 
-    @mcp.tool()
+    @mcp.tool(annotations=_READ_ONLY)
     async def authentik_list_users(search: str | None = None) -> dict[str, Any]:
         """List Authentik users, optionally filtered by a search term, under `items`."""
         return await _call_list("list_users", search)
 
-    @mcp.tool()
+    @mcp.tool(annotations=_READ_ONLY)
     async def authentik_list_groups(search: str | None = None) -> dict[str, Any]:
         """List Authentik groups, optionally filtered by a search term, under `items`."""
         return await _call_list("list_groups", search)

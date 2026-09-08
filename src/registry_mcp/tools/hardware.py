@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from registry_mcp.config import Settings
 from registry_mcp.deletion import DeletionGateError, DeletionGateStore
@@ -123,7 +124,10 @@ def register_hardware_tools(
 ) -> None:
     """Register hardware node CRUD and linking tools."""
 
-    @mcp.tool(name="hardware-add-node")
+    @mcp.tool(
+        name="hardware-add-node",
+        annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False),
+    )
     def hardware_add_node(
         hostname: str,
         display_name: str,
@@ -149,7 +153,7 @@ def register_hardware_tools(
         except ValueError as exc:
             return {"error": f"invalid role {role!r}: {exc}"}
 
-    @mcp.tool(name="hardware-get-node")
+    @mcp.tool(name="hardware-get-node", annotations=ToolAnnotations(readOnlyHint=True))
     def hardware_get_node(id: str) -> dict[str, Any]:
         """Fetch a hardware node by id or hostname."""
         node = hardware_store.get_node(id)
@@ -157,7 +161,7 @@ def register_hardware_tools(
             return {"error": f"no node found for {id!r}"}
         return node.model_dump(mode="json")
 
-    @mcp.tool(name="hardware-list-nodes")
+    @mcp.tool(name="hardware-list-nodes", annotations=ToolAnnotations(readOnlyHint=True))
     def hardware_list_nodes(
         role: str | None = None,
         status: str | None = None,
@@ -169,7 +173,10 @@ def register_hardware_tools(
             for n in hardware_store.list_nodes(role=role, status=status, tag=tag)
         ]
 
-    @mcp.tool(name="hardware-update-node")
+    @mcp.tool(
+        name="hardware-update-node",
+        annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True),
+    )
     def hardware_update_node(id: str, updates: dict[str, Any]) -> dict[str, Any]:
         """Patch mutable fields on a hardware node."""
         try:
@@ -180,7 +187,10 @@ def register_hardware_tools(
             return {"error": f"no node found for {id!r}"}
         return updated.model_dump(mode="json")
 
-    @mcp.tool(name="hardware-delete-node")
+    @mcp.tool(
+        name="hardware-delete-node",
+        annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True),
+    )
     def hardware_delete_node(id: str) -> dict[str, Any]:
         """Request deletion of a hardware node. Deletes nothing yet — returns an
         arithmetic challenge that must be solved and passed to
@@ -207,7 +217,10 @@ def register_hardware_tools(
             ),
         }
 
-    @mcp.tool(name="hardware-delete-node-confirm")
+    @mcp.tool(
+        name="hardware-delete-node-confirm",
+        annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True),
+    )
     def hardware_delete_node_confirm(request_id: str, answer: int) -> dict[str, Any]:
         """Complete a hardware node deletion by answering the math challenge
         from hardware-delete-node. A wrong or expired answer invalidates the
@@ -223,7 +236,10 @@ def register_hardware_tools(
             return {"error": f"no node found for {challenge.entity_id!r} (may already be deleted)"}
         return {"deleted": True, "id": challenge.entity_id, "hostname": challenge.entity_label}
 
-    @mcp.tool(name="hardware-link-service")
+    @mcp.tool(
+        name="hardware-link-service",
+        annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True),
+    )
     def hardware_link_service(service_id: str, node_id: str) -> dict[str, Any]:
         """Manually link a service to a hardware node. Sets manual_link=True to prevent
         auto-override."""
@@ -232,27 +248,30 @@ def register_hardware_tools(
             return {"error": f"service {service_id!r} or node {node_id!r} not found"}
         return {"linked": True, "service_id": service_id, "node_id": node_id}
 
-    @mcp.tool(name="hardware-node-services")
+    @mcp.tool(name="hardware-node-services", annotations=ToolAnnotations(readOnlyHint=True))
     def hardware_node_services(node_id: str) -> list[dict[str, Any]]:
         """List all services linked to a hardware node."""
         return [s.model_dump(mode="json") for s in hardware_store.get_node_services(node_id)]
 
-    @mcp.tool(name="hardware-list-unconfirmed")
+    @mcp.tool(name="hardware-list-unconfirmed", annotations=ToolAnnotations(readOnlyHint=True))
     def hardware_list_unconfirmed() -> list[dict[str, Any]]:
         """List nodes created from inventory or pull-mode that have not yet been live-probed."""
         return [n.model_dump(mode="json") for n in hardware_store.list_unconfirmed_nodes()]
 
-    @mcp.tool(name="hardware-list-stale")
+    @mcp.tool(name="hardware-list-stale", annotations=ToolAnnotations(readOnlyHint=True))
     def hardware_list_stale() -> list[dict[str, Any]]:
         """List nodes marked stale (not seen for the configured threshold of passes)."""
         return [n.model_dump(mode="json") for n in hardware_store.list_stale_nodes()]
 
-    @mcp.tool(name="hardware-capacity-summary")
+    @mcp.tool(name="hardware-capacity-summary", annotations=ToolAnnotations(readOnlyHint=True))
     def hardware_capacity_summary() -> dict[str, Any]:
         """Aggregate storage pool capacity across all confirmed nodes."""
         return hardware_store.capacity_summary()
 
-    @mcp.tool(name="hardware-discover-now")
+    @mcp.tool(
+        name="hardware-discover-now",
+        annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True),
+    )
     async def hardware_discover_now(host: str | None = None) -> dict[str, Any]:
         """Run a live Ansible fact-gather pass (`ansible <host|all> -m setup`)
         against the operator's own inventory (`ANSIBLE_CFG_PATH`) and upsert
@@ -270,7 +289,7 @@ def register_hardware_tools(
         # returns the same {"status": "error", ...} shape either way.
         return await discover_now(hardware_store, settings, host)
 
-    @mcp.tool(name="hardware-discovery-status")
+    @mcp.tool(name="hardware-discovery-status", annotations=ToolAnnotations(readOnlyHint=True))
     def hardware_discovery_status() -> dict[str, Any]:
         """Summarize hardware registry state: node counts by status and the most
         recent confirmation/sighting."""

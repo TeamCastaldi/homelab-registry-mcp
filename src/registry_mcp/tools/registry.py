@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from registry_mcp.config import Settings
 from registry_mcp.deletion import DeletionGateError, DeletionGateStore
@@ -31,7 +32,7 @@ def register_registry_tools(
 ) -> None:
     """Register the manual registry CRUD tools and resources on the server."""
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     def registry_add_service(
         name: str,
         display_name: str,
@@ -64,7 +65,7 @@ def register_registry_tools(
             return {"error": str(exc)}
         return _dump(created)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def registry_get_service(id_or_name: str) -> dict[str, Any]:
         """Fetch a single service by its id or canonical name."""
         service = store.get_service(id_or_name)
@@ -72,7 +73,7 @@ def register_registry_tools(
             return {"error": f"no service found for {id_or_name!r}"}
         return _dump(service)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def registry_list_services(
         category: Category | None = None,
         host: str | None = None,
@@ -86,7 +87,9 @@ def register_registry_tools(
         )
         return [_dump(s) for s in services]
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True)
+    )
     def registry_update_service(
         id: str,
         display_name: str | None = None,
@@ -116,7 +119,7 @@ def register_registry_tools(
             return {"error": f"no service found for id {id!r}"}
         return _dump(updated)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True))
     def registry_delete_service(id: str) -> dict[str, Any]:
         """Request deletion of a service by id. Deletes nothing yet — returns an
         arithmetic challenge that must be solved and passed to
@@ -143,7 +146,7 @@ def register_registry_tools(
             ),
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True))
     def registry_delete_service_confirm(request_id: str, answer: int) -> dict[str, Any]:
         """Complete a service deletion by answering the math challenge from
         registry_delete_service. A wrong or expired answer invalidates the

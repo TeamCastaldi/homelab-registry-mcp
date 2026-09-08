@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from registry_mcp import gitcrypt
 from registry_mcp.adoption import ssh as remote
@@ -110,7 +111,7 @@ def register_adoption_tools(
         node_label = service.host or node.hostname
         return settings.proposal_compose_path_template.format(node=node_label, service=service.name)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     async def proposal_adopt_service(service_id: str, ssh_user: str | None = None) -> dict:
         """Inspect a live, pre-existing Docker service and draft its adoption
         into GitOps management.
@@ -261,7 +262,7 @@ def register_adoption_tools(
             "next_step": next_step,
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     async def proposal_adopt_service_finalize(draft_id: str, secret_strategy: str = "keep") -> dict:
         """Finalize a drafted adoption: write the operator's chosen secret
         values, git-crypt-encrypt them, and open the PR.
@@ -380,7 +381,7 @@ def register_adoption_tools(
         )
         return proposal.model_dump(mode="json")
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True))
     def proposal_adopt_service_cancel(draft_id: str) -> dict:
         """Discard a pending adoption draft without committing anything."""
         if err := _read_only_error():
@@ -393,7 +394,7 @@ def register_adoption_tools(
         updated = adoption_store.set_status(draft_id, AdoptionDraftStatus.cancelled)
         return (updated or draft).model_dump(mode="json")
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def proposal_adopt_service_get(draft_id: str) -> dict:
         """Full detail on one adoption draft, including the sanitized compose
         preview and which secret keys are pending a keep/rotate decision."""

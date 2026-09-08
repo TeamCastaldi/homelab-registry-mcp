@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from registry_mcp.discovery.engine import DiscoveryEngine
 from registry_mcp.integrations.authentik.client import AuthentikClient, AuthentikError
@@ -38,7 +39,7 @@ def _invalid_connection_params(timeout_seconds: float, retries: int) -> str | No
 def register_discovery_tools(mcp: FastMCP, engine: DiscoveryEngine) -> None:
     """Register tools to trigger discovery, inspect its results, and connect new sources."""
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     async def discovery_run_now(source: str | None = None) -> dict[str, Any]:
         """Run a discovery pass now. Without `source`, runs every enabled source.
 
@@ -57,17 +58,17 @@ def register_discovery_tools(mcp: FastMCP, engine: DiscoveryEngine) -> None:
         event = await engine.run_source(source_type)
         return event.model_dump(mode="json")
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def discovery_status() -> dict[str, Any]:
         """Return the most recent discovery pass summary for each enabled source."""
         return {"sources": engine.status()}
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def discovery_list_stale() -> dict[str, Any]:
         """List services that have gone stale (not seen for the configured threshold)."""
         return {"items": [s.model_dump(mode="json") for s in engine.list_stale()]}
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def discovery_connect_traefik(
         url: str, timeout_seconds: float = 10.0, retries: int = 3
     ) -> dict[str, Any]:
@@ -96,7 +97,7 @@ def register_discovery_tools(mcp: FastMCP, engine: DiscoveryEngine) -> None:
             "next_step": _RESTART_HINT,
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def discovery_connect_authentik(
         url: str, token: str, timeout_seconds: float = 10.0, retries: int = 3
     ) -> dict[str, Any]:

@@ -9,6 +9,7 @@ from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from registry_mcp import __version__
 from registry_mcp.adoption import AdoptionDraftStore
@@ -173,7 +174,7 @@ def build_server(settings: Settings | None = None) -> FastMCP:
     )
     register_webhook_routes(mcp, settings, store, proposal_engine, read_only=read_only)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def health() -> dict[str, str]:
         """Report server liveness and version. Returns OK when the server is reachable."""
         return {
@@ -183,7 +184,7 @@ def build_server(settings: Settings | None = None) -> FastMCP:
             "timestamp": datetime.now(UTC).isoformat(),
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def system_health_check() -> dict[str, Any]:
         """Diagnose control-plane provisioning: Git repo, ansible.cfg, and SSH key.
 

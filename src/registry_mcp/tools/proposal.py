@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 if TYPE_CHECKING:
     from registry_mcp.discovery.engine import DiscoveryEngine
@@ -39,7 +40,7 @@ def register_proposal_tools(
             }
         return None
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     async def proposal_create(service_id: str) -> dict[str, Any]:
         """Open a remediation pull request for a flagged service.
 
@@ -51,12 +52,12 @@ def register_proposal_tools(
             return err
         return await engine.create_for_service(service_id)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def proposal_list_open() -> dict[str, Any]:
         """List open proposals (PRs this server has opened), under `items`."""
         return {"items": [p.model_dump(mode="json") for p in proposals.list_open()]}
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def proposal_get(proposal_id: str) -> dict[str, Any]:
         """Full detail on one proposal, including the proposed file content."""
         proposal = proposals.get(proposal_id)
@@ -64,14 +65,14 @@ def register_proposal_tools(
             return {"error": f"no proposal found for {proposal_id!r}"}
         return proposal.model_dump(mode="json")
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True))
     async def proposal_cancel(proposal_id: str) -> dict[str, Any]:
         """Close a proposal's PR without merging and mark it cancelled."""
         if err := _read_only_error():
             return err
         return await engine.cancel(proposal_id)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     async def proposal_verify(service_id: str) -> dict[str, Any]:
         """Force a discovery pass and check whether a service's conflict cleared.
 
@@ -89,7 +90,7 @@ def register_proposal_tools(
             "verified": not service.auth_mode_conflict,
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     async def proposal_normalize(
         node: str | None = None, dry_run: bool | None = None
     ) -> dict[str, Any]:

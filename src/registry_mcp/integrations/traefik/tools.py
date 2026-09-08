@@ -5,9 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from registry_mcp.config import Settings
 from registry_mcp.integrations.traefik.client import Protocol, TraefikClient, TraefikError
+
+_READ_ONLY = ToolAnnotations(readOnlyHint=True)
 
 
 def register_traefik_tools(mcp: FastMCP, settings: Settings) -> None:
@@ -37,37 +40,37 @@ def register_traefik_tools(mcp: FastMCP, settings: Settings) -> None:
             return data
         return {"items": data}
 
-    @mcp.tool()
+    @mcp.tool(annotations=_READ_ONLY)
     async def traefik_get_overview() -> dict[str, Any]:
         """Traefik's own summary of routers, services, middlewares, and features."""
         return await _call("overview")
 
-    @mcp.tool()
+    @mcp.tool(annotations=_READ_ONLY)
     async def traefik_get_entrypoints() -> dict[str, Any]:
         """List configured Traefik entrypoints (e.g. web, websecure), under `items`."""
         return await _call_list("entrypoints")
 
-    @mcp.tool()
+    @mcp.tool(annotations=_READ_ONLY)
     async def traefik_list_routers(protocol: Protocol = "http") -> dict[str, Any]:
         """List Traefik routers for the given protocol (http, tcp, or udp), under `items`."""
         return await _call_list("list_routers", protocol)
 
-    @mcp.tool()
+    @mcp.tool(annotations=_READ_ONLY)
     async def traefik_get_router(name: str, protocol: Protocol = "http") -> dict[str, Any]:
         """Fetch a single Traefik router by name, including its rule and middlewares."""
         return await _call("get_router", name, protocol)
 
-    @mcp.tool()
+    @mcp.tool(annotations=_READ_ONLY)
     async def traefik_list_services(protocol: Protocol = "http") -> dict[str, Any]:
         """List Traefik backend services for the given protocol, under `items`."""
         return await _call_list("list_services", protocol)
 
-    @mcp.tool()
+    @mcp.tool(annotations=_READ_ONLY)
     async def traefik_list_middlewares(protocol: Protocol = "http") -> dict[str, Any]:
         """List Traefik middlewares for the given protocol, under `items`."""
         return await _call_list("list_middlewares", protocol)
 
-    @mcp.tool()
+    @mcp.tool(annotations=_READ_ONLY)
     async def traefik_list_tls_certificates() -> dict[str, Any]:
         """List TLS configuration from Traefik.
 

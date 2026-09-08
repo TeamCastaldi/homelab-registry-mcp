@@ -283,7 +283,7 @@ def _make_mcp():
     tools: dict = {}
 
     class _FakeMCP:
-        def tool(self):
+        def tool(self, *args, **kwargs):
             def decorator(fn):
                 tools[fn.__name__] = fn
                 return fn

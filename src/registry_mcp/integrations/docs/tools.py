@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from registry_mcp.config import Settings
 from registry_mcp.integrations.docs.client import DocsMcpClient, DocsMcpError
@@ -28,7 +29,7 @@ def register_docs_tools(mcp: FastMCP, settings: Settings) -> None:
             timeout=settings.docs_mcp_timeout_seconds,
         )
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def get_service_documentation(
         service_name: str, version: str, topic: str | None = None
     ) -> dict[str, Any]:
