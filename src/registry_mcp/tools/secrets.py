@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from registry_mcp.config import Settings
 from registry_mcp.gitcrypt import check_path as _check_path
@@ -59,7 +60,7 @@ def register_secrets_tools(mcp: FastMCP, settings: Settings, read_only: bool = F
             }
         return None
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def secrets_status() -> dict[str, Any]:
         """Show git-crypt encrypted files and current lock state of the homelab repo."""
         if err := _guard(settings):
@@ -84,7 +85,9 @@ def register_secrets_tools(mcp: FastMCP, settings: Settings, read_only: bool = F
         locked = _is_locked(repo)
         return {"locked": locked, "encrypted_files": encrypted, "unencrypted_files": unencrypted}
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True)
+    )
     async def secrets_encrypt(path: str) -> dict[str, Any]:
         """Add a file to .gitattributes so git-crypt encrypts it.
 
@@ -126,7 +129,7 @@ def register_secrets_tools(mcp: FastMCP, settings: Settings, read_only: bool = F
 
         return {"encrypted": path, "gitattributes_updated": True}
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def secrets_decrypt(path: str) -> dict[str, Any]:
         """Read an encrypted .env file without writing plaintext to disk.
 
@@ -158,7 +161,9 @@ def register_secrets_tools(mcp: FastMCP, settings: Settings, read_only: bool = F
         content = target.read_text()
         return {"path": path, "content": _detect_format(target, content)}
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True)
+    )
     async def secrets_add(key: str, value: str, path: str) -> dict[str, Any]:
         """Add or update a key in an encrypted .env file.
 
@@ -207,7 +212,7 @@ def register_secrets_tools(mcp: FastMCP, settings: Settings, read_only: bool = F
 
         return {"path": path, "key": key, "staged": True}
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True))
     async def secrets_rotate(path: str) -> dict[str, Any]:
         """Re-encrypt the homelab repo with a new git-crypt key.
 
@@ -264,7 +269,7 @@ def register_secrets_tools(mcp: FastMCP, settings: Settings, read_only: bool = F
             ),
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def secrets_list_keys(path: str) -> dict[str, Any]:
         """List the keys present in an encrypted .env file without revealing their values."""
         if err := _guard(settings):

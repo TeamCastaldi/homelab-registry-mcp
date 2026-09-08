@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from registry_mcp.config import Settings
 from registry_mcp.integrations.authentik.client import AuthentikClient, AuthentikError
@@ -47,7 +48,9 @@ def register_linking_tools(
         except AuthentikError as exc:
             return {"error": str(exc)}
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True)
+    )
     def service_link_authentik(service_id: str, app_slug: str) -> dict[str, Any]:
         """Manually link a service to an Authentik application by slug.
 
@@ -62,7 +65,7 @@ def register_linking_tools(
             return {"error": f"no service found for id {service_id!r}"}
         return updated.model_dump(mode="json")
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def service_get_full_context(id: str) -> dict[str, Any]:
         """Resolve a service's full cross-source context in one call.
 

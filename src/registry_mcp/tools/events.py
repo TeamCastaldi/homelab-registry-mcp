@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from registry_mcp.models import SourceType
 from registry_mcp.registry import RegistryStore
@@ -13,7 +14,7 @@ from registry_mcp.registry import RegistryStore
 def register_event_tools(mcp: FastMCP, store: RegistryStore) -> None:
     """Register the event-log query tools on the server."""
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def events_list_discoveries(
         source: SourceType | None = None,
         limit: int = 100,
@@ -25,7 +26,7 @@ def register_event_tools(mcp: FastMCP, store: RegistryStore) -> None:
         )
         return [e.model_dump(mode="json") for e in events]
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def events_list_changes(
         service_id: str | None = None,
         limit: int = 100,
@@ -34,7 +35,7 @@ def register_event_tools(mcp: FastMCP, store: RegistryStore) -> None:
         events = store.list_change_events(service_id=service_id, limit=limit)
         return [e.model_dump(mode="json") for e in events]
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def events_get_for_service(service_id: str, limit: int = 100) -> list[dict[str, Any]]:
         """List all change events recorded for a single service, newest first."""
         events = store.list_change_events(service_id=service_id, limit=limit)
