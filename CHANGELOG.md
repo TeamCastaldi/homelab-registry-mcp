@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.2.0...v1.3.0) (2026-09-09)
+
+
+### Features
+
+* **troubleshooting:** add comprehensive troubleshooting skills and references for incident management ([e02305d](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/e02305d5d50805b872caa924e7c76d665abdf94b))
+
 ## [1.2.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.1.0...v1.2.0) (2026-09-08)
 
 
