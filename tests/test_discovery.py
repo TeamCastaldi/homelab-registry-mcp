@@ -409,9 +409,16 @@ def test_build_sources_respects_config():
             authentik_api_url="http://a/api/v3",
             authentik_token="x",
             docker_base_url="unix:///var/run/docker.sock",
+            dockhand_api_url="http://d",
+            dockhand_token="dh_x",
         )
     )
-    assert {SourceType.traefik, SourceType.authentik, SourceType.docker} == set(full)
+    assert {
+        SourceType.traefik,
+        SourceType.authentik,
+        SourceType.docker,
+        SourceType.dockhand,
+    } == set(full)
 
 
 def test_build_scheduler_adds_one_job_per_source(store):

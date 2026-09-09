@@ -34,6 +34,7 @@ class SourceType(StrEnum):
     traefik = "traefik"
     docker = "docker"
     authentik = "authentik"
+    dockhand = "dockhand"
 
 
 def utcnow() -> datetime:

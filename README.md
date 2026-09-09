@@ -2,7 +2,7 @@
 
 A Model Context Protocol (MCP) server that keeps one authoritative catalog of
 every service running in a homelab. It discovers services from Traefik,
-Authentik, and Docker, flags services that are exposed without the
+Authentik, Docker, and Dockhand, flags services that are exposed without the
 authentication they should have, and answers questions about the homelab through
 MCP tools. It is for homelab operators who drive their lab from an MCP-capable
 client such as Claude or VS Code and want a single source of truth they can both
@@ -12,17 +12,18 @@ query and act on.
 
 ### Read (always on)
 
-- Discovers services from Traefik, Authentik, and Docker on a schedule and
-  reconciles them into one registry, marking services stale (never deleting)
-  when they disappear.
+- Discovers services from Traefik, Authentik, Docker, and Dockhand on a
+  schedule and reconciles them into one registry, marking services stale
+  (never deleting) when they disappear.
 - Links a service across sources automatically — Traefik router, Authentik
   application, and Docker container — and returns the whole picture in one call.
 - Flags auth conflicts: a service Authentik protects but Traefik does not
   enforce. The Authentik outpost sidecar pattern is recognised so protected
   services are not flagged by mistake.
 - Read-only tools for Traefik and Authentik (routers, middlewares, applications,
-  providers, outposts, policies, the audit log) plus a curated registry and
-  append-only change and discovery logs.
+  providers, outposts, policies, the audit log) and for Dockhand (environments,
+  stacks, containers, pending updates, vulnerability/CVE findings) plus a
+  curated registry and append-only change and discovery logs.
 - Every hard delete of a service or hardware node is gated behind a solvable
   arithmetic challenge (request, solve, then confirm) — deliberate friction
   against an agent or a fat-fingered id removing something irreversible.
@@ -50,6 +51,9 @@ query and act on.
   redeploy the affected compose stack automatically.
 - Sends a templated HTML email — PR summary, diff, Approve/Request Changes
   links — the moment a proposal PR opens, so you don't have to poll GitHub.
+- Accepts Dockhand's outbound update and CVE alerts via a webhook and turns
+  them into staged pull requests through the same review-gated flow — see
+  ADR-010.
 
 ## How to run
 
@@ -86,6 +90,8 @@ curl -fsSL "https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/
 curl -fsSL "https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/${VERSION}/.env.example" -o .env.example
 cp .env.example .env
 # Set at least TRAEFIK_API_URL, AUTHENTIK_API_URL, AUTHENTIK_TOKEN, DOCKER_BASE_URL.
+# If you run Dockhand, also set DOCKHAND_API_URL/DOCKHAND_TOKEN to enable its
+# read-only tools and discovery source.
 # To pin the container image to the same release, add REGISTRY_MCP_VERSION=<same tag> to .env.
 ```
 
@@ -132,6 +138,7 @@ In Claude Desktop, add an MCP server with the same URL under Settings.
 - [docs/ARDs/ADR-010-Dockhand-Update-Webhook.md](docs/ARDs/ADR-010-Dockhand-Update-Webhook.md) — Dockhand update/CVE alerts become staged proposals via `POST /webhooks/dockhand`
 - [docs/ARDs/ADR-011-Remove-Komodo-Integration-And-Chat-Interface.md](docs/ARDs/ADR-011-Remove-Komodo-Integration-And-Chat-Interface.md) — withdraws the Komodo integration and the `/chat` interface from the server's supported surface
 - [docs/ARDs/ADR-012-Scope-The-Repo-To-The-MCP-Server.md](docs/ARDs/ADR-012-Scope-The-Repo-To-The-MCP-Server.md) — removes the provisioning scripts; this repo ships the MCP server and the deploy action, not a node installer
+- [docs/ARDs/ADR-013-Dockhand-Read-Only-API-Integration.md](docs/ARDs/ADR-013-Dockhand-Read-Only-API-Integration.md) — read-only Dockhand query tools and discovery source; the outbound-query complement to ADR-010's inbound webhook
 - [docs/SOPs/SOP-001-Deploy-New-Service.md](docs/SOPs/SOP-001-Deploy-New-Service.md) — runbook for deploying a new service to an onboarded node
 - [docs/SOPs/SOP-002-Connect-Dockhand-Webhook.md](docs/SOPs/SOP-002-Connect-Dockhand-Webhook.md) — runbook for pointing Dockhand at the update webhook
 - [docs/plans/phase-d.md](docs/plans/phase-d.md) — historical: migration from workload node to a dedicated control-plane node. The migration itself is complete; its Traefik static-backend routing model is superseded by ADR-006/ADR-007, which co-locate Traefik on the same node behind standard Docker labels

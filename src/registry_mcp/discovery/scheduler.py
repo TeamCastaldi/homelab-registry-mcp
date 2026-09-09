@@ -15,6 +15,7 @@ def build_scheduler(engine: DiscoveryEngine, settings: Settings) -> AsyncIOSched
         SourceType.traefik: settings.discovery_traefik_interval_seconds,
         SourceType.docker: settings.discovery_docker_interval_seconds,
         SourceType.authentik: settings.discovery_authentik_interval_seconds,
+        SourceType.dockhand: settings.discovery_dockhand_interval_seconds,
     }
     scheduler = AsyncIOScheduler()
     for source in engine.sources:

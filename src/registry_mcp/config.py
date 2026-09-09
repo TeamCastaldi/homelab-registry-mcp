@@ -34,6 +34,14 @@ class Settings(BaseSettings):
     authentik_token: str | None = Field(default=None)
     authentik_timeout_seconds: float = Field(default=10.0)
     authentik_retries: int = Field(default=3)
+    # Dockhand read-only query client + discovery source (ADR-013). Distinct
+    # from the dockhand_webhook_* block further below (ADR-010, an INBOUND
+    # alert receiver) — these settings configure this server as an OUTBOUND
+    # client of Dockhand's own REST API.
+    dockhand_api_url: str | None = Field(default=None)
+    dockhand_token: str | None = Field(default=None)
+    dockhand_timeout_seconds: float = Field(default=10.0)
+    dockhand_retries: int = Field(default=3)
     docs_mcp_url: str | None = Field(default=None)
     docs_mcp_token: str | None = Field(default=None)
     docs_mcp_timeout_seconds: float = Field(default=30.0)
@@ -52,6 +60,7 @@ class Settings(BaseSettings):
     discovery_traefik_interval_seconds: int = Field(default=300)
     discovery_docker_interval_seconds: int = Field(default=300)
     discovery_authentik_interval_seconds: int = Field(default=900)
+    discovery_dockhand_interval_seconds: int = Field(default=300)
     discovery_stale_after_misses: int = Field(default=3)
 
     # Reasoning layer (DSPy) — Phase 7. Off by default: the server reasons only
