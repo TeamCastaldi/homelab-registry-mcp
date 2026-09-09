@@ -1,6 +1,6 @@
 # homelab-registry-mcp
 
-Python MCP server that is the authoritative service catalog for a homelab. It discovers services from Traefik, Docker, and Authentik; maintains a curated SQLite registry; and exposes the data as MCP tools, resources, and prompts for AI agents.
+Python MCP server that is the authoritative service catalog for a homelab. It discovers services from Traefik, Docker, Authentik, and Dockhand; maintains a curated SQLite registry; and exposes the data as MCP tools, resources, and prompts for AI agents.
 
 ## Commands
 
@@ -38,7 +38,7 @@ src/registry_mcp/
 │   ├── base.py            # DiscoverySource protocol
 │   ├── engine.py          # Orchestrates discovery passes
 │   ├── scheduler.py       # APScheduler wiring
-│   ├── traefik.py / docker.py / authentik.py  # source implementations
+│   ├── traefik.py / docker.py / authentik.py / dockhand.py  # source implementations
 ├── dspy/                  # reasoning layer (Phase 7) — DSPy enrichment, confidence-gated
 │   ├── signatures.py      # ResolveServiceIdentity, InferServiceMetadata, SummarizeAccessAudit, GenerateRemediationPatch, DetectHardcodedSecrets
 │   └── reasoner.py        # Reasoner: lazy LM config, gates, graceful degradation
@@ -65,7 +65,8 @@ src/registry_mcp/
 │   └── notification/      # NotificationProvider protocol + Ntfy/Smtp/Null + factory
 ├── integrations/
 │   ├── traefik/           # httpx client + 7 MCP tools + resource + prompt
-│   └── authentik/         # httpx client + 10 MCP tools + resource + prompt
+│   ├── authentik/         # httpx client + 10 MCP tools + resource + prompt
+│   └── dockhand/          # httpx client + 7 MCP tools + resource + prompt (ADR-013, read-only)
 ├── tools/
 │   ├── registry.py        # CRUD: add/get/list/update/delete (math-gated, see deletion/) service
 │   ├── events.py          # query change + discovery logs
@@ -222,6 +223,20 @@ GitOps-managed) under management without leaking its hardcoded secrets. Off by d
 - `AdoptionDraft` rows hold the captured live secret values only long enough for the
   operator to answer (`ADOPTION_DRAFT_TTL_MINUTES`, default 60) before expiring.
 
+**Dockhand integration (ADR-013, `integrations/dockhand/` + `discovery/dockhand.py`):**
+read-only httpx client (Bearer-token auth, same shape as Authentik's) for the
+container-management tool that replaced Komodo in the operator's homelab. 7
+`dockhand_*` tools query environments, stacks, containers, pending updates, and
+vulnerabilities; a `dockhand://stacks/{stack_id}` resource and a `diagnose_stack`
+prompt mirror the Traefik/Authentik shape exactly. `DockhandDiscoverySource` feeds
+discovered containers into the registry as `SourceType.dockhand` provenance,
+reconciling by `name` against the same `Service` row Docker/Traefik discovery may
+already have created — this wiring is what makes the integration load-bearing,
+unlike the now-removed Komodo integration (ADR-011), which had no discovery-source
+path and was withdrawn for being "a read-only window onto a system the operator can
+already open directly." No update-triggering or stack-mutating Dockhand endpoint
+(`POST /api/containers/check-updates`, `POST /api/stacks`) is ever exposed as a tool.
+
 **Dockhand webhook (ADR-010, `webhooks/`):** an opt-in `POST /webhooks/dockhand` route
 that turns Dockhand's outbound update and CVE alerts into staged proposals. Off by default
 (`DOCKHAND_WEBHOOK_ENABLED=false`); requires the same `GIT_*` as the proposal layer. This
@@ -279,6 +294,10 @@ ADR-004's unimplemented polling source.
 | `AUTHENTIK_TOKEN` | unset | **Read-only service-account token only** (never admin) |
 | `AUTHENTIK_TIMEOUT_SECONDS` | `10` | |
 | `AUTHENTIK_RETRIES` | `3` | |
+| `DOCKHAND_API_URL` | unset | Enables Dockhand discovery + `dockhand_*` tools; e.g. `http://dockhand.lan:PORT` |
+| `DOCKHAND_TOKEN` | unset | Dockhand API token (`dh_...`); scope to a read-only role if available |
+| `DOCKHAND_TIMEOUT_SECONDS` | `10` | |
+| `DOCKHAND_RETRIES` | `3` | |
 | `DOCKER_BASE_URL` | unset | Enables Docker discovery; e.g. `unix:///var/run/docker.sock` |
 | `REGISTRY_DB_PATH` | `/data/registry.db` | SQLite location |
 | `REGISTRY_LOG_PATH` | `/data/events.log` | JSON event log |
@@ -287,6 +306,7 @@ ADR-004's unimplemented polling source.
 | `DISCOVERY_TRAEFIK_INTERVAL_SECONDS` | `300` | |
 | `DISCOVERY_DOCKER_INTERVAL_SECONDS` | `300` | |
 | `DISCOVERY_AUTHENTIK_INTERVAL_SECONDS` | `900` | |
+| `DISCOVERY_DOCKHAND_INTERVAL_SECONDS` | `300` | |
 | `DISCOVERY_STALE_AFTER_MISSES` | `3` | |
 | `DSPY_ENABLED` | `false` | Enables the Phase 7 reasoning layer (identity/metadata enrichment + audit summaries) |
 | `DSPY_MODEL` | `anthropic/claude-haiku-4-5-20251001` | litellm model id for the reasoning LM |
@@ -345,7 +365,7 @@ Copy `.env.example` to `.env` and fill in the upstream URLs before running local
 - **Curated fields are sacred**: `display_name`, `category`, `tags`, `notes` set by humans are never overwritten by discovery. Discovery only updates provenance fields (`host`, `urls`, `traefik_router`, `authentik_app_slug`, `auth_mode`).
 - **Never hard-delete discovered services**: mark `stale=True` after threshold misses.
 - **Every hard delete is math-gated**: `registry_delete_service` and `hardware-delete-node` only request deletion — they return an `x + y = ?` challenge (`deletion/store.py`'s `DeletionGateStore`) that must be solved and passed to `registry_delete_service_confirm`/`hardware-delete-node-confirm` within `DELETE_CHALLENGE_TTL_MINUTES` before the row is actually removed. Not a security boundary (single digits, shown in the challenge itself) — a deliberate human-in-the-loop friction point against an agent or a fat-fingered id deleting something irreversible; a wrong answer invalidates the challenge rather than allowing retries.
-- **Upstream APIs are read-only**: Traefik, Authentik, and Docker are never modified.
+- **Upstream APIs are read-only**: Traefik, Authentik, Docker, and Dockhand are never modified.
 - **The write path writes to Git only**: the proposal layer opens PRs; it never merges them and never writes the filesystem Traefik/Docker watch. The PR + human merge is the safety gate. All write behavior defaults off.
 - **All patch generation goes through DSPy**: `proposal/generator.py` has no rule-based fallback. Low-confidence or invalid-YAML patches become `rejected` Proposals, never commits.
 - **A normalization rewrite must prove behavior equivalence before it's committed**: `normalization/rules.is_equivalent()` projects both the before and after YAML to a representation-independent form and compares them; a rewrite that changes anything Docker would see differently is never committed, regardless of whether the deterministic formatter or the DSPy escalation produced it. Security patches (`proposal/generator.py`) intentionally change behavior and have no equivalent gate.
@@ -450,6 +470,14 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
 
 ## Current Status
 
+- **ADR-013 accepted — Dockhand read-only integration added**: `integrations/dockhand/`
+  (7 `dockhand_*` tools, a `dockhand://stacks/{stack_id}` resource, a `diagnose_stack`
+  prompt) and `discovery/dockhand.py` (`DockhandDiscoverySource`, new `SourceType.dockhand`)
+  give the server visibility into Dockhand, which replaced Komodo in the operator's
+  homelab. Off by default (`DOCKHAND_API_URL`/`DOCKHAND_TOKEN` unset). Read-only only — no
+  write/update-triggering tool is exposed, even though Dockhand's API has one;
+  discovery-source wiring is what makes this integration load-bearing, addressing the
+  exact reason ADR-011 withdrew the read-only-only Komodo integration.
 - **Delete confirmation gate complete**: every hard-delete tool (`registry_delete_service`,
   `hardware-delete-node`) now only *requests* deletion — it returns a single-digit
   `x + y = ?` arithmetic challenge (`deletion/store.py`'s `DeletionGateStore`, backed by the

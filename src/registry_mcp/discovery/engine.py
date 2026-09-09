@@ -9,9 +9,11 @@ from registry_mcp.config import Settings
 from registry_mcp.discovery.authentik import AuthentikDiscoverySource
 from registry_mcp.discovery.base import DiscoveredService, DiscoverySource
 from registry_mcp.discovery.docker import DockerDiscoverySource
+from registry_mcp.discovery.dockhand import DockhandDiscoverySource
 from registry_mcp.discovery.traefik import TraefikDiscoverySource
 from registry_mcp.dspy import Reasoner
 from registry_mcp.integrations.authentik.client import AuthentikClient
+from registry_mcp.integrations.dockhand.client import DockhandClient
 from registry_mcp.integrations.traefik.client import TraefikClient
 from registry_mcp.logging import get_logger
 from registry_mcp.models import DiscoveryEvent, DiscoveryStatus, Service, SourceType
@@ -78,6 +80,15 @@ def build_sources(settings: Settings) -> dict[SourceType, DiscoverySource]:
         )
     if docker_source is not None:
         sources[SourceType.docker] = docker_source
+    if settings.dockhand_api_url and settings.dockhand_token:
+        sources[SourceType.dockhand] = DockhandDiscoverySource(
+            DockhandClient(
+                settings.dockhand_api_url,
+                settings.dockhand_token,
+                timeout=settings.dockhand_timeout_seconds,
+                retries=settings.dockhand_retries,
+            )
+        )
     return sources
 
 
