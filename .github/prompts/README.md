@@ -20,6 +20,12 @@ Structured debugging workflow — Observe, Theorize, Act. Run when something is 
 ### `create-commit.prompt.md`
 Semantic commit message generator. Analyzes staged changes and session context to write a Conventional Commits message.
 
+### `ansible-planned-rollout.prompt.md`
+Gated Ansible capability-planning workflow. Scans real vs. projected Ansible capability (what ships today against what ADR-001 originally projected and ADR-012 later withdrew), interviews the user for design decisions, saves a plan to `docs/plans/`, executes it as atomic Conventional Commits, opens a PR, resolves feedback, and hands back a manual test checklist.
+
+### `sync-template.prompt.md`
+Consistency audit for this template's own folder structure, READMEs, and documentation. Run after any structural change to the template.
+
 ## How to use
 
 1. Open Copilot Chat in VS Code
