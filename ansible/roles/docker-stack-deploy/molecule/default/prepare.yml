@@ -57,6 +57,29 @@
         state: present
         update_cache: true
 
+    - name: Stop Docker if the package's postinst already auto-started it
+      # docker-ce's postinst commonly enables+starts the service on
+      # install; the vfs config below must be in place before the
+      # daemon's first real start, so stop it unconditionally first
+      # (a no-op, not a failure, if it was already stopped).
+      ansible.builtin.systemd:
+        name: docker
+        state: stopped
+
+    - name: Configure the inner Docker daemon to use the vfs storage driver
+      # This test instance is itself a Docker container (Docker-in-Docker),
+      # and its own filesystem is already overlay-backed on GitHub Actions
+      # runners -- overlay2 (the default storage driver) cannot nest on top
+      # of another overlay filesystem and fails with "failed to mount ...
+      # fstype: overlay ... invalid argument" the first time a container is
+      # created. vfs has no such restriction; it's slower but always works
+      # in a nested-container scenario like this one.
+      ansible.builtin.copy:
+        dest: /etc/docker/daemon.json
+        content: |
+          {"storage-driver": "vfs"}
+        mode: "0644"
+
     - name: Start and enable Docker
       ansible.builtin.systemd:
         name: docker
