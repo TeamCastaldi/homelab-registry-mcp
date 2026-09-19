@@ -41,8 +41,8 @@ Read CLAUDE.md's Deferred line and confirm it now cites Phase G, not Phase E.
 - Q10 answer: "Out of scope for now" (declared-vs-actual inventory drift detection).
 
 **Tasks**:
-- [ ] Add `docs/SOPs/SOP-004-Verify-Ansible-Control-Plane-Plumbing.md` covering `ansible --version`, `ansible-config dump`, `ansible <host> -m ping`, and a `--check --diff` dry run of `deploy.yml` against control-plane and heimdall
-- [ ] Document the `ANSIBLE_CFG_PATH` / `SSH_KEY_PATH` / `SECRETS_REPO_PATH` three-way health-check coupling in the new SOP, so an operator understands why `hardware-discover-now` needs all three health checks even though it only directly uses two of them
+- [x] Add `docs/SOPs/SOP-004-Verify-Ansible-Control-Plane-Plumbing.md` covering `ansible --version`, `ansible-config dump`, `ansible <host> -m ping`, and a `--check --diff` dry run of `deploy.yml` against control-plane and heimdall
+- [x] Document the `ANSIBLE_CFG_PATH` / `SSH_KEY_PATH` / `SECRETS_REPO_PATH` three-way health-check coupling in the new SOP, so an operator understands why `hardware-discover-now` needs all three health checks even though it only directly uses two of them
 
 **Verification**:
 
