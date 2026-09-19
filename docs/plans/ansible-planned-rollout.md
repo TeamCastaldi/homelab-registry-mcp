@@ -113,7 +113,7 @@ ansible-playbook ansible/playbooks/verify-plumbing.yml --syntax-check
 
 **Tasks**:
 - [x] Add Molecule scaffold (`molecule/default`) for the plumbing-check role using the Docker driver
-- [ ] Add Molecule scaffold (`molecule/default`) for the docker-stack-deploy role using the Docker driver
+- [x] Add Molecule scaffold (`molecule/default`) for the docker-stack-deploy role using the Docker driver
 - [ ] Add molecule and its Docker driver to the project's dev dependencies
 
 **Verification**:
