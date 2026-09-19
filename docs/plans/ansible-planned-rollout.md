@@ -60,7 +60,7 @@ Hand `SOP-004` to the operator and run its steps against control-plane and heimd
 - Confirmed design detail: `HardwareNode` already carries `hostname`, `ip_address`, `ansible_host`, and `ansible_groups` (`src/registry_mcp/models/hardware.py`), so the tool syncs an existing node row rather than inventing a parallel registration flow.
 
 **Tasks**:
-- [ ] Draft `docs/ARDs/ADR-015-Ansible-Inventory-Sync-Tool.md` amending ADR-012 to permit a math-gated Ansible inventory-sync tool scoped to already-registered hardware nodes
+- [x] Draft `docs/ARDs/ADR-015-Ansible-Inventory-Sync-Tool.md` amending ADR-012 to permit a math-gated Ansible inventory-sync tool scoped to already-registered hardware nodes
 - [ ] Add `ANSIBLE_INVENTORY_PATH` setting for the inventory-sync tool's write target
 - [ ] Add `PendingInventoryWrite` model and `InventoryGateStore` math-confirm gate for inventory writes
 - [ ] Add an inventory YAML writer that upserts one host entry without disturbing the rest of the file
