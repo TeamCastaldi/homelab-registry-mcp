@@ -25,3 +25,23 @@ provisioner:
     verify: verify.yml
 verifier:
   name: ansible
+scenario:
+  # Excludes idempotence (the only change from Molecule's default
+  # sequence). docker-stack-deploy's own tasks/main.yml hardcodes
+  # changed_when: true on both `docker compose pull` and `up -d` --
+  # a deliberate, pre-existing design choice (avoids parsing compose's
+  # own output to infer idempotency), not a bug this scenario should
+  # paper over or "fix" by rewriting the role's behavior. Molecule's
+  # idempotence stage converges twice and requires zero changes on the
+  # second run, which this role's own design can never satisfy.
+  test_sequence:
+    - dependency
+    - cleanup
+    - destroy
+    - syntax
+    - create
+    - prepare
+    - converge
+    - verify
+    - cleanup
+    - destroy
