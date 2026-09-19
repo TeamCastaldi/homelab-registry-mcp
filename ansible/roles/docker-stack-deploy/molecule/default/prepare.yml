@@ -16,12 +16,45 @@
     seed_repo_path: /tmp/homelab-seed
     bare_repo_path: /tmp/homelab-bare.git
   tasks:
-    - name: Install Docker and git
+    # docker-compose-plugin (the `docker compose` v2 CLI this role invokes)
+    # is not in Debian's own apt repos -- only Docker's official one carries
+    # it. amd64/bookworm are hardcoded because this scenario's test image
+    # (molecule.yml) is pinned to geerlingguy/docker-debian12-ansible, a
+    # fixed Debian 12 amd64 image; adjust both if that image ever changes.
+    - name: Install apt-over-https prerequisites
+      # ca-certificates for HTTPS validation; get_url below is pure-Python
+      # (no shelling out to curl, so it isn't needed here).
       ansible.builtin.apt:
         name:
-          - docker.io
-          - docker-compose-plugin
+          - ca-certificates
           - git
+        state: present
+        update_cache: true
+
+    - name: Create the apt keyrings directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+
+    - name: Fetch Docker's official apt GPG key
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/debian/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        mode: "0644"
+
+    - name: Add Docker's official apt repository
+      ansible.builtin.apt_repository:
+        repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable"
+        state: present
+
+    - name: Install Docker from its official repository
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
         state: present
         update_cache: true
 
