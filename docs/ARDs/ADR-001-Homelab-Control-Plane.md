@@ -471,8 +471,9 @@ Phases are ordered by dependency. Each phase should be executed as a focused ses
 ## 12. References
 
 - `docs/agentic-design-intent.md` — MCP architectural philosophy and standing policies
-- `docs/plans/project-plan-registry-mcp.md` — Original phased project plan (Phases 1–9)
-- `docs/plans/plan-ansibleSetup.md` — Ansible control node setup reference
+- `docs/plans/project-plan-registry-mcp.md` and `docs/plans/plan-ansibleSetup.md` — cited here as
+  the original phased project plan and an Ansible control node setup reference, but neither file
+  was ever written; `docs/plans/updated-phases.md` is the phased plan that actually exists
 - SMTP2GO documentation — https://www.smtp2go.com/docs/
 
 ---
