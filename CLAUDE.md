@@ -344,6 +344,8 @@ ADR-004's unimplemented polling source.
 | `SECRETS_GIT_CRYPT_KEY` | unset | Base64-encoded git-crypt key bytes (fallback when no key file) |
 | `ANSIBLE_CFG_PATH` | unset | Absolute path to `ansible.cfg` on this node; one of three startup health checks (Phase 2) — missing it starts the server in read-only mode |
 | `SSH_KEY_PATH` | unset | Absolute path to the control-plane SSH key; same startup health check as `ANSIBLE_CFG_PATH`, same no-expansion caveat |
+| `ANSIBLE_INVENTORY_PATH` | unset | Absolute path to the YAML inventory file `ansible-inventory-sync-node` writes a single host entry into (ADR-015); not inferred from `ansible.cfg`'s `inventory =` setting |
+| `ANSIBLE_INVENTORY_WRITE_CHALLENGE_TTL_MINUTES` | `5` | How long an `ansible-inventory-sync-node` math challenge stays answerable via `ansible-inventory-sync-node-confirm` before expiring |
 | `ADOPTION_ENABLED` | `false` | Enables the `proposal_adopt_service*` brownfield adoption tools |
 | `SSH_DEFAULT_USER` | `root` | User for the ad-hoc SSH connection adoption uses to inspect a live container; reuses `SSH_KEY_PATH` |
 | `ADOPTION_DRAFT_TTL_MINUTES` | `60` | How long a drafted adoption may await the operator's keep/rotate decision before expiring |
