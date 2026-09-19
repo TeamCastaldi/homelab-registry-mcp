@@ -54,3 +54,46 @@ jobs:
         env:
           ANSIBLE_ROLES_PATH: ansible/roles
         run: ansible-lint ansible/roles ansible/playbooks
+
+      - name: Idempotency check — plumbing-check (--check --diff against localhost)
+        env:
+          ANSIBLE_ROLES_PATH: ansible/roles
+        run: |
+          ansible-playbook ansible/playbooks/verify-plumbing.yml -i localhost, -c local \
+            -e target_node=localhost \
+            --check --diff
+
+      - name: Seed a pre-deployed fixture for the docker-stack-deploy idempotency check
+        # docker-stack-deploy's compose-file-exists gate needs a real,
+        # already-checked-out clone -- `git` in --check mode reports what it
+        # *would* do but never writes to disk, so a from-scratch --check run
+        # always fails that gate. This seeds a local git remote + an
+        # already-cloned, already-deployed working copy, so the idempotency
+        # check below exercises "run again against known-good state" rather
+        # than a from-scratch deploy under check mode, which cannot work.
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/idempotency-origin.git /tmp/idempotency-clone
+          git init -q --bare /tmp/idempotency-origin.git
+          git clone -q /tmp/idempotency-origin.git /tmp/idempotency-clone
+          mkdir -p /tmp/idempotency-clone/nodes/localhost/idempotency-check
+          cat > /tmp/idempotency-clone/nodes/localhost/idempotency-check/compose.yaml <<'EOF'
+          services:
+            idempotency-check:
+              image: alpine:latest
+          EOF
+          git -C /tmp/idempotency-clone -c user.email=ci@ci -c user.name=ci add -A
+          git -C /tmp/idempotency-clone -c user.email=ci@ci -c user.name=ci commit -q -m seed
+          git -C /tmp/idempotency-clone branch -M main
+          git -C /tmp/idempotency-clone push -q origin main
+
+      - name: Idempotency check — docker-stack-deploy (--check --diff against the fixture)
+        env:
+          ANSIBLE_ROLES_PATH: ansible/roles
+        run: |
+          ansible-playbook ansible/playbooks/deploy.yml -i localhost, -c local \
+            -e target_node=localhost \
+            -e target_service=idempotency-check \
+            -e docker_stack_deploy_repo_url=/tmp/idempotency-origin.git \
+            -e docker_stack_deploy_repo_path=/tmp/idempotency-clone \
+            --check --diff
