@@ -112,7 +112,7 @@ ansible-playbook ansible/playbooks/verify-plumbing.yml --syntax-check
 - Q11 follow-up answer: "Yes, include docker-stack-deploy too".
 
 **Tasks**:
-- [ ] Add Molecule scaffold (`molecule/default`) for the plumbing-check role using the Docker driver
+- [x] Add Molecule scaffold (`molecule/default`) for the plumbing-check role using the Docker driver
 - [ ] Add Molecule scaffold (`molecule/default`) for the docker-stack-deploy role using the Docker driver
 - [ ] Add molecule and its Docker driver to the project's dev dependencies
 
