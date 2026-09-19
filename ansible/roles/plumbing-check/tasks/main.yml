@@ -6,3 +6,17 @@
 # command, copy, and service (status-check only, never restart/stop). Tasks
 # are added incrementally — see docs/plans/ansible-planned-rollout.md
 # Phase 4 for the commit-by-commit build order.
+
+- name: Ping {{ inventory_hostname }}
+  ansible.builtin.ping:
+
+- name: Gather facts for {{ inventory_hostname }}
+  ansible.builtin.setup:
+  register: plumbing_check_facts
+
+- name: Report OS and hostname facts
+  ansible.builtin.debug:
+    msg: >-
+      {{ plumbing_check_facts.ansible_facts.ansible_hostname }} running
+      {{ plumbing_check_facts.ansible_facts.ansible_distribution | default('unknown OS') }}
+      {{ plumbing_check_facts.ansible_facts.ansible_distribution_version | default('') }}
