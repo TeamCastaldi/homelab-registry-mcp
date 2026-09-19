@@ -6,6 +6,14 @@ workflow uses) — no separate inventory setting to keep in sync. Like every
 other discovery source in this project, this only *reads* the target node;
 nothing here writes anything remotely. The write path is `HardwareStore`,
 driven by the caller (`tools/hardware.py`).
+
+Deliberately narrow for now (`DISCOVERY_FIELDS`, `node_fields_from_facts()`):
+IP/MAC, OS, CPU model/cores, RAM, and disks — exactly what
+`HardwareStore.upsert_from_discovery` accepts today. Candidates for a future
+pass, not built here: installed package versions (`ansible_facts` already
+carries `ansible_pkg_mgr`-specific facts on some setups), live container
+inventory (would overlap with `discovery/docker.py`'s own source), and
+kernel/uptime facts for a lightweight drift signal.
 """
 
 from __future__ import annotations
