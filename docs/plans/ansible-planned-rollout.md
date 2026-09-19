@@ -62,7 +62,7 @@ Hand `SOP-004` to the operator and run its steps against control-plane and heimd
 **Tasks**:
 - [x] Draft `docs/ARDs/ADR-015-Ansible-Inventory-Sync-Tool.md` amending ADR-012 to permit a math-gated Ansible inventory-sync tool scoped to already-registered hardware nodes
 - [x] Add `ANSIBLE_INVENTORY_PATH` setting for the inventory-sync tool's write target
-- [ ] Add `PendingInventoryWrite` model and `InventoryGateStore` math-confirm gate for inventory writes
+- [x] Add `PendingInventoryWrite` model and `InventoryGateStore` math-confirm gate for inventory writes
 - [ ] Add an inventory YAML writer that upserts one host entry without disturbing the rest of the file
 - [ ] Add `ansible-inventory-sync-node` and `ansible-inventory-sync-node-confirm` MCP tools
 - [ ] Register the new inventory tools in `server.py`
