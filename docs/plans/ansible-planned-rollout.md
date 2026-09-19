@@ -89,7 +89,7 @@ Call `ansible-inventory-sync-node` against a registered test node, solve the ret
 - Q16 answer: "No" (no new off-by-default env var for this capability either).
 
 **Tasks**:
-- [ ] Add `ansible/roles/plumbing-check` role scaffold with README and `defaults/main.yml`
+- [x] Add `ansible/roles/plumbing-check` role scaffold with README and `defaults/main.yml`
 - [ ] Add `ping` and `setup` tasks to the plumbing-check role
 - [ ] Add a `command`/`shell` diagnostic task (`uptime`) to the plumbing-check role
 - [ ] Add a `copy`/`template` file-delivery task with `backup: true` to the plumbing-check role
