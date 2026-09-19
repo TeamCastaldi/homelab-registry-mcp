@@ -17,7 +17,7 @@
 - Q9 answer: "Stay exactly what it accepts today. But note somewhere what features could be added later." (`hardware-discover-now`'s fact-gathering scope).
 
 **Tasks**:
-- [ ] Fix CLAUDE.md's Deferred line to attribute multi-node Ansible bootstrap to the withdrawn OOBE Phase G instead of the completed Phase E
+- [x] Fix CLAUDE.md's Deferred line to attribute multi-node Ansible bootstrap to the withdrawn OOBE Phase G instead of the completed Phase E
 - [ ] Replace the dangling `docs/plans/project-plan-registry-mcp.md` and `docs/plans/plan-ansibleSetup.md` references in ADR-001 §12 with a note that they were never written
 - [ ] Fix the dangling `docs/plans/phase-4-cd.md` reference in the docker-stack-deploy role README to point at `docs/plans/updated-phases.md`
 - [ ] Add a forward-looking note to `hardware-discover-now`'s docstring listing possible future fact-gathering scope
