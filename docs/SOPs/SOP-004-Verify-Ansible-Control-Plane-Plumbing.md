@@ -145,6 +145,19 @@ run. Phase 6 of `docs/plans/ansible-planned-rollout.md` wires `--check --diff`
 into CI with this same limitation; it is not something this SOP or that CI
 step can close.
 
+**A second, deeper limitation**: running `--check --diff` against a
+`docker_stack_deploy_repo_path` that has never been cloned for real always
+fails at the "compose file exists" gate, even for a perfectly valid
+`target_node`/`target_service` — `--check` mode makes the `git` task report
+what it *would* pull without ever writing anything to disk, so the file the
+next task looks for genuinely isn't there yet. This isn't specific to
+`heimdall`; it's true of any fresh path. To dry-run a deploy meaningfully,
+either run once for real first (so the clone exists), or point
+`docker_stack_deploy_repo_path` at a path that's already been deployed to
+before. CI's idempotency step (Phase 6) seeds a fake, already-deployed local
+fixture for exactly this reason, rather than trying to dry-run a from-scratch
+deploy.
+
 ---
 
 #### Step 6: Verify `ansible-lint` runs correctly
