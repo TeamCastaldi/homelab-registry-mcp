@@ -1,0 +1,8 @@
+---
+# plumbing-check
+#
+# Confirms Ansible plumbing works end-to-end against a node by exercising
+# the five most common ad-hoc operations as ordinary tasks: ping, setup,
+# command, copy, and service (status-check only, never restart/stop). Tasks
+# are added incrementally — see docs/plans/ansible-planned-rollout.md
+# Phase 4 for the commit-by-commit build order.
