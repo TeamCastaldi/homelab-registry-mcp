@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.3.0...v1.3.1) (2026-09-19)
+
+
+### Documentation
+
+* **prompts:** add ansible-planned-rollout gated planning prompt ([74ccca1](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/74ccca1b85666a62a76cbc67034cfa3bcadebb77))
+
 ## [1.3.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.2.0...v1.3.0) (2026-09-09)
 
 
