@@ -22,8 +22,7 @@
     # (molecule.yml) is pinned to geerlingguy/docker-debian12-ansible, a
     # fixed Debian 12 amd64 image; adjust both if that image ever changes.
     - name: Install apt-over-https prerequisites
-      # ca-certificates for HTTPS validation; get_url below is pure-Python
-      # (no shelling out to curl, so it isn't needed here).
+      # ca-certificates for HTTPS validation.
       ansible.builtin.apt:
         name:
           - ca-certificates
@@ -31,21 +30,16 @@
         state: present
         update_cache: true
 
-    - name: Create the apt keyrings directory
-      ansible.builtin.file:
-        path: /etc/apt/keyrings
-        state: directory
-        mode: "0755"
-
-    - name: Fetch Docker's official apt GPG key
-      ansible.builtin.get_url:
-        url: https://download.docker.com/linux/debian/gpg
-        dest: /etc/apt/keyrings/docker.asc
-        mode: "0644"
-
     - name: Add Docker's official apt repository
-      ansible.builtin.apt_repository:
-        repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable"
+      # deb822_repository manages the signing key itself (downloads and
+      # stores it) -- no manual keyring file or apt_repository needed.
+      ansible.builtin.deb822_repository:
+        name: docker
+        types: [deb]
+        uris: [https://download.docker.com/linux/debian]
+        suites: [bookworm]
+        components: [stable]
+        signed_by: https://download.docker.com/linux/debian/gpg
         state: present
 
     - name: Install Docker from its official repository
@@ -75,12 +69,15 @@
         cmd: git init --bare {{ bare_repo_path }}
         creates: "{{ bare_repo_path }}/HEAD"
 
-    - name: Clone the bare repo to seed it  # noqa: latest[git]
-      # Cloning a bare repo this same play just created empty — there is no
-      # meaningful commit/tag/branch to pin `version:` to yet.
-      ansible.builtin.git:
-        repo: "{{ bare_repo_path }}"
-        dest: "{{ seed_repo_path }}"
+    - name: Clone the bare repo to seed it  # noqa: command-instead-of-module
+      # ansible.builtin.git always checks out a branch after cloning, and
+      # guesses "master" for a repo with no commits yet -- that checkout
+      # fails outright against this genuinely empty bare repo (nothing has
+      # been pushed to it yet; that happens further down this same play). A
+      # plain `git clone` has no such requirement and succeeds normally.
+      ansible.builtin.command:
+        cmd: git clone {{ bare_repo_path }} {{ seed_repo_path }}
+        creates: "{{ seed_repo_path }}/.git"
 
     - name: Create the compose file's directory
       ansible.builtin.file:
