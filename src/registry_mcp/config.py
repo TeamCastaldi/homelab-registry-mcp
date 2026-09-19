@@ -175,6 +175,16 @@ class Settings(BaseSettings):
     ansible_cfg_path: str | None = Field(default=None)
     ssh_key_path: str | None = Field(default=None)
 
+    # Ansible inventory-sync tool (ADR-015). Explicit absolute path to the
+    # YAML inventory file `ansible-inventory-sync-node` writes a single host
+    # entry into — deliberately not inferred by parsing ansible.cfg's
+    # `inventory =` setting, which can be relative, environment-expanded, a
+    # directory, or a dynamic inventory script.
+    ansible_inventory_path: str | None = Field(default=None)
+    # Same math-confirm-gate shape as delete_challenge_ttl_minutes, kept as
+    # its own field since this gates a write, not a delete.
+    ansible_inventory_write_challenge_ttl_minutes: int = Field(default=5, gt=0)
+
     # --- Dockhand webhook (ADR-010) — inbound container-update alerts ---
     # Off by default. Dockhand pushes an alert when it detects a newer upstream
     # image (or a CVE in one it scanned); the route turns that into a staged
