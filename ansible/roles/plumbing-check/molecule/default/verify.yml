@@ -1,0 +1,15 @@
+---
+- name: Verify
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Check that the marker file was created
+      ansible.builtin.stat:
+        path: /tmp/plumbing-check-marker.txt
+      register: plumbing_check_marker_stat
+
+    - name: Assert the marker file exists
+      ansible.builtin.assert:
+        that:
+          - plumbing_check_marker_stat.stat.exists
+        fail_msg: plumbing-check did not create its marker file

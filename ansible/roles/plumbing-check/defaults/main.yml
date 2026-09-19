@@ -1,0 +1,18 @@
+---
+# plumbing-check — defaults
+#
+# Every variable this role uses has a default here, so it runs against any
+# node with no extra-vars required. plumbing_check_service_name is
+# deliberately unset (~) — the service-status report step is skipped
+# entirely rather than failing when no service name is given.
+
+plumbing_check_diagnostic_command: uptime
+plumbing_check_target_file: /tmp/plumbing-check-marker.txt
+# Deliberately static, not timestamped: a Molecule scenario's default
+# test_sequence converges twice and asserts the second run reports zero
+# changes (idempotence) -- a live timestamp here would fail that by design
+# on every run, since the file's content would legitimately differ each
+# time. Override this per-call if you want a freshness marker instead and
+# don't need idempotence for that run.
+plumbing_check_target_file_content: "plumbing-check verified this node's plumbing works"
+plumbing_check_service_name: ~

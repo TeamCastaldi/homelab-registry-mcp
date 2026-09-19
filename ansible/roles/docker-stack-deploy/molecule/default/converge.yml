@@ -1,0 +1,11 @@
+---
+- name: Converge
+  hosts: all
+  gather_facts: false
+  roles:
+    - role: docker-stack-deploy
+      vars:
+        target_node: testnode
+        target_service: testservice
+        docker_stack_deploy_repo_url: /tmp/homelab-bare.git
+        docker_stack_deploy_repo_path: /tmp/homelab-clone

@@ -1,0 +1,156 @@
+---
+# Prepares the test instance for docker-stack-deploy: installs a real
+# Docker daemon (the role runs `docker compose` on its target, so the
+# instance needs its own working Docker, not just the outer Molecule
+# host's), then seeds a local bare git repo standing in for the operator's
+# private homelab repo, with one nodes/<node>/<service>/compose.yaml commit
+# already in it — entirely local, so this scenario needs no external git
+# remote.
+
+- name: Prepare
+  hosts: all
+  gather_facts: false
+  vars:
+    test_node: testnode
+    test_service: testservice
+    seed_repo_path: /tmp/homelab-seed
+    bare_repo_path: /tmp/homelab-bare.git
+  tasks:
+    # docker-compose-plugin (the `docker compose` v2 CLI this role invokes)
+    # is not in Debian's own apt repos -- only Docker's official one carries
+    # it. amd64/bookworm are hardcoded because this scenario's test image
+    # (molecule.yml) is pinned to geerlingguy/docker-debian12-ansible, a
+    # fixed Debian 12 amd64 image; adjust both if that image ever changes.
+    - name: Install apt-over-https prerequisites
+      # ca-certificates for HTTPS validation.
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - git
+        state: present
+        update_cache: true
+
+    - name: Add Docker's official apt repository
+      # deb822_repository manages the signing key itself (downloads and
+      # stores it) -- no manual keyring file or apt_repository needed.
+      ansible.builtin.deb822_repository:
+        name: docker
+        types: [deb]
+        uris: [https://download.docker.com/linux/debian]
+        suites: [bookworm]
+        components: [stable]
+        signed_by: https://download.docker.com/linux/debian/gpg
+        state: present
+        # The module needs python3-debian on the target and won't install
+        # it unless told to; the test image's system Python is what runs
+        # this module, so the module's own "only works with system Python"
+        # caveat doesn't apply here.
+        install_python_debian: true
+
+    - name: Install Docker from its official repository
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+        state: present
+        update_cache: true
+
+    - name: Stop Docker if the package's postinst already auto-started it
+      # docker-ce's postinst commonly enables+starts the service on
+      # install; the vfs config below must be in place before the
+      # daemon's first real start, so stop it unconditionally first
+      # (a no-op, not a failure, if it was already stopped).
+      ansible.builtin.systemd:
+        name: docker
+        state: stopped
+
+    - name: Configure the inner Docker daemon to use the vfs storage driver
+      # This test instance is itself a Docker container (Docker-in-Docker),
+      # and its own filesystem is already overlay-backed on GitHub Actions
+      # runners -- overlay2 (the default storage driver) cannot nest on top
+      # of another overlay filesystem and fails with "failed to mount ...
+      # fstype: overlay ... invalid argument" the first time a container is
+      # created. vfs has no such restriction; it's slower but always works
+      # in a nested-container scenario like this one.
+      ansible.builtin.copy:
+        dest: /etc/docker/daemon.json
+        content: |
+          {"storage-driver": "vfs"}
+        mode: "0644"
+
+    - name: Start and enable Docker
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Wait for the Docker socket to be ready
+      ansible.builtin.wait_for:
+        path: /var/run/docker.sock
+        timeout: 30
+
+    - name: Create the bare repo standing in for the operator's homelab repo  # noqa: command-instead-of-module
+      # No ansible.builtin module wraps `git init --bare`.
+      ansible.builtin.command:
+        cmd: git init --bare {{ bare_repo_path }}
+        creates: "{{ bare_repo_path }}/HEAD"
+
+    - name: Clone the bare repo to seed it  # noqa: command-instead-of-module
+      # ansible.builtin.git always checks out a branch after cloning, and
+      # guesses "master" for a repo with no commits yet -- that checkout
+      # fails outright against this genuinely empty bare repo (nothing has
+      # been pushed to it yet; that happens further down this same play). A
+      # plain `git clone` has no such requirement and succeeds normally.
+      ansible.builtin.command:
+        cmd: git clone {{ bare_repo_path }} {{ seed_repo_path }}
+        creates: "{{ seed_repo_path }}/.git"
+
+    - name: Create the compose file's directory
+      ansible.builtin.file:
+        path: "{{ seed_repo_path }}/nodes/{{ test_node }}/{{ test_service }}"
+        state: directory
+        mode: "0755"
+
+    - name: Write a minimal compose.yaml
+      ansible.builtin.copy:
+        dest: "{{ seed_repo_path }}/nodes/{{ test_node }}/{{ test_service }}/compose.yaml"
+        content: |
+          services:
+            {{ test_service }}:
+              image: alpine:latest
+              container_name: {{ test_service }}
+              command: sleep 3600
+        mode: "0644"
+
+    - name: Configure a commit identity for the seed clone  # noqa: command-instead-of-module
+      # One-off test-scaffold plumbing, not idempotent infrastructure state —
+      # community.general.git_config would add a collection dependency for
+      # a single throwaway config value.
+      ansible.builtin.command:
+        cmd: "git -C {{ seed_repo_path }} config user.{{ item.key }} {{ item.value }}"
+      loop:
+        - { key: "email", value: "molecule@localhost" }
+        - { key: "name", value: "molecule" }
+      changed_when: true
+
+    - name: Stage the seeded compose file  # noqa: command-instead-of-module
+      ansible.builtin.command:
+        cmd: git -C {{ seed_repo_path }} add -A
+      changed_when: true
+
+    - name: Commit the seeded compose file  # noqa: command-instead-of-module
+      ansible.builtin.command:
+        cmd: git -C {{ seed_repo_path }} commit -m seed
+      changed_when: true
+
+    - name: Rename the seed branch to main  # noqa: command-instead-of-module
+      ansible.builtin.command:
+        cmd: git -C {{ seed_repo_path }} branch -M main
+      changed_when: true
+
+    - name: Push the seed commit back to the bare repo  # noqa: command-instead-of-module
+      ansible.builtin.command:
+        cmd: git -C {{ seed_repo_path }} push origin main
+      changed_when: true

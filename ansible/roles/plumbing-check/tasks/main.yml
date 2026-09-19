@@ -1,0 +1,52 @@
+---
+# plumbing-check
+#
+# Confirms Ansible plumbing works end-to-end against a node by exercising
+# the five most common ad-hoc operations as ordinary tasks: ping, setup,
+# command, copy, and service (status-check only, never restart/stop). Tasks
+# are added incrementally — see docs/plans/ansible-planned-rollout.md
+# Phase 4 for the commit-by-commit build order.
+
+- name: Ping {{ inventory_hostname }}
+  ansible.builtin.ping:
+
+- name: Gather facts for {{ inventory_hostname }}
+  ansible.builtin.setup:
+  register: plumbing_check_facts
+
+- name: Report OS and hostname facts
+  ansible.builtin.debug:
+    msg: >-
+      {{ plumbing_check_facts.ansible_facts.ansible_hostname }} running
+      {{ plumbing_check_facts.ansible_facts.ansible_distribution | default('unknown OS') }}
+      {{ plumbing_check_facts.ansible_facts.ansible_distribution_version | default('') }}
+
+- name: Run diagnostic command
+  ansible.builtin.command:
+    cmd: "{{ plumbing_check_diagnostic_command }}"
+  register: plumbing_check_command_result
+  changed_when: false
+
+- name: Report diagnostic command output
+  ansible.builtin.debug:
+    var: plumbing_check_command_result.stdout_lines
+
+- name: Deliver plumbing-check marker file
+  ansible.builtin.copy:
+    dest: "{{ plumbing_check_target_file }}"
+    content: "{{ plumbing_check_target_file_content }}\n"
+    mode: "0644"
+    backup: true
+
+- name: Gather service facts (read-only — never starts, stops, or restarts anything)
+  ansible.builtin.service_facts:
+  when: plumbing_check_service_name is not none
+
+- name: Report status of the configured service
+  ansible.builtin.debug:
+    msg: >-
+      {{ plumbing_check_service_name }} is
+      {{ ansible_facts.services[plumbing_check_service_name].state
+         if plumbing_check_service_name in ansible_facts.services
+         else 'not found' }}
+  when: plumbing_check_service_name is not none

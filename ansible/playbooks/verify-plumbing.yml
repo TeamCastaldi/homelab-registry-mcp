@@ -1,0 +1,12 @@
+---
+# Confirms Ansible plumbing works end-to-end against one node by running
+# the plumbing-check role's five ad-hoc-equivalent tasks (ping, setup,
+# command, copy, service). Expects target_node to name a host or group in
+# the caller's inventory. See ansible/roles/plumbing-check/README.md for
+# the full variable contract.
+
+- name: Verify Ansible plumbing
+  hosts: "{{ target_node | default('all') }}"
+  gather_facts: false
+  roles:
+    - role: plumbing-check

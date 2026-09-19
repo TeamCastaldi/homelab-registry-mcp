@@ -27,6 +27,10 @@ from registry_mcp.models.hardware import (
     StorageDisk,
     StoragePool,
 )
+from registry_mcp.models.inventory import (
+    PendingInventoryWrite,
+    PendingInventoryWriteStatus,
+)
 from registry_mcp.models.proposal import (
     FindingType,
     Proposal,
@@ -60,6 +64,8 @@ __all__ = [
     "NodeStatus",
     "PendingDeletion",
     "PendingDeletionStatus",
+    "PendingInventoryWrite",
+    "PendingInventoryWriteStatus",
     "PoolType",
     "Proposal",
     "ProposalStatus",

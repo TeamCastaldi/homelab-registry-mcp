@@ -7,8 +7,9 @@ target, then runs `docker compose pull && up -d` in that service's directory.
 This role ships with `homelab-registry-mcp` (the automation), not with an
 operator's private homelab repo (the config). It is invoked by the reusable
 `.github/workflows/deploy.yml` in this repo — see that file and
-`docs/plans/phase-4-cd.md` for how an operator wires it into their own
-private repo.
+`docs/plans/updated-phases.md`'s "Phase 4: Automated Deployment Pipeline
+(GitOps CD)" section for how an operator wires it into their own private
+repo.
 
 ## Required variables
 
