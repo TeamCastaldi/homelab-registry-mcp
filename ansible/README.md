@@ -13,6 +13,12 @@ that repo's GitHub Actions workflow calls the reusable
   README for the required variables.
 - **`playbooks/deploy.yml`** — thin playbook wrapping the role, parameterized
   by `target_node` / `target_service`.
+- **`roles/plumbing-check/`** — confirms Ansible plumbing works end-to-end
+  against a node by exercising the five most common ad-hoc operations
+  (ping, setup, command, copy, service) as ordinary tasks. See its README
+  and `docs/SOPs/SOP-004-Verify-Ansible-Control-Plane-Plumbing.md`.
+- **`playbooks/verify-plumbing.yml`** — thin playbook wrapping that role,
+  parameterized by `target_node`.
 
 See `.github/workflows/deploy.yml` for the reusable CD workflow and
 `CLAUDE.md` for the snippet an operator pastes into their private repo.
