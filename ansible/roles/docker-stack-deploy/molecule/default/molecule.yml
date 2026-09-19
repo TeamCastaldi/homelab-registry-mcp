@@ -1,0 +1,27 @@
+---
+# This role runs `docker compose` on its target, so the test instance needs
+# a real Docker daemon of its own (Docker-in-Docker) — prepare.yml installs
+# and starts it. Requires --privileged and the cgroup mount below for the
+# inner dockerd to run at all.
+dependency:
+  name: galaxy
+  enabled: false
+driver:
+  name: docker
+platforms:
+  - name: docker-stack-deploy-instance
+    image: geerlingguy/docker-debian12-ansible:latest
+    command: ""
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    privileged: true
+    pre_build_image: true
+provisioner:
+  name: ansible
+  playbooks:
+    prepare: prepare.yml
+    converge: converge.yml
+    verify: verify.yml
+verifier:
+  name: ansible

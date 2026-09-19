@@ -1,0 +1,98 @@
+---
+# Prepares the test instance for docker-stack-deploy: installs a real
+# Docker daemon (the role runs `docker compose` on its target, so the
+# instance needs its own working Docker, not just the outer Molecule
+# host's), then seeds a local bare git repo standing in for the operator's
+# private homelab repo, with one nodes/<node>/<service>/compose.yaml commit
+# already in it — entirely local, so this scenario needs no external git
+# remote.
+
+- name: Prepare
+  hosts: all
+  gather_facts: false
+  vars:
+    test_node: testnode
+    test_service: testservice
+    seed_repo_path: /tmp/homelab-seed
+    bare_repo_path: /tmp/homelab-bare.git
+  tasks:
+    - name: Install Docker and git
+      ansible.builtin.apt:
+        name:
+          - docker.io
+          - docker-compose-plugin
+          - git
+        state: present
+        update_cache: true
+
+    - name: Start and enable Docker
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Wait for the Docker socket to be ready
+      ansible.builtin.wait_for:
+        path: /var/run/docker.sock
+        timeout: 30
+
+    - name: Create the bare repo standing in for the operator's homelab repo  # noqa: command-instead-of-module
+      # No ansible.builtin module wraps `git init --bare`.
+      ansible.builtin.command:
+        cmd: git init --bare {{ bare_repo_path }}
+        creates: "{{ bare_repo_path }}/HEAD"
+
+    - name: Clone the bare repo to seed it  # noqa: latest[git]
+      # Cloning a bare repo this same play just created empty — there is no
+      # meaningful commit/tag/branch to pin `version:` to yet.
+      ansible.builtin.git:
+        repo: "{{ bare_repo_path }}"
+        dest: "{{ seed_repo_path }}"
+
+    - name: Create the compose file's directory
+      ansible.builtin.file:
+        path: "{{ seed_repo_path }}/nodes/{{ test_node }}/{{ test_service }}"
+        state: directory
+        mode: "0755"
+
+    - name: Write a minimal compose.yaml
+      ansible.builtin.copy:
+        dest: "{{ seed_repo_path }}/nodes/{{ test_node }}/{{ test_service }}/compose.yaml"
+        content: |
+          services:
+            {{ test_service }}:
+              image: alpine:latest
+              container_name: {{ test_service }}
+              command: sleep 3600
+        mode: "0644"
+
+    - name: Configure a commit identity for the seed clone  # noqa: command-instead-of-module
+      # One-off test-scaffold plumbing, not idempotent infrastructure state —
+      # community.general.git_config would add a collection dependency for
+      # a single throwaway config value.
+      ansible.builtin.command:
+        cmd: "git -C {{ seed_repo_path }} config user.{{ item.key }} {{ item.value }}"
+      loop:
+        - { key: "email", value: "molecule@localhost" }
+        - { key: "name", value: "molecule" }
+      changed_when: true
+
+    - name: Stage the seeded compose file  # noqa: command-instead-of-module
+      ansible.builtin.command:
+        cmd: git -C {{ seed_repo_path }} add -A
+      changed_when: true
+
+    - name: Commit the seeded compose file  # noqa: command-instead-of-module
+      ansible.builtin.command:
+        cmd: git -C {{ seed_repo_path }} commit -m seed
+      changed_when: true
+
+    - name: Rename the seed branch to main  # noqa: command-instead-of-module
+      ansible.builtin.command:
+        cmd: git -C {{ seed_repo_path }} branch -M main
+      changed_when: true
+
+    - name: Push the seed commit back to the bare repo  # noqa: command-instead-of-module
+      ansible.builtin.command:
+        cmd: git -C {{ seed_repo_path }} push origin main
+      changed_when: true

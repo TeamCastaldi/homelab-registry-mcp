@@ -1,0 +1,16 @@
+---
+- name: Verify
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Check the deployed container is running
+      ansible.builtin.command:
+        cmd: docker ps --filter name=testservice --format '{{ "{{" }}.Names{{ "}}" }}'
+      register: docker_stack_deploy_ps
+      changed_when: false
+
+    - name: Assert the deployed container appears in `docker ps`
+      ansible.builtin.assert:
+        that:
+          - "'testservice' in docker_stack_deploy_ps.stdout"
+        fail_msg: docker-stack-deploy did not bring up the testservice container
