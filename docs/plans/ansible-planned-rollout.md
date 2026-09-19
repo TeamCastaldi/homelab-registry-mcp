@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | Draft |
+| Status | In review |
 | Date | 2026-09-19 |
 | Companion | [ADR-001](../ARDs/ADR-001-Homelab-Control-Plane.md), [ADR-012](../ARDs/ADR-012-Scope-The-Repo-To-The-MCP-Server.md), ADR-015 (drafted in Phase 3 of this plan) |
 
