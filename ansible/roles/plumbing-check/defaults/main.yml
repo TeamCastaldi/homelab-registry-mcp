@@ -8,5 +8,11 @@
 
 plumbing_check_diagnostic_command: uptime
 plumbing_check_target_file: /tmp/plumbing-check-marker.txt
-plumbing_check_target_file_content: "plumbing-check ran at {{ ansible_date_time.iso8601 | default('unknown time') }}"
+# Deliberately static, not timestamped: a Molecule scenario's default
+# test_sequence converges twice and asserts the second run reports zero
+# changes (idempotence) -- a live timestamp here would fail that by design
+# on every run, since the file's content would legitimately differ each
+# time. Override this per-call if you want a freshness marker instead and
+# don't need idempotence for that run.
+plumbing_check_target_file_content: "plumbing-check verified this node's plumbing works"
 plumbing_check_service_name: ~

@@ -39,7 +39,7 @@ than failing.
 |---|---|---|
 | `plumbing_check_diagnostic_command` | `uptime` | Command run by the diagnostic step |
 | `plumbing_check_target_file` | `/tmp/plumbing-check-marker.txt` | Where the marker file is written |
-| `plumbing_check_target_file_content` | a timestamped string | Marker file content |
+| `plumbing_check_target_file_content` | a static string | Marker file content — deliberately not timestamped, so a Molecule idempotence check (converge twice, expect zero changes on the second run) passes by default |
 | `plumbing_check_service_name` | unset | Name of a systemd service to report the status of; the report step is skipped entirely if unset |
 
 ## Example
