@@ -119,9 +119,14 @@ ansible-playbook ansible/playbooks/verify-plumbing.yml --syntax-check
 **Verification**:
 
 ```bash
-uv run molecule test -s default --role-name-check 1 -- ansible/roles/plumbing-check
-uv run molecule test -s default --role-name-check 1 -- ansible/roles/docker-stack-deploy
+(cd ansible/roles/plumbing-check && ANSIBLE_ROLES_PATH=$(pwd)/../../../ansible/roles uv run --project ../../.. molecule test)
+(cd ansible/roles/docker-stack-deploy && ANSIBLE_ROLES_PATH=$(pwd)/../../../ansible/roles uv run --project ../../.. molecule test)
 ```
+
+Corrected from the original draft's `molecule test -- <role-path>`, which is not
+valid Molecule CLI syntax — `molecule test` has no positional role-path
+argument; it discovers `molecule/<scenario>/molecule.yml` relative to the
+current directory, so the scenario's own role directory must be the CWD.
 
 ## Phase 6: Wire the new checks into CI
 
