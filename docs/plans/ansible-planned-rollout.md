@@ -154,7 +154,7 @@ before trusting the converge/verify logic, not just the config and syntax.
 **Tasks**:
 - [x] Add a `--check --diff` verification step to CI for the plumbing-check and docker-stack-deploy roles
 - [x] Add Molecule test execution to CI for both roles
-- [ ] Confirm `.ansible-lint`'s existing `role-name` skip still covers the new role without further changes
+- [x] Confirm `.ansible-lint`'s existing `role-name` skip still covers the new role without further changes
 
 **Verification**:
 
