@@ -37,3 +37,16 @@
     content: "{{ plumbing_check_target_file_content }}\n"
     mode: "0644"
     backup: true
+
+- name: Gather service facts (read-only — never starts, stops, or restarts anything)
+  ansible.builtin.service_facts:
+  when: plumbing_check_service_name is not none
+
+- name: Report status of the configured service
+  ansible.builtin.debug:
+    msg: >-
+      {{ plumbing_check_service_name }} is
+      {{ ansible_facts.services[plumbing_check_service_name].state
+         if plumbing_check_service_name in ansible_facts.services
+         else 'not found' }}
+  when: plumbing_check_service_name is not none
