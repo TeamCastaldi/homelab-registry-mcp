@@ -94,7 +94,7 @@ Call `ansible-inventory-sync-node` against a registered test node, solve the ret
 - [x] Add a `command`/`shell` diagnostic task (`uptime`) to the plumbing-check role
 - [x] Add a `copy`/`template` file-delivery task with `backup: true` to the plumbing-check role
 - [x] Add a `service` status-check task to the plumbing-check role, read-only — never restart or stop
-- [ ] Add `ansible/playbooks/verify-plumbing.yml` wrapping the plumbing-check role
+- [x] Add `ansible/playbooks/verify-plumbing.yml` wrapping the plumbing-check role
 
 **Verification**:
 
