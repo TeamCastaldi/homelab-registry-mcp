@@ -1,6 +1,7 @@
 """MCP tool registration."""
 
 from registry_mcp.tools.adoption import register_adoption_tools
+from registry_mcp.tools.ansible_inventory import register_ansible_inventory_tools
 from registry_mcp.tools.discovery import register_discovery_tools
 from registry_mcp.tools.events import register_event_tools
 from registry_mcp.tools.hardware import register_hardware_tools
@@ -11,6 +12,7 @@ from registry_mcp.tools.secrets import register_secrets_tools
 
 __all__ = [
     "register_adoption_tools",
+    "register_ansible_inventory_tools",
     "register_discovery_tools",
     "register_event_tools",
     "register_hardware_tools",

@@ -24,6 +24,7 @@ from registry_mcp.integrations.authentik import register_authentik_tools
 from registry_mcp.integrations.dockhand import register_dockhand_tools
 from registry_mcp.integrations.docs import register_docs_tools
 from registry_mcp.integrations.traefik import register_traefik_tools
+from registry_mcp.inventory import InventoryGateStore
 from registry_mcp.logging import configure_logging, get_logger, install_tool_call_logging
 from registry_mcp.normalization import NormalizationEngine, NormalizationGenerator, schedule_seconds
 from registry_mcp.proposal import AdoptionGenerator, PatchGenerator, ProposalEngine, ProposalStore
@@ -32,6 +33,7 @@ from registry_mcp.providers.notification import build_notification_provider
 from registry_mcp.registry import RegistryStore
 from registry_mcp.tools import (
     register_adoption_tools,
+    register_ansible_inventory_tools,
     register_discovery_tools,
     register_event_tools,
     register_hardware_tools,
@@ -109,6 +111,8 @@ def build_server(settings: Settings | None = None) -> FastMCP:
     adoption_store.purge_expired()
     deletion_gate = DeletionGateStore(store.engine)
     deletion_gate.purge_expired()
+    inventory_gate = InventoryGateStore(store.engine)
+    inventory_gate.purge_expired()
     adoption_generator = AdoptionGenerator(
         reasoner, threshold=settings.proposal_confidence_threshold
     )
@@ -151,6 +155,9 @@ def build_server(settings: Settings | None = None) -> FastMCP:
     register_linking_tools(mcp, store, settings, hardware_store=hardware_store)
     register_hardware_tools(
         mcp, store, hardware_store, settings, deletion_gate, read_only=read_only
+    )
+    register_ansible_inventory_tools(
+        mcp, hardware_store, inventory_gate, settings, read_only=read_only
     )
     register_proposal_tools(
         mcp,
