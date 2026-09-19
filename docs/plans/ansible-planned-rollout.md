@@ -64,8 +64,8 @@ Hand `SOP-004` to the operator and run its steps against control-plane and heimd
 - [x] Add `ANSIBLE_INVENTORY_PATH` setting for the inventory-sync tool's write target
 - [x] Add `PendingInventoryWrite` model and `InventoryGateStore` math-confirm gate for inventory writes
 - [x] Add an inventory YAML writer that upserts one host entry without disturbing the rest of the file
-- [ ] Add `ansible-inventory-sync-node` and `ansible-inventory-sync-node-confirm` MCP tools
-- [ ] Register the new inventory tools in `server.py`
+- [x] Add `ansible-inventory-sync-node` and `ansible-inventory-sync-node-confirm` MCP tools
+- [x] Register the new inventory tools in `server.py`
 - [x] Add unit tests for the inventory writer and the math-confirm gate
 
 **Verification**:
