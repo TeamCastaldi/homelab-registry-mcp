@@ -128,6 +128,21 @@ valid Molecule CLI syntax — `molecule test` has no positional role-path
 argument; it discovers `molecule/<scenario>/molecule.yml` relative to the
 current directory, so the scenario's own role directory must be the CWD.
 
+**Note on what was actually verified**: `molecule` alone (`ansible-core` +
+`molecule` + `molecule-plugins[docker]`) is not sufficient — the docker
+driver's own destroy/create playbooks use `community.docker.docker_container`,
+which plain `ansible-core` does not bundle. Adding the full `ansible` PyPI
+package as a dev dependency fixed this (bundles `community.docker` and
+`ansible.posix` without touching Ansible Galaxy), confirmed without disturbing
+the project's pinned `ansible-core>=2.21.1`. With that fix, `uv run molecule
+test` for both roles progresses cleanly through dependency → cleanup → destroy
+→ **syntax: Executed: Successful** → create, failing only at the container
+image pull — which this sandbox's network blocks (Docker Hub returns
+`Forbidden`), not a defect in the scenario or dependency wiring. The
+create → converge → verify → destroy cycle itself could not be exercised
+end-to-end in this session; run it for real (CI or a networked dev machine)
+before trusting the converge/verify logic, not just the config and syntax.
+
 ## Phase 6: Wire the new checks into CI
 
 **Goal**: Make the idempotency check and Molecule coverage from Phases 4-5 run automatically, without changing the existing lint ruleset.
