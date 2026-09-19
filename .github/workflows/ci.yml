@@ -102,8 +102,12 @@ jobs:
             --check --diff
 
   molecule:
-    name: Molecule (docker driver)
+    name: Molecule (${{ matrix.role }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        role: [plumbing-check, docker-stack-deploy]
 
     steps:
       - uses: actions/checkout@v7
@@ -119,14 +123,8 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
-      - name: Molecule test — plumbing-check
-        working-directory: ansible/roles/plumbing-check
-        env:
-          ANSIBLE_ROLES_PATH: ${{ github.workspace }}/ansible/roles
-        run: uv run --project ${{ github.workspace }} molecule test
-
-      - name: Molecule test — docker-stack-deploy
-        working-directory: ansible/roles/docker-stack-deploy
+      - name: Molecule test
+        working-directory: ansible/roles/${{ matrix.role }}
         env:
           ANSIBLE_ROLES_PATH: ${{ github.workspace }}/ansible/roles
         run: uv run --project ${{ github.workspace }} molecule test
