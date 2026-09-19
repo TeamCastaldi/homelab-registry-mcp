@@ -152,7 +152,7 @@ before trusting the converge/verify logic, not just the config and syntax.
 - Q12 answer: "Keep the existing config as-is" (`.ansible-lint`'s single `role-name` skip).
 
 **Tasks**:
-- [ ] Add a `--check --diff` verification step to CI for the plumbing-check and docker-stack-deploy roles
+- [x] Add a `--check --diff` verification step to CI for the plumbing-check and docker-stack-deploy roles
 - [ ] Add Molecule test execution to CI for both roles
 - [ ] Confirm `.ansible-lint`'s existing `role-name` skip still covers the new role without further changes
 
