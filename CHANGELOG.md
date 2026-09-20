@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.1](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.4.0...v1.4.1) (2026-09-20)
+
+
+### Documentation
+
+* **env:** add missing ANSIBLE_INVENTORY_PATH settings to .env.example ([9bb3984](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/9bb3984802215b21a2a1fd96cf9739fcc05d4960))
+
 ## [1.4.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.3.1...v1.4.0) (2026-09-20)
 
 
