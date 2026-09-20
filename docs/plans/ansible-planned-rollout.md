@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | In review |
+| Status | Complete |
 | Date | 2026-09-19 |
 | Companion | [ADR-001](../ARDs/ADR-001-Homelab-Control-Plane.md), [ADR-012](../ARDs/ADR-012-Scope-The-Repo-To-The-MCP-Server.md), ADR-015 (drafted in Phase 3 of this plan) |
 
@@ -168,6 +168,41 @@ CI is green on this branch, including the new `--check --diff` and Molecule step
 | 2 | Should the inventory-sync tool support ini-format inventories, or stay YAML-only? | Open — YAML-only for this rollout |
 | 3 | Should `hardware-discover-now`'s fact scope grow to include installed package versions or live container inventory? | Open — deferred, noted in Phase 1's docstring update for a future phase |
 | 4 | What is the `SSH_KEY_PATH` rotation procedure? | Open — separate concern, not designed in this plan |
+
+## Postscript: release-please missed this merge
+
+PR #124 merged into `main` via a regular merge commit (GitHub's default
+"Create a merge commit" strategy), whose own commit message —
+`Merge pull request #124 from TeamCastaldi/claude/ansible-planned-rollout-p43s9s`
+— is not Conventional-Commit-formatted. `release-please`'s commit scan walks
+`main`'s first-parent history, so from its point of view this merge was the
+only new item since `v1.3.1`; it tried to parse that one commit's message,
+failed, and treated the entire PR as zero releasable commits — despite the
+multiple `feat:`/`fix:` commits landed inside it (the inventory-sync tool,
+the plumbing-check role, Molecule coverage). No release PR was opened, no
+tag was cut, and consequently no new container image was published to
+`ghcr.io`.
+
+This is not specific to this PR: any PR merged here via a plain merge commit
+is invisible to `release-please` the same way, since that non-conventional
+commit message is first-parent history's only entry for the whole PR —
+first-parent traversal never descends into a merge's other parent, so none
+of the individual commits nested inside it get scanned either.
+`release-please` cannot retroactively re-derive that content once it's
+buried behind such a merge commit.
+
+This commit forces the release `release-please` should have proposed, using
+its own documented `Release-As:` trailer, which sets an exact next version
+regardless of what commit-scanning finds. It carries a real content change
+(this section, plus the Status update above) rather than an empty commit,
+and lands via an explicit squash or rebase merge to keep this message intact
+on `main`'s first-parent history.
+
+**Recommended follow-up, not made by this commit**: disable "Create a merge
+commit" as an allowed merge strategy for this repository (Settings → General
+→ Pull Requests), leaving Squash and/or Rebase merge enabled — both put each
+PR's commit message(s) into `main`'s first-parent history directly, which is
+what `release-please` actually needs.
 
 ## Execution discipline
 
