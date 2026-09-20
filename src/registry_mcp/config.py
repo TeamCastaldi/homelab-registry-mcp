@@ -169,6 +169,26 @@ class Settings(BaseSettings):
     secrets_key_path: str | None = Field(default=None)
     secrets_git_crypt_key: str | None = Field(default=None)
 
+    # Read-only Infisical integration (ADR-016) — off by default. Reads
+    # which secret keys exist at a project/environment/path; never a
+    # value, independent of infisical_allow_write below.
+    # infisical_client_id/infisical_client_secret authenticate *to*
+    # Infisical (Universal Auth) -- that credential cannot itself be
+    # sourced from Infisical without being circular, so how it's delivered
+    # into this process is a deployment concern, not something this
+    # Settings field encodes.
+    infisical_enabled: bool = Field(default=False)
+    infisical_base_url: str | None = Field(default=None)
+    infisical_client_id: str | None = Field(default=None)
+    infisical_client_secret: str | None = Field(default=None)
+    infisical_project_id: str | None = Field(default=None)
+    infisical_environment: str | None = Field(default=None)
+    infisical_secret_path: str = Field(default="/")
+    # Reserved for a future write phase (ADR-016 Open item 4) -- read
+    # nowhere in this codebase yet. Exists now only as the visible seam a
+    # later phase would flip, matching adoption_enabled/dspy_enabled's shape.
+    infisical_allow_write: bool = Field(default=False)
+
     # Startup health checks (Phase 2) — control-plane provisioning prerequisites
     # for the GitOps/Ansible write path. Absolute paths only: pydantic-settings
     # reads these as literal strings, so `~`/`$HOME` are not expanded.
