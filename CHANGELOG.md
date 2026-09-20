@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.5.0...v1.6.0) (2026-09-20)
+
+
+### Features
+
+* **infisical:** add opt-in whole-project recursive scan (ADR-017) ([b39bc3e](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/b39bc3e9aae0ed31a7675a53a0ecaf4da67cb6b9))
+* **infisical:** add opt-in whole-project recursive scan (ADR-017) ([93f8d26](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/93f8d2610334eecda6d850b2480f59419a287730))
+
 ## [1.5.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.4.4...v1.5.0) (2026-09-20)
 
 
