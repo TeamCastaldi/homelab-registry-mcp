@@ -123,7 +123,7 @@ class HardwareStore:
         self,
         *,
         hostname: str,
-        ansible_host: str,
+        ansible_host: str | None,
         ansible_groups: list[str] | None,
         fields: dict[str, Any],
         actor: str = "ansible",
@@ -134,11 +134,14 @@ class HardwareStore:
         `last_seen_at`) are written — curated fields (`display_name`, `role`,
         `tags`, `notes`, `location`, ...) set via `hardware-add-node`/
         `hardware-update-node` are never touched, mirroring the Service
-        curated-field convention (`registry/reconcile.py`). `ansible_groups`
-        is `None` when the caller has no group membership to report (the
-        ad-hoc `ansible ... -m setup` pass doesn't expose it) — that leaves
-        an existing node's groups untouched rather than clobbering them with
-        an empty list on every pass; a new node still gets `[]`."""
+        curated-field convention (`registry/reconcile.py`). `ansible_host`
+        and `ansible_groups` are both `None` when the caller has nothing
+        better to report than what's already stored (the ad-hoc
+        `ansible ... -m setup` pass exposes neither a real connection
+        address nor inventory group membership) — that leaves an existing
+        node's value untouched (via `update_node`'s None-skips-field
+        behavior) rather than clobbering it every pass; a new node gets
+        `None`/`[]` respectively."""
         now = _utcnow()
         discovered = {k: v for k, v in fields.items() if k in DISCOVERY_FIELDS}
         existing = self.get_node(hostname)
