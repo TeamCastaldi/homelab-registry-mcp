@@ -23,6 +23,7 @@ from registry_mcp.health import check_health
 from registry_mcp.integrations.authentik import register_authentik_tools
 from registry_mcp.integrations.dockhand import register_dockhand_tools
 from registry_mcp.integrations.docs import register_docs_tools
+from registry_mcp.integrations.infisical import register_infisical_tools
 from registry_mcp.integrations.traefik import register_traefik_tools
 from registry_mcp.inventory import InventoryGateStore
 from registry_mcp.logging import configure_logging, get_logger, install_tool_call_logging
@@ -150,6 +151,7 @@ def build_server(settings: Settings | None = None) -> FastMCP:
     register_traefik_tools(mcp, settings)
     register_authentik_tools(mcp, settings, reasoner=reasoner)
     register_dockhand_tools(mcp, settings)
+    register_infisical_tools(mcp, settings, build_notification_provider(settings))
     register_docs_tools(mcp, settings)
     register_discovery_tools(mcp, engine)
     register_linking_tools(mcp, store, settings, hardware_store=hardware_store)

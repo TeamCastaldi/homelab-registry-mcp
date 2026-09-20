@@ -50,14 +50,19 @@ this project.
 **Read-only, by design and by construction, not just by convention:**
 
 - The client requests `viewSecretValue=false` on every secrets call, so no
-  secret value is fetched in the first place. (This needs empirical
-  verification against the live instance during implementation — see Open
-  items; this rollout has already found Infisical's real behavior diverging
-  from its docs twice, on `workspaceSlug` and on what an empty result looks
-  like.)
+  secret value is fetched in the first place. **Confirmed live** against the
+  operator's self-hosted instance (see Open item 2, now resolved): with
+  `viewSecretValue=false`, each entry in the response carries an explicit
+  `secretValueHidden: true` plus `secretValue: "<hidden-by-infisical>"` — a
+  literal placeholder string, never `null` or an omitted field.
 - The MCP tool surface never returns a secret's value under any
-  circumstance — only its key name and a `has_value: bool` computed
-  server-side, never the literal value, exposed to the tool's caller.
+  circumstance — only its key name, exposed to the tool's caller. A
+  `has_value: bool` (whether the real value is non-empty) was considered but
+  is **not** deliverable: Infisical's placeholder is uniform across every
+  key regardless of whether the underlying value is empty or not, so there
+  is no signal available here to distinguish "masked" from "genuinely
+  empty" without fetching the real value — which this client will never do.
+  Key existence is the only thing reported.
 - `INFISICAL_ALLOW_WRITE` (bool, default `false`) is reserved for a future
   phase and does nothing yet in this ADR's scope — it exists now only as the
   visible seam a later phase would flip, matching `ADOPTION_ENABLED`'s and
@@ -65,8 +70,16 @@ this project.
 
 **Defensive value-leak gate**, independent of and not reliant on
 `viewSecretValue` working as documented: every secrets response is inspected
-for a non-empty `secretValue` field regardless of what was requested. If one
-is ever present:
+for confirmation the value was actually masked, trusting neither field
+alone — `secretValueHidden` must be exactly `True` *and* `secretValue` must
+be one of the known-safe placeholders (the confirmed-live
+`"<hidden-by-infisical>"`, plus the more conservative `None`/`""` a future
+version might use instead). Either signal failing that check — an
+unrecognized placeholder string despite `secretValueHidden: true`, or a
+`secretValueHidden: false` despite a masked-looking value — is treated as a
+leak, so a future Infisical version changing its exact placeholder text
+fails closed rather than silently being accepted as new-but-fine. If a leak
+is detected:
 
 - The tool call **fails closed** — it returns an error to the caller, never
   the leaked value and never a partial or "sanitized" version of the
@@ -79,12 +92,13 @@ is ever present:
   key be **rotated in Infisical immediately** — this is treated as a live
   credential-compromise signal, not a someday cleanup item.
 
-**Tool surface (first cut):** one read-only tool, tentatively
-`infisical_status` (exact name/shape open — see Open items), taking no
-required arguments and returning, for the configured project/environment/
-secret path, each key's name and whether it currently has a non-empty
-value. No tool exists to fetch or display any individual secret's actual
-content, in either direction.
+**Tool surface:** one read-only tool, `infisical_status`, taking no required
+arguments and returning, for the configured project/environment/secret
+path, the list of key names present (`{"keys": [...]}`). On a leak-gate
+trip, a disabled/unconfigured integration, or an upstream error, it returns
+`{"error": "..."}` instead — never a partial key list mixed with an error.
+No tool exists to fetch or display any individual secret's actual content,
+in either direction.
 
 **New settings** (`config.py`), all optional and inert unless set:
 `INFISICAL_ENABLED`, `INFISICAL_BASE_URL`, `INFISICAL_CLIENT_ID`,
@@ -141,8 +155,8 @@ Open items.
 | # | Question | Status |
 |---|---|---|
 | 1 | How does `INFISICAL_CLIENT_ID`/`INFISICAL_CLIENT_SECRET` reach registry-mcp's own running environment without looping through Infisical itself — the chicken-and-egg problem SOP-005 deliberately left unresolved? | Open |
-| 2 | Does this instance's `/api/v3/secrets/raw` actually honor `viewSecretValue=false` as documented, or does it need the same kind of empirical workaround `secretPath` and the API version needed? | Open — verify during implementation |
-| 3 | Exact tool name and response shape (`infisical_status` vs. something else) | Open — placeholder pending implementation |
+| 2 | Does this instance's `/api/v3/secrets/raw` actually honor `viewSecretValue=false` as documented, or does it need the same kind of empirical workaround `secretPath` and the API version needed? | **Resolved** — confirmed live: yes, via an explicit `secretValueHidden: true` plus a literal `"<hidden-by-infisical>"` placeholder (never `null`/omitted). The client's value-leak gate checks both signals together, not either alone |
+| 3 | Exact tool name and response shape (`infisical_status` vs. something else) | **Resolved** — `infisical_status`, returning `{"keys": [...]}` or `{"error": "..."}` (see Decision, Tool surface) |
 | 4 | Should a future write phase let registry-mcp create/update secrets in Infisical directly, or should that stay a human/Dockhand-only action permanently? | Open — no plan to build this yet |
 
 ## References

@@ -66,7 +66,8 @@ src/registry_mcp/
 ├── integrations/
 │   ├── traefik/           # httpx client + 7 MCP tools + resource + prompt
 │   ├── authentik/         # httpx client + 10 MCP tools + resource + prompt
-│   └── dockhand/          # httpx client + 7 MCP tools + resource + prompt (ADR-013, read-only)
+│   ├── dockhand/          # httpx client + 7 MCP tools + resource + prompt (ADR-013, read-only)
+│   └── infisical/         # Universal Auth httpx client + 1 MCP tool (ADR-016, read-only, off by default)
 ├── tools/
 │   ├── registry.py        # CRUD: add/get/list/update/delete (math-gated, see deletion/) service
 │   ├── events.py          # query change + discovery logs
@@ -281,6 +282,41 @@ ADR-004's unimplemented polling source.
   Dockhand retry a condition that never resolves. Malformed payloads get 422, bad
   content-type/body 400, failed auth 403, oversized body 413, internal fault a structured 500.
 
+**Read-only Infisical integration (ADR-016, `integrations/infisical/`):** the operator's
+live secrets (delivered to containers by Dockhand's own Infisical integration at deploy
+time, entirely outside this server) live in a self-hosted Infisical instance this server
+had no visibility into — a real gap found by hand mid-rollout (a required env var missing
+from Infisical, and most of Infisical's secrets never wired into `compose.yaml`'s
+`environment:` block, both invisible without eyeballing a dashboard). `infisical_status`
+closes that gap without ever exposing a value. Off by default (`INFISICAL_ENABLED=false`).
+- **Universal Auth, not a static Bearer token** — the one genuinely new client shape in
+  `integrations/`: `INFISICAL_CLIENT_ID`/`INFISICAL_CLIENT_SECRET` are exchanged for a
+  short-lived access token (`POST /api/v1/auth/universal-auth/login`) that
+  `InfisicalClient` caches and refreshes on expiry, rather than a single static token
+  attached to every request like Traefik/Authentik/Dockhand.
+- **Never returns a value, under any circumstance.** Every read requests
+  `viewSecretValue=false`; confirmed live against the operator's self-hosted instance, a
+  masked entry comes back with `secretValueHidden: true` and a literal
+  `secretValue: "<hidden-by-infisical>"` placeholder (never `null`/omitted). The tool
+  reports key names only — a `has_value` signal was considered but isn't deliverable,
+  since the placeholder is uniform regardless of whether the real value is empty.
+- **Defensive value-leak gate, trusting neither signal alone:** `secretValueHidden` must be
+  exactly `True` *and* `secretValue` must be one of the known-safe placeholders
+  (`_MASKED_VALUE_PLACEHOLDERS` in `client.py`) before a key is reported — an unrecognized
+  placeholder despite `secretValueHidden: true`, or vice versa, both trip the gate. On a
+  trip, `InfisicalSecretValueLeakedError` (carrying only the key name, never the value)
+  fails the tool call closed, logs `infisical_secret_value_leaked` with the key name only,
+  and sends an urgent `NotificationProvider` alert recommending that key be rotated in
+  Infisical immediately — this is a live credential-compromise signal, not a cleanup item.
+- `INFISICAL_PROJECT_ID`/`INFISICAL_ENVIRONMENT`/`INFISICAL_SECRET_PATH` point at one
+  project/environment/folder; the operator's real project is a shared "Homelab" project
+  with this service's secrets under the `/homelab-registry-mcp` folder, not a project of
+  its own — see `docs/SOPs/SOP-005-Connect-Infisical-Machine-Identity.md`.
+- `INFISICAL_ALLOW_WRITE` is reserved for a future write phase and does nothing yet.
+- Credential delivery (`INFISICAL_CLIENT_ID`/`INFISICAL_CLIENT_SECRET` reaching this
+  process without looping through Infisical itself) is a deliberately open,
+  deployment-specific problem — see ADR-016's Open items.
+
 **A source only runs when its upstream env var is set** (e.g., no Traefik discovery if `TRAEFIK_API_URL` is unset).
 
 ## Environment Variables
@@ -342,6 +378,13 @@ ADR-004's unimplemented polling source.
 | `SECRETS_REPO_PATH` | unset | Absolute path to the cloned private homelab repo on this node. `pydantic-settings` reads `.env` as literal strings — `$HOME`/`~` are not expanded, so use a concrete absolute path (e.g. `/opt/homelab` on the Pi, `/Users/you/homelab` on macOS) |
 | `SECRETS_KEY_PATH` | unset | Absolute path to the exported git-crypt key file (priority over env var); same no-expansion caveat as `SECRETS_REPO_PATH` |
 | `SECRETS_GIT_CRYPT_KEY` | unset | Base64-encoded git-crypt key bytes (fallback when no key file) |
+| `INFISICAL_ENABLED` | `false` | Enables the read-only `infisical_status` MCP tool (ADR-016) |
+| `INFISICAL_BASE_URL` | unset | e.g. `https://infisical.example.com` (self-hosted) |
+| `INFISICAL_CLIENT_ID` / `INFISICAL_CLIENT_SECRET` | unset | Universal Auth Machine Identity credential (see `docs/SOPs/SOP-005-Connect-Infisical-Machine-Identity.md`); how this reaches the running process is a deployment concern — it can't be sourced from Infisical itself without being circular |
+| `INFISICAL_PROJECT_ID` | unset | Project ID (not slug), from Infisical's Project Settings page |
+| `INFISICAL_ENVIRONMENT` | unset | e.g. `prod` |
+| `INFISICAL_SECRET_PATH` | `/` | Folder within the project holding this service's secrets — often not the project root |
+| `INFISICAL_ALLOW_WRITE` | `false` | Reserved for a future write phase; read nowhere in the codebase yet |
 | `ANSIBLE_CFG_PATH` | unset | Absolute path to `ansible.cfg` on this node; one of three startup health checks (Phase 2) — missing it starts the server in read-only mode |
 | `SSH_KEY_PATH` | unset | Absolute path to the control-plane SSH key; same startup health check as `ANSIBLE_CFG_PATH`, same no-expansion caveat |
 | `ANSIBLE_INVENTORY_PATH` | unset | Absolute path to the YAML inventory file `ansible-inventory-sync-node` writes a single host entry into (ADR-015); not inferred from `ansible.cfg`'s `inventory =` setting |
@@ -472,6 +515,17 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
 
 ## Current Status
 
+- **ADR-016 accepted and implemented — read-only Infisical integration**:
+  `integrations/infisical/` (`InfisicalClient` — Universal Auth login/token caching +
+  `list_secret_keys()`, plus the `infisical_status` MCP tool). Off by default
+  (`INFISICAL_ENABLED=false`). Never returns a secret value under any circumstance;
+  confirmed live that `viewSecretValue=false` masks via `secretValueHidden: true` +
+  a literal `"<hidden-by-infisical>"` placeholder, and the client's defensive
+  value-leak gate checks both signals together before trusting either. See
+  `docs/SOPs/SOP-005-Connect-Infisical-Machine-Identity.md` for setup. Open items:
+  credential-delivery mechanism (`INFISICAL_CLIENT_ID`/`_SECRET` reaching this
+  process without looping through Infisical itself) and a future write phase — see
+  ADR-016.
 - **ADR-013 accepted — Dockhand read-only integration added**: `integrations/dockhand/`
   (7 `dockhand_*` tools, a `dockhand://stacks/{stack_id}` resource, a `diagnose_stack`
   prompt) and `discovery/dockhand.py` (`DockhandDiscoverySource`, new `SourceType.dockhand`)
