@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.4](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.4.3...v1.4.4) (2026-09-20)
+
+
+### Documentation
+
+* **adr:** add ADR-016 for a read-only Infisical integration ([ff536d3](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/ff536d3e2209f8b0d219eda805920c8c951b6e22))
+* **adr:** add ADR-016 for a read-only Infisical integration ([7e15259](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/7e15259472754b0a6e1ccc44c8e864a84e186594))
+
 ## [1.4.3](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.4.2...v1.4.3) (2026-09-20)
 
 
