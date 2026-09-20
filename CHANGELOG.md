@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.2](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.4.1...v1.4.2) (2026-09-20)
+
+
+### Bug Fixes
+
+* **hardware:** stop discover_now from clobbering ansible_host ([df1f419](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/df1f419d725a513c6076a4ee7d216313649a8249))
+* **hardware:** stop discover_now from clobbering ansible_host ([756bd21](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/756bd21cf4189eddf1b17e962c203c5d371d9432))
+
 ## [1.4.1](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.4.0...v1.4.1) (2026-09-20)
 
 
