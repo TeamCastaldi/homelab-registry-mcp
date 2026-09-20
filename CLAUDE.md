@@ -312,6 +312,23 @@ closes that gap without ever exposing a value. Off by default (`INFISICAL_ENABLE
   project/environment/folder; the operator's real project is a shared "Homelab" project
   with this service's secrets under the `/homelab-registry-mcp` folder, not a project of
   its own — see `docs/SOPs/SOP-005-Connect-Infisical-Machine-Identity.md`.
+- **Whole-project visibility (ADR-017), opt-in via `INFISICAL_RECURSIVE_SCAN`:** off by
+  default, single-folder behavior above is unchanged. When `true`, `client.list_secret_tree()`
+  walks the folder tree rooted at `INFISICAL_SECRET_PATH` (set it to `/` for the whole
+  project) via `GET /api/v1/folders`, reusing `list_secret_keys()` (and its value-leak gate,
+  unchanged) per folder, rather than depending on `/api/v3/secrets/raw`'s documented but
+  **unverified-on-this-instance** `recursive=true` flag — this rollout has already found this
+  self-hosted instance's behavior diverging from Infisical's docs twice (`workspaceSlug`, the
+  masking shape above), so the folder-walk leans on a long-stable endpoint instead. The tool
+  then returns `secrets_by_path` (keys grouped by folder) instead of `keys`.
+  `InfisicalSecretValueLeakedError` now carries an optional `path` alongside `key`, since the
+  same key name can exist in more than one service's folder. A folder the Machine Identity
+  can't read is skipped and reported under `inaccessible_paths`, not treated as a leak or a
+  hard failure. `INFISICAL_MAX_FOLDERS` (default 50) bounds one sweep's size. This is a real
+  scope expansion, not just a config toggle — once enabled, the tool can tell an AI
+  conversation which *other* services have secrets configured and by what key names, not just
+  this server's own; requires the Machine Identity's Infisical permissions to actually cover
+  those folders, which is an Infisical-side change this code can't grant. See ADR-017.
 - `INFISICAL_ALLOW_WRITE` is reserved for a future write phase and does nothing yet.
 - Credential delivery (`INFISICAL_CLIENT_ID`/`INFISICAL_CLIENT_SECRET` reaching this
   process without looping through Infisical itself) is a deliberately open,
@@ -383,7 +400,9 @@ closes that gap without ever exposing a value. Off by default (`INFISICAL_ENABLE
 | `INFISICAL_CLIENT_ID` / `INFISICAL_CLIENT_SECRET` | unset | Universal Auth Machine Identity credential (see `docs/SOPs/SOP-005-Connect-Infisical-Machine-Identity.md`); how this reaches the running process is a deployment concern — it can't be sourced from Infisical itself without being circular |
 | `INFISICAL_PROJECT_ID` | unset | Project ID (not slug), from Infisical's Project Settings page |
 | `INFISICAL_ENVIRONMENT` | unset | e.g. `prod` |
-| `INFISICAL_SECRET_PATH` | `/` | Folder within the project holding this service's secrets — often not the project root |
+| `INFISICAL_SECRET_PATH` | `/` | Folder within the project holding this service's secrets — often not the project root; also the walk's starting point when `INFISICAL_RECURSIVE_SCAN=true` |
+| `INFISICAL_RECURSIVE_SCAN` | `false` | ADR-017: walk every subfolder under `INFISICAL_SECRET_PATH` instead of just that one, grouping keys by folder — still never a value. Widens what the tool can see across services; requires the Machine Identity's Infisical permissions to cover those folders |
+| `INFISICAL_MAX_FOLDERS` | `50` | Caps how many folders one recursive sweep visits |
 | `INFISICAL_ALLOW_WRITE` | `false` | Reserved for a future write phase; read nowhere in the codebase yet |
 | `ANSIBLE_CFG_PATH` | unset | Absolute path to `ansible.cfg` on this node; one of three startup health checks (Phase 2) — missing it starts the server in read-only mode |
 | `SSH_KEY_PATH` | unset | Absolute path to the control-plane SSH key; same startup health check as `ANSIBLE_CFG_PATH`, same no-expansion caveat |
@@ -515,6 +534,18 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
 
 ## Current Status
 
+- **ADR-017 accepted and implemented — Infisical whole-project visibility**:
+  `InfisicalClient.list_secret_tree()` walks the folder tree under `INFISICAL_SECRET_PATH`
+  via `GET /api/v1/folders`, opt-in via `INFISICAL_RECURSIVE_SCAN` (default `false`,
+  single-folder ADR-016 behavior unchanged). `infisical_status` returns `secrets_by_path`
+  (keys grouped by folder) plus `inaccessible_paths` for folders the Machine Identity
+  can't read, instead of failing the whole call. The value-leak gate is unchanged in
+  logic, applied per folder; `InfisicalSecretValueLeakedError` now carries the folder
+  `path` alongside the key since the same key name can exist in multiple services'
+  folders. **Unverified against the live instance**: whether `/api/v1/folders` actually
+  returns the assumed `{"folders": [{"name": ...}]}` shape, and whether the Machine
+  Identity's current Infisical permissions extend beyond `/homelab-registry-mcp` — both
+  are ADR-017 Open items to confirm on next deploy.
 - **ADR-016 accepted and implemented — read-only Infisical integration**:
   `integrations/infisical/` (`InfisicalClient` — Universal Auth login/token caching +
   `list_secret_keys()`, plus the `infisical_status` MCP tool). Off by default

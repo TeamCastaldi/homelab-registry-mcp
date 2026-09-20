@@ -184,6 +184,14 @@ class Settings(BaseSettings):
     infisical_project_id: str | None = Field(default=None)
     infisical_environment: str | None = Field(default=None)
     infisical_secret_path: str = Field(default="/")
+    # Whole-project visibility (ADR-017) -- off by default. When true,
+    # infisical_status walks the folder tree rooted at infisical_secret_path
+    # instead of reading just that one folder, grouping keys by the exact
+    # folder each lives in. A folder the Machine Identity can't read is
+    # skipped and reported, not treated as a failure; infisical_max_folders
+    # bounds how many folders a single sweep visits.
+    infisical_recursive_scan: bool = Field(default=False)
+    infisical_max_folders: int = Field(default=50, gt=0)
     # Reserved for a future write phase (ADR-016 Open item 4) -- read
     # nowhere in this codebase yet. Exists now only as the visible seam a
     # later phase would flip, matching adoption_enabled/dspy_enabled's shape.
