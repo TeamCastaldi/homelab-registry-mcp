@@ -3,8 +3,9 @@
 **Owner:** the maintainer
 **Frequency:** Once (initial setup), then again after any Client Secret rotation
 **Last Updated:** 2026
-**Status:** Draft — prep work for a planned read-only Infisical integration; no
-ADR exists yet and no registry-mcp code depends on this today
+**Status:** Verified against the live instance (Steps 1–5 run end to end,
+2026-09-20) — prep work for a planned read-only Infisical integration; no ADR
+exists yet and no registry-mcp code depends on this today
 
 ---
 
@@ -39,9 +40,13 @@ for the pending ADR, not something this SOP resolves. Stop at Step 6.
 ### Prerequisites
 
 - [ ] Admin access to `https://infisical.castaldifamily.com`
-- [ ] The `homelab-registry-mcp` project already exists in Infisical with its
-      secrets populated (confirmed — it currently holds ~74 keys mirroring
-      `CLAUDE.md`'s environment variable table)
+- [ ] The `Homelab` project (slug `homelab-yo-qb`) already exists in
+      Infisical, with a `homelab-registry-mcp` secrets **folder** inside it
+      already populated (confirmed — it currently holds 75 keys mirroring
+      `CLAUDE.md`'s environment variable table). This is one shared project
+      organized by per-service folders, not a project named
+      `homelab-registry-mcp` — don't assume otherwise from the dashboard
+      breadcrumb alone (see Step 4)
 - [ ] A place to record the Client ID/Secret once generated (a password
       manager — e.g. Vaultwarden, matching how `SECRETS_KEY_PATH`'s exported
       key file is handled per `CLAUDE.md`) — Infisical shows the Client
@@ -80,7 +85,7 @@ retrieved again — delete it and generate a new one.
 
 #### Step 3: Grant least-privilege, read-only access
 
-Open the `homelab-registry-mcp` **project → Access Control → Identities →
+Open the `Homelab` **project → Access Control → Identities →
 Add Identity**, and add `registry-mcp`.
 
 Assign the **narrowest role Infisical's UI offers that only grants Secrets:
@@ -103,7 +108,7 @@ application-level gate cosmetic.
 
 ---
 
-#### Step 4: Find the Project ID and environment slug
+#### Step 4: Find the Project ID, environment slug, and secret path
 
 **Project Settings** (gear icon, top of the project) shows a copyable
 **Project ID** (a UUID) — this is what the API calls in Step 5 need as
@@ -115,8 +120,19 @@ reliably resolve on some versions, so prefer the ID.
 secrets you saw in the dashboard (likely `Production`, commonly slugged
 `prod`, but don't assume — read it off this screen).
 
-**Expected result:** You have a Project ID (UUID) and an environment slug,
-both copied somewhere you'll reuse in Step 5.
+**Also note the secret path** the 75 keys actually live under. If this
+project holds secrets for more than one service (organized as folders rather
+than one project each), the keys will not be at the root path (`/`) — the
+breadcrumb shown when you first browse to them in the dashboard (e.g.
+`🗂 / homelab-registry-mcp`) is a **folder path within the project**, not the
+project's own name. Confirmed live: this instance's `Homelab` project holds a
+`homelab-registry-mcp` folder, and a root-path query (`secretPath` omitted,
+defaulting to `/`) returns a valid but empty `{"secrets": [], "imports": []}`
+— not an error — because nothing lives at the root itself.
+
+**Expected result:** You have a Project ID (UUID), an environment slug, and a
+secret path (e.g. `/homelab-registry-mcp`), all copied somewhere you'll reuse
+in Step 5.
 
 ---
 
@@ -124,8 +140,9 @@ both copied somewhere you'll reuse in Step 5.
 
 This also settles a real open question: Infisical's secrets-read endpoint has
 moved between `/api/v3/secrets/raw` and `/api/v4/secrets` across versions (a
-still-open upstream CLI bug conflates the two), so confirm which one your
-self-hosted instance actually serves rather than assuming.
+still-open upstream CLI bug conflates the two). **Confirmed against this
+instance: `/api/v3/secrets/raw` is correct** — don't spend time on v4 unless
+v3 starts erroring after an upgrade.
 
 ```bash
 # 1. Exchange Client ID/Secret for a short-lived access token
@@ -136,23 +153,30 @@ TOKEN=$(curl -sS -X POST https://infisical.castaldifamily.com/api/v1/auth/univer
 
 echo "$TOKEN"   # sanity check: should be a long JWT-looking string, not empty/null
 
-# 2. Try the v3 path first
+# 2. Read the secrets folder -- secretPath matters, see Step 4
 curl -sS "https://infisical.castaldifamily.com/api/v3/secrets/raw" \
   -H "Authorization: Bearer $TOKEN" \
   --data-urlencode "workspaceId=<project id from Step 4>" \
   --data-urlencode "environment=<environment slug from Step 4>" \
+  --data-urlencode "secretPath=<secret path from Step 4>" \
   -G | jq '.secrets | length'
 ```
 
-**Expected result:** Step 1 prints a real token. Step 2 prints a number
-matching (or close to) the ~74 secrets visible in the dashboard.
-**If Step 2 returns 404 or an empty/error body:** retry against
-`/api/v4/secrets` with the same query parameters and compare — whichever one
-returns the real count is what a future client should target.
+**Expected result:** Step 1 prints a real token. Step 2 prints `75`, matching
+the count visible in the dashboard.
 **If Step 1 returns 401:** Client ID/Secret mismatch, or Step 2's identity
-setup didn't complete — redo Step 2.
+setup didn't complete — redo Step 2. Double-check you copied the Client ID
+from the *same* identity you generated the Client Secret for, not a
+different one.
+**If Step 2 returns a valid `{"secrets": [], "imports": []}` (empty, not an
+error):** this is not a wrong-API-version symptom — it means `secretPath` is
+missing or wrong. Re-check Step 4; the root path (`/`) is genuinely empty
+when secrets live in a named folder.
 **If Step 2 returns 403:** the role from Step 3 doesn't actually grant
-Secrets:Read on this project/environment — recheck the role assignment.
+Secrets:Read on this project/environment/path — recheck the role assignment.
+**If Step 2 returns 404 on `/api/v3/secrets/raw` itself:** try `/api/v4/secrets`
+with the same query parameters — your instance's version may differ from the
+one this SOP was verified against.
 
 ---
 
@@ -170,11 +194,10 @@ manager until that's settled.
 ### Verification
 
 - [ ] The `registry-mcp` Machine Identity exists with Universal Auth configured
-- [ ] It holds a read-only role on the `homelab-registry-mcp` project (not
-      Admin/Member)
+- [ ] It holds a read-only role on the `Homelab` project (not Admin/Member)
 - [ ] Step 5's login call returns a real access token
-- [ ] Step 5's secrets call returns a count matching the dashboard, confirming
-      both the correct API path (v3 vs v4) and the correct Project ID/environment slug
+- [ ] Step 5's secrets call returns `75`, confirming the correct API path
+      (`/api/v3/secrets/raw`), Project ID, environment slug, and secret path
 - [ ] The Client ID/Secret are recorded in a password manager, not left only
       in shell history
 
@@ -184,10 +207,11 @@ manager until that's settled.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Login call returns `401` | Wrong Client ID/Secret, or pasted with trailing whitespace | Regenerate the Client Secret (Step 2) and re-copy carefully |
+| Login call returns `401` | Wrong Client ID/Secret (e.g. Client ID copied from a different identity than the Client Secret), or pasted with trailing whitespace | Regenerate the Client Secret (Step 2) and re-copy both values from the same identity |
 | Login call returns a token, but the secrets call 403s | The identity's project role doesn't grant `Secrets: Read` | Recheck Step 3's role assignment; a Custom Role may be needed |
-| Secrets call 404s on both `/api/v3/secrets/raw` and `/api/v4/secrets` | Wrong Project ID, or `workspaceId` param name doesn't match this server version | Re-confirm the Project ID from Step 4; check this Infisical version's own API reference if both paths fail |
-| Secrets call succeeds but returns 0 or far fewer than expected | Wrong environment slug (e.g. `production` vs `prod`) | Re-read the exact slug from Project Settings → Environments, don't guess |
+| Secrets call returns valid JSON (`{"secrets": [], "imports": []}`) but 0 results | Missing or wrong `secretPath` — secrets live in a named folder, not the project root | Re-check Step 4; a root-path query is genuinely empty when secrets are foldered |
+| Secrets call succeeds but returns fewer results than expected (nonzero, still wrong) | Wrong environment slug (e.g. `production` vs `prod`) | Re-read the exact slug from Project Settings → Environments, don't guess |
+| Secrets call 404s on `/api/v3/secrets/raw` | Wrong Project ID, or this instance's version serves `/api/v4/secrets` instead | Re-confirm the Project ID from Step 4; try `/api/v4/secrets` with the same params |
 | `curl` TLS errors against `infisical.castaldifamily.com` | Self-hosted instance's cert chain isn't trusted from wherever you're running `curl` | Confirm you're running this from a host that already trusts the instance's cert (e.g. the control-plane node), not an unrelated machine |
 
 ---
@@ -209,4 +233,8 @@ configuration, no git-crypt state, no running container.
 - Least-privilege matters more here than for the other integrations
   (Traefik/Authentik/Dockhand) this project already has read-only clients
   for: those read infrastructure state, this identity would read the literal
-  plaintext value of every secret the `homelab-registry-mcp` project holds.
+  plaintext value of every secret in the `Homelab` project's
+  `homelab-registry-mcp` folder.
+- This SOP's Step 5 has been run end to end against the real instance: login
+  succeeded, the root-path empty-result gotcha was hit and diagnosed live,
+  and the corrected query (with `secretPath`) returned all 75 secrets.
