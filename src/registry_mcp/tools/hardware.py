@@ -92,7 +92,16 @@ async def discover_now(
         was_new = hardware_store.get_node(hostname) is None
         node = hardware_store.upsert_from_discovery(
             hostname=hostname,
-            ansible_host=inventory_host,
+            # `inventory_host` is just the inventory alias this pass used to
+            # reach the node (e.g. "heimdall") -- not a connection address,
+            # and frequently identical to `hostname` itself. Passing it
+            # through as `ansible_host` used to silently clobber a real,
+            # already-configured value (an IP or a different DNS name) with
+            # that redundant alias on every pass. None leaves an existing
+            # node's ansible_host untouched (see HardwareStore.upsert_from_discovery)
+            # so ansible-inventory-sync-node's `ansible_host or ip_address`
+            # fallback can actually reach the genuinely-discovered IP.
+            ansible_host=None,
             # The ad-hoc `ansible -m setup` pass doesn't expose inventory
             # group membership, so leave an existing node's groups alone
             # (see HardwareStore.upsert_from_discovery) instead of clobbering

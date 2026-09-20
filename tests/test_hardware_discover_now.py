@@ -110,3 +110,42 @@ async def test_discover_now_preserves_existing_ansible_groups(hardware_store, se
         await discover_now(hardware_store, settings, host=None)
 
     assert hardware_store.get_node("existing").ansible_groups == ["nas_hosts"]
+
+
+async def test_discover_now_preserves_existing_ansible_host(hardware_store, settings):
+    """Regression test: discover_now() used to pass the inventory alias
+    (e.g. "heimdall", the loop key from facts_by_host) through as
+    ansible_host, clobbering a real, already-configured connection address
+    (an IP or a different DNS name) on every pass. It must leave an
+    existing ansible_host untouched, the same way it already preserves
+    ansible_groups."""
+    settings.ansible_cfg_path = "/opt/homelab/ansible.cfg"
+    settings.ssh_key_path = "/opt/homelab/.ssh/id_ed25519"
+
+    hardware_store.upsert_from_discovery(
+        hostname="heimdall", ansible_host="10.0.0.151", ansible_groups=[], fields={}
+    )
+    facts_by_host = {"heimdall": {"ansible_hostname": "heimdall"}}
+    with patch.object(
+        ansible_facts, "gather_facts", new=AsyncMock(return_value=(facts_by_host, {}))
+    ):
+        await discover_now(hardware_store, settings, host=None)
+
+    assert hardware_store.get_node("heimdall").ansible_host == "10.0.0.151"
+
+
+async def test_discover_now_leaves_ansible_host_unset_for_new_node(hardware_store, settings):
+    """A brand-new node has no better connection address than the
+    discovered ip_address, so ansible_host stays None rather than being
+    set to the inventory alias -- ansible-inventory-sync-node's
+    `ansible_host or ip_address` fallback depends on this."""
+    settings.ansible_cfg_path = "/opt/homelab/ansible.cfg"
+    settings.ssh_key_path = "/opt/homelab/.ssh/id_ed25519"
+
+    facts_by_host = {"waldorf": {"ansible_hostname": "waldorf"}}
+    with patch.object(
+        ansible_facts, "gather_facts", new=AsyncMock(return_value=(facts_by_host, {}))
+    ):
+        await discover_now(hardware_store, settings, host=None)
+
+    assert hardware_store.get_node("waldorf").ansible_host is None
