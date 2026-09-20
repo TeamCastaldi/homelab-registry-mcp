@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.3.1...v1.4.0) (2026-09-20)
+
+
+### Documentation
+
+* **plans:** mark ansible rollout complete, force the missed release ([238a981](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/238a981dfe623f8cd4868e3be99626e19920094e))
+
 ## [1.3.1](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.3.0...v1.3.1) (2026-09-19)
 
 
