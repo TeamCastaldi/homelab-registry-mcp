@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.4.3](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.4.2...v1.4.3) (2026-09-20)
+
+
+### Bug Fixes
+
+* **ansible:** add repo-root ansible.cfg so role resolution works by default ([0e819f6](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/0e819f6c2ea77717bb07d5d53d75c011170e0d10))
+* **ansible:** add repo-root ansible.cfg so role resolution works by default ([74937b0](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/74937b0c384303153cadf410e97ec318a0f99c79))
+
+
+### Documentation
+
+* **sops:** add SOP for creating a registry-mcp Machine Identity in Infisical ([fdee522](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/fdee522659404cf3d4b37bdef2913434a1c2f583))
+* **sops:** add SOP for creating a registry-mcp Machine Identity in Infisical ([eed67e1](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/eed67e1b34a086ec33b9aa06254679342d788bfd))
+
 ## [1.4.2](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.4.1...v1.4.2) (2026-09-20)
 
 
