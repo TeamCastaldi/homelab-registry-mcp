@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.4.4...v1.5.0) (2026-09-20)
+
+
+### Features
+
+* **infisical:** add read-only Infisical status tool (ADR-016) ([12d2dda](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/12d2dda086f400a5fc82b9b81941c8e75c2ed795))
+* **infisical:** add read-only Infisical status tool (ADR-016) ([2de6251](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/2de625192d9c4d265e673e860576be63db2f8607))
+
 ## [1.4.4](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.4.3...v1.4.4) (2026-09-20)
 
 
