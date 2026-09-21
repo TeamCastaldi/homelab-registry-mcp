@@ -30,6 +30,10 @@ query and act on.
 - Hardware node inventory: register physical and virtual nodes with role, IP,
   CPU/RAM/storage specs, and storage-pool capacity; link services to nodes;
   query aggregate capacity across the lab.
+- Optional, read-only visibility into a self-hosted Infisical instance: which
+  secret keys exist for this service — or, in whole-project mode, every
+  service sharing the same Infisical project — never a value, and a defensive
+  gate that fails closed if Infisical ever returns one anyway.
 - Optional LLM reasoning (off by default) for fuzzy cross-source matching,
   metadata enrichment, and access-audit summaries.
 
@@ -139,8 +143,15 @@ In Claude Desktop, add an MCP server with the same URL under Settings.
 - [docs/ARDs/ADR-011-Remove-Komodo-Integration-And-Chat-Interface.md](docs/ARDs/ADR-011-Remove-Komodo-Integration-And-Chat-Interface.md) — withdraws the Komodo integration and the `/chat` interface from the server's supported surface
 - [docs/ARDs/ADR-012-Scope-The-Repo-To-The-MCP-Server.md](docs/ARDs/ADR-012-Scope-The-Repo-To-The-MCP-Server.md) — removes the provisioning scripts; this repo ships the MCP server and the deploy action, not a node installer
 - [docs/ARDs/ADR-013-Dockhand-Read-Only-API-Integration.md](docs/ARDs/ADR-013-Dockhand-Read-Only-API-Integration.md) — read-only Dockhand query tools and discovery source; the outbound-query complement to ADR-010's inbound webhook
+- [docs/ARDs/ADR-014-Service-State-Reset-Action-Tool.md](docs/ARDs/ADR-014-Service-State-Reset-Action-Tool.md) — draft: a location-agnostic, math-confirmed service state-reset action for an iOS Shortcut; not yet implemented
+- [docs/ARDs/ADR-015-Ansible-Inventory-Sync-Tool.md](docs/ARDs/ADR-015-Ansible-Inventory-Sync-Tool.md) — amends ADR-012 to permit a narrow, math-gated `ansible-inventory-sync-node` tool scoped to already-registered hardware nodes
+- [docs/ARDs/ADR-016-Read-Only-Infisical-Integration.md](docs/ARDs/ADR-016-Read-Only-Infisical-Integration.md) — read-only `infisical_status` tool: reports which secret keys exist for this service in Infisical, never a value, with a defensive leak gate
+- [docs/ARDs/ADR-017-Infisical-Whole-Project-Visibility.md](docs/ARDs/ADR-017-Infisical-Whole-Project-Visibility.md) — extends ADR-016 to an opt-in whole-project recursive scan across every service's Infisical folder, still never a value
 - [docs/SOPs/SOP-001-Deploy-New-Service.md](docs/SOPs/SOP-001-Deploy-New-Service.md) — runbook for deploying a new service to an onboarded node
 - [docs/SOPs/SOP-002-Connect-Dockhand-Webhook.md](docs/SOPs/SOP-002-Connect-Dockhand-Webhook.md) — runbook for pointing Dockhand at the update webhook
+- [docs/SOPs/SOP-003-Enable-Service-Reset-Action.md](docs/SOPs/SOP-003-Enable-Service-Reset-Action.md) — draft: runbook for standing up the not-yet-implemented service reset action (companion to ADR-014)
+- [docs/SOPs/SOP-004-Verify-Ansible-Control-Plane-Plumbing.md](docs/SOPs/SOP-004-Verify-Ansible-Control-Plane-Plumbing.md) — runbook for verifying `ANSIBLE_CFG_PATH`/`SSH_KEY_PATH`-driven Ansible execution actually works end-to-end
+- [docs/SOPs/SOP-005-Connect-Infisical-Machine-Identity.md](docs/SOPs/SOP-005-Connect-Infisical-Machine-Identity.md) — runbook for creating the Infisical Machine Identity `infisical_status` authenticates with
 - [docs/plans/phase-d.md](docs/plans/phase-d.md) — historical: migration from workload node to a dedicated control-plane node. The migration itself is complete; its Traefik static-backend routing model is superseded by ADR-006/ADR-007, which co-locate Traefik on the same node behind standard Docker labels
 - [CONTRIBUTING.md](CONTRIBUTING.md) — branch naming, commit format, and the local checks to run before a PR
 - [SECURITY.md](SECURITY.md) — security posture, supported versions, and how to report a vulnerability
