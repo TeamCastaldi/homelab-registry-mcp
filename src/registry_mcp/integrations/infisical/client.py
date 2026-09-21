@@ -34,13 +34,15 @@ has twice found this self-hosted instance's real behavior diverging from
 Infisical's documented API (the `workspaceSlug` parameter, and the exact
 `viewSecretValue=false` masking shape above), so a widely-supported,
 long-stable endpoint (folder listing) is preferred over an unverified flag
-on a newer one. This is UNVERIFIED against the operator's live instance as
-of this writing -- see ADR-017's Open items. If `/api/v1/folders`' response
-shape turns out to differ from what's assumed here, the walk degrades to
-seeing only the root path's own secrets (the already-proven single-path
-code path) rather than crashing, but that failure mode is silent: it looks
-identical to "this project genuinely has no subfolders." Confirm live that
-multiple folders are actually returned before trusting an empty result.
+on a newer one. **Confirmed live**: `/api/v1/folders` returns exactly the
+assumed `{"folders": [{"name": ...}]}` shape, and the walk correctly
+recurses at least two levels deep. If a future Infisical version's
+response shape ever diverges from what's assumed here, the walk degrades
+to seeing only the root path's own secrets (the already-proven single-path
+code path) rather than crashing -- but that failure mode is silent: it
+looks identical to "this project genuinely has no subfolders." Re-confirm
+live that multiple folders are actually returned after any Infisical
+version upgrade, rather than trusting an empty result at face value.
 """
 
 from __future__ import annotations

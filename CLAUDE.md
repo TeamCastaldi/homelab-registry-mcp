@@ -534,7 +534,7 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
 
 ## Current Status
 
-- **ADR-017 accepted and implemented — Infisical whole-project visibility**:
+- **ADR-017 accepted, implemented, and confirmed live — Infisical whole-project visibility**:
   `InfisicalClient.list_secret_tree()` walks the folder tree under `INFISICAL_SECRET_PATH`
   via `GET /api/v1/folders`, opt-in via `INFISICAL_RECURSIVE_SCAN` (default `false`,
   single-folder ADR-016 behavior unchanged). `infisical_status` returns `secrets_by_path`
@@ -542,10 +542,16 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
   can't read, instead of failing the whole call. The value-leak gate is unchanged in
   logic, applied per folder; `InfisicalSecretValueLeakedError` now carries the folder
   `path` alongside the key since the same key name can exist in multiple services'
-  folders. **Unverified against the live instance**: whether `/api/v1/folders` actually
-  returns the assumed `{"folders": [{"name": ...}]}` shape, and whether the Machine
-  Identity's current Infisical permissions extend beyond `/homelab-registry-mcp` — both
-  are ADR-017 Open items to confirm on next deploy.
+  folders. **Confirmed live**: `/api/v1/folders` returns exactly the assumed
+  `{"folders": [{"name": ...}]}` shape and the walk correctly recurses at least two
+  levels deep (`/heimdall/<service>`, `/ollama/<service>` subfolders); the Machine
+  Identity's permissions were widened to project-wide read, returning all 24 folders
+  with zero `inaccessible_paths` and zero leaked values across hundreds of keys.
+  **Deployment note**: this operator's container is deployed via Dockhand, which
+  injects secret values from Infisical directly at deploy time rather than reading a
+  `.env` file — a new setting only reaches the container once it exists as a key in
+  Infisical itself, and redeploys for this stack must go through Dockhand, not a raw
+  `docker compose up -d` (which falls back to a placeholder `.env`, not real secrets).
 - **ADR-016 accepted and implemented — read-only Infisical integration**:
   `integrations/infisical/` (`InfisicalClient` — Universal Auth login/token caching +
   `list_secret_keys()`, plus the `infisical_status` MCP tool). Off by default
