@@ -39,8 +39,11 @@ ADR-016 had to correct after live verification. Rather than build around an
 unverified flag on a newer endpoint, `InfisicalClient.list_secret_tree()` calls
 `GET /api/v1/folders` (a long-stable, widely-used part of Infisical's API) to
 enumerate each folder's immediate children, and reuses the already-proven
-`list_secret_keys()` per folder. This is **still unverified against the operator's
-live instance as of this writing** — see Open items.
+`list_secret_keys()` per folder. **Confirmed live** against the operator's
+self-hosted instance (see Open items, now resolved): `GET /api/v1/folders` returns
+exactly the assumed `{"folders": [{"name": ...}, ...]}` shape, and the walk
+correctly recurses to at least two levels deep (`/heimdall/<service>`,
+`/ollama/<service>`, `/waldorf/<service>` subfolders under top-level node folders).
 
 **Same read-only, never-a-value guarantee, generalized:**
 - The defensive value-leak gate is unchanged in logic and still applies per secret,
@@ -86,13 +89,13 @@ own Identity/Permissions UI, not something this ADR or its code can do.
   zero values exposed anywhere, same gate as ADR-016, but the blast radius of "what
   can this tool tell an LLM" grows by one dimension. The operator explicitly asked
   for this after seeing the single-folder version work.
-- **The folder-listing endpoint's exact shape is unverified** (see Open items). The
-  code is written to fail toward the already-proven single-path behavior if
-  `/api/v1/folders`'s response doesn't match what's assumed (a `folders: [{name:
-  ...}]` array) — but that failure mode is silent: an empty child list looks
-  identical to "this folder genuinely has no subfolders." A live test showing
-  multiple folders' keys actually returned is required before trusting an empty
-  `secrets_by_path` as ground truth.
+- **The folder-listing endpoint's exact shape was unverified at merge time** (see
+  Open items, now resolved by a live test). The code was written to fail toward the
+  already-proven single-path behavior if `/api/v1/folders`'s response didn't match
+  what's assumed — that failure mode would have been silent (an empty child list
+  looks identical to "this folder genuinely has no subfolders"), so the live test
+  confirming multiple folders' keys actually returned, including nested subfolders,
+  mattered before trusting an empty `secrets_by_path` as ground truth in the future.
 - N+1 API calls (one per folder visited, plus one folder-listing call per non-leaf
   folder) instead of Infisical's hypothetical single `recursive=true` call — traded
   deliberately for not depending on a flag this rollout has no live confirmation of,
@@ -111,9 +114,11 @@ own Identity/Permissions UI, not something this ADR or its code can do.
 
 | # | Question | Status |
 |---|---|---|
-| 1 | Does `GET /api/v1/folders` on this self-hosted instance actually accept `workspaceId`/`environment`/`path` and return `{"folders": [{"name": ...}, ...]}` as assumed? | Open — needs live verification once `INFISICAL_RECURSIVE_SCAN=true` is tested against the real instance |
-| 2 | Does the current Machine Identity's Universal Auth policy grant read access beyond `/homelab-registry-mcp`? | Open — operator action in Infisical's Identity/Permissions UI, independent of this code |
-| 3 | Should a v2 revisit `recursive=true` on `/api/v3/secrets/raw` as a faster path, now that the folder-walk gives a working (if slower) baseline to compare against? | Deferred — no need identified yet |
+| 1 | Does `GET /api/v1/folders` on this self-hosted instance actually accept `workspaceId`/`environment`/`path` and return `{"folders": [{"name": ...}, ...]}` as assumed? | **Resolved** — confirmed live: yes, exactly as assumed, and the walk correctly recurses at least two levels deep |
+| 2 | Does the current Machine Identity's Universal Auth policy grant read access beyond `/homelab-registry-mcp`? | **Resolved** — the operator widened it to project-wide read; a live scan returned all 24 folders with zero `inaccessible_paths` |
+| 3 | Should a v2 revisit `recursive=true` on `/api/v3/secrets/raw` as a faster path, now that the folder-walk gives a working (if slower) baseline to compare against? | Deferred — no need identified yet; the current folder-walk works and needs no further verification |
+
+**Deployment note discovered during rollout**: this operator's registry-mcp container is deployed via Dockhand, which injects secret values into the container directly from Infisical at deploy time — it does not read a `.env` file for these values. A new setting like `INFISICAL_RECURSIVE_SCAN` only reaches the running container once it exists as a key in Infisical's `/homelab-registry-mcp` folder itself; adding it only to `compose.yaml`'s `environment:` block is not sufficient on this deployment path. A raw `docker compose up -d` bypasses Dockhand's injection entirely and falls back to whatever plain `.env` sits next to the compose file (a placeholder, not real secrets) — redeploys for this stack should go through Dockhand, not the CLI.
 
 ## References
 
