@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.2](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.6.1...v1.6.2) (2026-09-21)
+
+
+### Documentation
+
+* **readme:** add Infisical feature and fill in missing ADR/SOP links ([b811484](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/b811484fc40c3c523f358001db106633b8103cba))
+* **readme:** add Infisical feature and fill in missing ADR/SOP links ([8a8bae7](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/8a8bae72e71d80a0ffd41cd99af0e5b23778fe81))
+
 ## [1.6.1](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.6.0...v1.6.1) (2026-09-21)
 
 
