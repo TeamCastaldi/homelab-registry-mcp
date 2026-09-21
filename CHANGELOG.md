@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.1](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.6.0...v1.6.1) (2026-09-21)
+
+
+### Documentation
+
+* **adr:** mark ADR-017 open items resolved after live verification ([5aaa066](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/5aaa066ae74c08d33868cf4e94f6fd17645b3b5a))
+* **adr:** mark ADR-017 open items resolved after live verification ([e941c3f](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/e941c3feda4cbfe1a5ea870d7aa3f70ef2e13727))
+
 ## [1.6.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.5.0...v1.6.0) (2026-09-20)
 
 
