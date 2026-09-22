@@ -115,6 +115,70 @@ class InferServiceRequirements(dspy.Signature):
     reasoning: str = dspy.OutputField(desc="What in the README supports each inference")
 
 
+class GenerateServiceCompose(dspy.Signature):
+    """Draft a brand-new Docker Compose file for a service this homelab has
+    never run, from facts already extracted from that service's source repo.
+
+    `intake` is ground truth: its ports, env vars, volumes, and dependencies
+    came from the repo's own files (plus any confidence-gated inference
+    already folded in). Do not contradict it, and do not invent services,
+    ports, or variables it does not support.
+
+    Follow `homelab_conventions` for shape and style. Beyond that, every
+    generated file must:
+    - use `service_name` as the main service's key, and set every service's
+      `container_name` equal to its own service key;
+    - use a published image with a pinned version tag for every service —
+      never `:latest`, never a `build:` key. A Dockerfile's FROM line is a
+      build base, not the image to deploy; if no published image for this
+      service can be identified from the intake, say so with a low
+      confidence score rather than inventing an image name;
+    - set a `restart:` policy on every service;
+    - reference every secret or operator-supplied environment value as a
+      `${VAR_NAME}` interpolation, never a literal — the operator supplies
+      those values later, outside your context;
+    - include each backing service the intake requires (a database, a cache)
+      as its own service in the same file, under the same rules;
+    - prefer reaching a web-facing service through the external reverse-proxy
+      network `${PROXY_NETWORK:-proxy-net}` over publishing a host port; any
+      host port mapping that is genuinely needed carries a `# temporary`
+      comment.
+
+    Output the COMPLETE file, never a fragment. If you are not confident the
+    file is correct and runnable, say so with a low confidence score rather
+    than guessing — a rejected draft costs a follow-up question, while a
+    confidently wrong one reaches a pull request.
+
+    IMPORTANT: Never include real credentials, tokens, or secrets."""
+
+    intake: dict = dspy.InputField(
+        desc=(
+            "Requirements from repo intake: detected facts (base_image/ports/env_vars/"
+            "volumes/depends_on/service_names) plus any accepted inference "
+            "(summary/required_dependencies/operator_supplied_env_vars)"
+        )
+    )
+    homelab_conventions: str = dspy.InputField(
+        desc="This homelab's compose conventions: canonical shape rules, plus the "
+        "homelab repo's own compose spec when available"
+    )
+    service_name: str = dspy.InputField(desc="Main service key, e.g. 'paperless-ngx'")
+    target_node: str = dspy.InputField(
+        desc="Node this stack will deploy to; empty string if not yet chosen", default=""
+    )
+
+    compose_yaml: str = dspy.OutputField(
+        desc=(
+            "Complete compose.yaml content. CRITICAL: every secret or operator-supplied "
+            "value is a ${VAR_NAME} interpolation, never a literal credential."
+        )
+    )
+    confidence: float = dspy.OutputField(desc="0.0 to 1.0")
+    reasoning: str = dspy.OutputField(
+        desc="Which intake facts drove each choice, and anything left unresolved"
+    )
+
+
 class GenerateRemediationPatch(dspy.Signature):
     """Given a service record, its finding details, and the current file
     content, generate the minimal correct change to resolve the finding.
