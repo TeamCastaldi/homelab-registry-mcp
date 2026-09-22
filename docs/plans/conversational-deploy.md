@@ -1,6 +1,9 @@
 # Conversational Service Deployment — Build Plan
 
-**Status:** Proposed — not started.
+**Status:** Proposed — not started. Phase 0 recon run 2026-09-22 against the live
+`homelab-registry-mcp` server; partially resolved — see findings inline below.
+Two items still block Phase 3/7 and need Nathan directly or a session scoped to
+`ncastaldi/homelab` (see "Phase 0 recon findings").
 **Written:** 2026-09-21.
 **Origin:** Grew out of evaluating whether artifacts in the separate `ncastaldi/ansible`
 repo could feed `homelab-registry-mcp`; that evaluation surfaced open questions
@@ -80,6 +83,23 @@ Phase 7 can be designed:
   though the API has one." Not a default to build toward; a decision to make
   consciously when this phase is reached.
 
+  **Still unresolved as of the 2026-09-22 recon.** Live `dockhand_list_stacks`
+  and `dockhand_list_containers` (via this server's own read-only Dockhand token)
+  both returned zero items across all four registered Dockhand environments
+  (Control Plane, Heimdall, Media, Ollama) — nothing is currently tracked as a
+  Dockhand "stack." Three of the four environments (Heimdall/Media/Ollama) connect
+  through a `hawser-standard` agent whose `hawserLastSeen` is `null`, i.e. this
+  API has never seen that agent check in. That's *consistent* with Path A (Dockhand
+  really is just habit-clicking, nothing real is stack-managed there) but it directly
+  conflicts with this repo's own Current Status note that `homelab-registry-mcp`'s
+  own container "is deployed via Dockhand" — so it may equally be a token-scope or
+  agent-connectivity artifact rather than proof Dockhand is unused. Cannot
+  distinguish the two from this server's API alone; the reusable `deploy.yml`
+  workflow's actual run history lives in `ncastaldi/homelab`'s Actions tab, which
+  this GitHub-scoped session (locked to the `TeamCastaldi` org after first
+  attaching `TeamCastaldi/homelab-registry-mcp`) cannot reach. **Ask Nathan
+  directly, or re-run this check from a session started against `ncastaldi/homelab`.**
+
 **Hardware/node identity drift**, surfaced while evaluating the `ncastaldi/ansible` repo,
 unresolved as of this writing:
 
@@ -89,21 +109,76 @@ unresolved as of this writing:
   "Hands-off... Not Ansible-onboarded") — a direct contradiction, not yet resolved.
   Whether this is the same box renamed/repurposed or a stale abandoned experiment is
   unknown from the repos alone.
+
+  **Partially de-risked by the 2026-09-22 recon, still open.** Live
+  `hardware-list-nodes` (all statuses — confirmed/unconfirmed/stale all checked)
+  returns exactly four `HardwareNode` rows: `homelab-control-plane` (10.0.0.200),
+  `waldorf` (10.0.0.251), `heimdall` (10.0.0.151), `p1ollama` (10.0.0.203). Neither
+  `p410`, `panoptichron`, nor 10.0.0.201 appears at all — not confirmed, not
+  unconfirmed, not stale. That means the "worse" risk this section originally
+  called out (placement proposing the hands-off `panoptichron` node under a
+  different name) can't currently happen: `hardware-list-nodes` /
+  `hardware-capacity-summary` simply never return it as a candidate. It does
+  *not* answer what `p410`/`panoptichron` actually is or whether it should
+  eventually be onboarded — that answer lives in `ncastaldi/ansible`'s inventory
+  and `references/homelab.md`, neither reachable from this GitHub-scoped session
+  (see the convention-freshness note below). Re-check this once that repo is
+  reachable, in case a future `hardware-discover-now` sweep or manual add
+  changes what the registry returns.
 - `dev5432` (ansible repo, 10.0.0.203) appears to be `p1ollama`/"ollama" in the
   homelab repo — the node `homelab-registry-mcp` itself now runs on — but nothing
   in the ansible repo reflects that role change.
+
+  **Resolved by the 2026-09-22 recon.** Live `hardware-list-nodes` confirms
+  10.0.0.203 is `p1ollama` in the `HardwareStore`, and live
+  `dockhand_list_environments` independently confirms the same IP as Dockhand's
+  "Ollama" environment. Both live sources agree with the homelab-repo side of the
+  contradiction; the `ansible` repo's `dev5432` entry is the stale one. Nothing
+  left to resolve here — the ansible repo's inventory should be updated to match,
+  whenever that repo is next touched.
 
 This matters here because Phase 3 (placement) trusts `hardware-list-nodes` /
 `hardware-capacity-summary` output to pick a deploy target. If the underlying
 `HardwareNode` rows carry stale or contested identity, placement can propose a node
 that's wrong, or — worse — the hands-off `panoptichron` node under a different name.
 Resolve before Phase 3 ships, not necessarily before Phases 1-2 (which don't touch
-node identity).
+node identity). **As of the 2026-09-22 recon, the "worse" scenario is ruled out
+(see above) — Phase 3 can proceed on the current registry contents without risk of
+silently targeting `panoptichron`. The node's true identity/purpose is still worth
+settling for its own sake, just no longer a blocker for Phase 3 specifically.**
 
 **Convention freshness.** `docs/spec/compose.yaml` and `references/homelab.md` (fed
 into Phase 2's generator as ground truth) should be spot-checked as current — the
 troubleshooting reference is explicitly dated ("last confirmed 2026-08-17") and
 self-describes as "a map, not gospel."
+
+**Still unresolved as of the 2026-09-22 recon.** Both files live in `ncastaldi/homelab`,
+not in this repo. This session's GitHub access is scoped per-owner and was first
+attached to `TeamCastaldi/homelab-registry-mcp`; `add_repo` on `ncastaldi/homelab` or
+`ncastaldi/ansible` was rejected ("cross-tier adds are not supported in v1... start a
+new session with the requested repo as the initial source"). Spot-checking currency
+needs either a session started fresh against `ncastaldi/homelab`, or Nathan confirming
+directly.
+
+## Phase 0 recon findings (2026-09-22)
+
+Run live against the production `homelab-registry-mcp` MCP server (`health` reported
+`version: 1.6.2`) from a session scoped to `TeamCastaldi/homelab-registry-mcp` only.
+Summary — two of the three open questions above got real evidence, one couldn't be
+touched at all from this vantage point:
+
+| Question | Outcome |
+|---|---|
+| `dev5432` vs. `p1ollama` | **Resolved.** Both `hardware-list-nodes` and `dockhand_list_environments` independently confirm 10.0.0.203 = `p1ollama`/"Ollama". |
+| `p410`/`panoptichron` placement risk | **De-risked, not resolved.** Not present in `hardware-list-nodes` (checked confirmed + `hardware-list-unconfirmed` + `hardware-list-stale`, all empty for it) — Phase 3 can't accidentally target it. Its actual identity/purpose is still unknown from here. |
+| Deploy-mechanism fork | **Still open, new discrepancy surfaced.** `dockhand_list_stacks`/`dockhand_list_containers` are empty across all 4 Dockhand environments, three of which show a never-checked-in `hawser` agent (`hawserLastSeen: null`) — weak evidence for Path A, but it conflicts with this repo's own Current Status claim that `homelab-registry-mcp` itself deploys via Dockhand, so treat it as inconclusive rather than a resolution. |
+| Convention freshness | **Untouched.** `ncastaldi/homelab` isn't reachable from a session already scoped to the `TeamCastaldi` org; needs a fresh session or Nathan directly. |
+
+Next step for whoever picks this back up: either start a session with
+`ncastaldi/homelab` as the *initial* source (so `add_repo` can reach it) to check
+`references/homelab.md`/`docs/spec/compose.yaml` currency and the real Ansible
+inventory, or get Nathan's direct read on the Dockhand-vs-CD-pipeline question and
+what `p410`/`panoptichron` actually is.
 
 ## Phased plan
 
