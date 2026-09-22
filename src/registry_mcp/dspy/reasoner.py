@@ -91,6 +91,7 @@ class Reasoner:
         self._detect_secrets: Any = None
         self._normalize: Any = None
         self._infer_requirements: Any = None
+        self._generate_compose: Any = None
 
     # -- lazy setup --------------------------------------------------------
     def _ensure(self) -> None:
@@ -102,6 +103,7 @@ class Reasoner:
             ApplyReviewFeedback,
             DetectHardcodedSecrets,
             GenerateRemediationPatch,
+            GenerateServiceCompose,
             InferServiceMetadata,
             InferServiceRequirements,
             NormalizeConfigFile,
@@ -138,6 +140,9 @@ class Reasoner:
         self._normalize.set_lm(self._patch_lm)
         # Emits only short fields, so the default token budget is enough.
         self._infer_requirements = dspy.ChainOfThought(InferServiceRequirements)
+        self._generate_compose = dspy.ChainOfThought(GenerateServiceCompose)
+        # Also emits a whole file; reuse the patch LM's larger token budget.
+        self._generate_compose.set_lm(self._patch_lm)
         self._load_compiled()
         self._configured = True
         _log.info("reasoning_configured", model=self._settings.dspy_model)
@@ -158,6 +163,7 @@ class Reasoner:
             (self._detect_secrets, "detect_hardcoded_secrets.json"),
             (self._normalize, "normalize_config.json"),
             (self._infer_requirements, "infer_service_requirements.json"),
+            (self._generate_compose, "generate_service_compose.json"),
         ):
             full = os.path.join(path, fname)
             if not os.path.exists(full):
@@ -451,6 +457,43 @@ class Reasoner:
             "operator_supplied_env_vars": list(
                 getattr(pred, "operator_supplied_env_vars", []) or []
             ),
+            "confidence": _as_float(getattr(pred, "confidence", 0.0)),
+            "reasoning": getattr(pred, "reasoning", "") or "",
+        }
+
+    def generate_service_compose(
+        self, *, intake: dict, homelab_conventions: str, service_name: str, target_node: str = ""
+    ) -> dict | None:
+        """Draft a brand-new compose file for a service from its repo-intake
+        requirements (conversational deploy Phase 2).
+
+        Returns the raw module outputs (including ``confidence``) so
+        ``service_deploy.ComposeGenerator`` can enforce
+        ``SERVICE_DEPLOY_CONFIDENCE_THRESHOLD`` and record a rejection reason;
+        returns None only when the reasoning layer is disabled or the call
+        errors. Same no-fallback rule as ``generate_remediation_patch``: a
+        None or low-confidence result must be rejected, never hand-written.
+        """
+        if not self.enabled:
+            return None
+        self._ensure()
+        try:
+            pred = self._generate_compose(
+                intake=intake,
+                homelab_conventions=homelab_conventions,
+                service_name=service_name,
+                target_node=target_node,
+            )
+        except Exception as exc:
+            _log.warning(
+                "reasoning_failed",
+                op="generate_service_compose",
+                error=str(exc),
+                partial_response=_last_completion(self._patch_lm),
+            )
+            return None
+        return {
+            "compose_yaml": getattr(pred, "compose_yaml", "") or "",
             "confidence": _as_float(getattr(pred, "confidence", 0.0)),
             "reasoning": getattr(pred, "reasoning", "") or "",
         }
