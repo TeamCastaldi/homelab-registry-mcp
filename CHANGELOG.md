@@ -1,5 +1,43 @@
 # Changelog
 
+## [1.7.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.6.3...v1.7.0) (2026-09-22)
+
+
+### Features
+
+* **config:** add service_deploy settings for conversational deploy ([24cfbb6](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/24cfbb6f3f255519786f734ccd4d5839f60c5a34))
+* **config:** add service_deploy_conventions_path setting ([878611c](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/878611cfeb86019146fd7e7a5594511c162a23c2))
+* conversational deploy Phase 1 — repo intake (ADR-018) ([e671d87](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/e671d87e41aa0482a7613787ffe0e508dc3db7c9))
+* conversational deploy Phase 2 — compose generation (ADR-019) ([713fe84](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/713fe843d8f1fea27951880a0d5474ad7166adff))
+* **dspy:** add GenerateServiceCompose signature ([3522393](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/3522393ddb08af29d18476790622f70316f1e6e3))
+* **dspy:** add InferServiceRequirements for repo intake ([8a9fba3](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/8a9fba3b5a5647c1aa320038e19cd62db48c7ded))
+* **dspy:** wire generate_service_compose into the Reasoner ([5349e6f](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/5349e6f75108098118f30d8a5c403ba3081e8e9e))
+* **intake:** add repo fetch with URL and symlink containment ([d37cf2b](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/d37cf2b8bb3077dfa8afa770cdd9e44e55d4ae90))
+* **intake:** parse runtime requirements from Dockerfile and compose ([c271a05](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/c271a058cac3284f1dd56c3a25695aff2e1a4b65))
+* **service_deploy:** add ComposeGenerator for Phase 2 compose drafts ([dcae483](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/dcae483cfdfaf737b322192978784b0a508a9660))
+* **tools:** add service-deploy-generate-compose MCP tool ([ab80561](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/ab80561658e6ee34e1e1a7be1c71d4fd72bfecf6))
+* **tools:** register service-intake-repo MCP tool ([861a65b](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/861a65ba11082fcec2393f33c66c00c62b112e0b))
+
+
+### Bug Fixes
+
+* **normalization:** name swarm-net as the proxy network default ([44ebed7](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/44ebed793b1daa089fa00bace48faaabf0bef25d))
+* **service_deploy:** default proxy network to swarm-net ([5b392a4](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/5b392a4169156174e3e9275fe379c32f2b7aee1e))
+
+
+### Documentation
+
+* add ADR-018 and document conversational deploy Phase 1 ([7952599](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/79525991863c2276effd7e01885d16e774bba8ec))
+* add ADR-019 and document conversational deploy Phase 2 ([cbf6cde](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/cbf6cde2b3531298278514ea9715d7ca39f6e42f))
+* Phase 0 recon findings from 2026-09-22 live server run ([26bd157](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/26bd15726808a453636efcbeb01ba3369c2fb494))
+* **plans:** record Phase 0 recon session 2 findings ([e57ffa8](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/e57ffa822c257eee7b457fe06b82637f8530b65a))
+* **plans:** resolve conversational-deploy Phase 0 recon findings ([ea662bf](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/ea662bf628a5c40adfacf48ee0d1306eb35694c2))
+* **plans:** resolve Phase 0's conversational-deploy open questions ([4b207da](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/4b207da2112892a227dbab2c0a846ba7777c69dc))
+* **plans:** resolve the deploy-mechanism fork ([035f3ac](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/035f3ac2c801dda962c1f20db5c0613d26172dcf))
+* **readme:** fix broken ADR index links ([0155446](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/0155446a6b4d73d79723f915ce4918f7cfb14ba3))
+* **session:** add 2026-09-22 session snapshot ([ddaf9e4](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/ddaf9e46ce6731fd41a759f9fcfbc3c642023de9))
+* **session:** add 2026-09-22 session snapshot (part 2) ([672d88c](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/672d88ca005dc6ed05605725c9f79b8ab0353241))
+
 ## [1.6.3](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.6.2...v1.6.3) (2026-09-22)
 
 
