@@ -63,6 +63,58 @@ class InferServiceMetadata(dspy.Signature):
     confidence: float = dspy.OutputField(desc="0.0 to 1.0 confidence in the inference")
 
 
+class InferServiceRequirements(dspy.Signature):
+    """Given a foreign repo's README and the facts deterministic parsing
+    already extracted from its Dockerfile/compose file, fill in only what
+    those files did not state outright.
+
+    `detected` is ground truth — it came from the repo's own files. Do not
+    contradict it, restate it, or "correct" it. Your job is the gap: what the
+    prose implies that no instruction declares. Chiefly, which backing
+    services this needs (a database, a cache, a message broker) and which of
+    the detected environment variables an operator must supply a real value
+    for, as opposed to ones that already carry a working default.
+
+    An env var is operator-supplied when it is a credential, an API key, an
+    external endpoint, or anything the README tells a user to set. A var with
+    a sensible default in the Dockerfile usually is not.
+
+    If the README is missing, uninformative, or you are otherwise unsure, say
+    so with a low confidence score and return empty fields rather than
+    guessing — an unfilled field costs a follow-up question, while an invented
+    dependency sends a generated compose file after a service that was never
+    needed."""
+
+    repo_url: str = dspy.InputField(desc="Source repository the files came from")
+    readme: str = dspy.InputField(
+        desc="README content verbatim; empty string when the repo has none", default=""
+    )
+    detected: dict = dspy.InputField(
+        desc=(
+            "Facts already extracted deterministically from the repo's own files: "
+            "base_image/ports/env_vars/volumes/depends_on/service_names"
+        )
+    )
+
+    service_name: str = dspy.OutputField(
+        desc="Short lowercase name for this service, suitable as a directory name "
+        "(e.g. 'paperless-ngx'); empty string if unclear"
+    )
+    summary: str = dspy.OutputField(desc="One-sentence description of what this service does")
+    category: str = dspy.OutputField(desc="one of: infra app media monitoring security other")
+    required_dependencies: list[str] = dspy.OutputField(
+        desc="Backing services this needs that `detected` does not already list "
+        "(e.g. ['postgres', 'redis']); empty list when none or unsure"
+    )
+    operator_supplied_env_vars: list[str] = dspy.OutputField(
+        desc="Names drawn from `detected.env_vars` that an operator must supply a "
+        "real value for; empty list when none or unsure. Never invent a name that "
+        "is not in `detected.env_vars` or named by the README."
+    )
+    confidence: float = dspy.OutputField(desc="0.0 to 1.0")
+    reasoning: str = dspy.OutputField(desc="What in the README supports each inference")
+
+
 class GenerateRemediationPatch(dspy.Signature):
     """Given a service record, its finding details, and the current file
     content, generate the minimal correct change to resolve the finding.

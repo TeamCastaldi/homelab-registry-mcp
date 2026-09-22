@@ -12,7 +12,11 @@ from dspy.utils.dummies import DummyLM
 
 from conftest import IsolatedSettings
 from registry_mcp.dspy import build_reasoner
-from registry_mcp.dspy.signatures import NormalizeConfigFile, ResolveServiceIdentity
+from registry_mcp.dspy.signatures import (
+    InferServiceRequirements,
+    NormalizeConfigFile,
+    ResolveServiceIdentity,
+)
 from registry_mcp.models import AuthMode, Category
 from registry_mcp.server import build_server
 
@@ -34,6 +38,9 @@ def test_disabled_reasoner_short_circuits():
     assert reasoner.infer_metadata(router_rule="", middlewares=[], service_name="x") is None
     summary = reasoner.summarize_access(slug="x", events=[], hours=24)
     assert "error" in summary and "DSPY_ENABLED" in summary["error"]
+    assert (
+        reasoner.infer_service_requirements(repo_url="https://x/y", readme="", detected={}) is None
+    )
 
 
 # --- ResolveServiceIdentity gate ------------------------------------------
@@ -196,3 +203,85 @@ async def test_summarize_events_tool_disabled(tmp_path):
     server = build_server(IsolatedSettings(registry_db_path=str(tmp_path / "r.db")))
     result = (await server.call_tool("authentik_summarize_events", {"slug": "vaultwarden"}))[1]
     assert "error" in result and "DSPY_ENABLED" in result["error"]
+
+
+# --- InferServiceRequirements: raw passthrough, caller owns the gate -------
+
+
+def test_infer_service_requirements_returns_raw_outputs_with_confidence():
+    # Unlike the enrichment modules, this one does not gate internally — the
+    # intake tool applies SERVICE_DEPLOY_CONFIDENCE_THRESHOLD, the same split
+    # the write-path modules use.
+    reasoner = _enabled_reasoner()
+    reasoner._infer_requirements = lambda **kw: SimpleNamespace(
+        service_name="  paperless-ngx  ",
+        summary=" Document management ",
+        category="APP",
+        required_dependencies=["postgres", "redis"],
+        operator_supplied_env_vars=["PAPERLESS_SECRET_KEY"],
+        confidence=0.42,
+        reasoning="README documents a postgres backend",
+    )
+
+    result = reasoner.infer_service_requirements(
+        repo_url="https://github.com/o/p", readme="# Paperless", detected={"env_vars": {}}
+    )
+
+    # A low score is returned, not swallowed: the caller decides.
+    assert result["confidence"] == 0.42
+    assert result["service_name"] == "paperless-ngx"
+    assert result["summary"] == "Document management"
+    assert result["category"] == "app"
+    assert result["required_dependencies"] == ["postgres", "redis"]
+    assert result["operator_supplied_env_vars"] == ["PAPERLESS_SECRET_KEY"]
+
+
+def test_infer_service_requirements_tolerates_missing_fields():
+    reasoner = _enabled_reasoner()
+    reasoner._infer_requirements = lambda **kw: SimpleNamespace(confidence="not-a-number")
+
+    result = reasoner.infer_service_requirements(repo_url="x", readme="", detected={})
+
+    assert result["confidence"] == 0.0
+    assert result["required_dependencies"] == []
+    assert result["service_name"] == ""
+
+
+def test_infer_service_requirements_survives_module_error():
+    reasoner = _enabled_reasoner()
+
+    def _boom(**kw):
+        raise RuntimeError("LM exploded")
+
+    reasoner._infer_requirements = _boom
+    assert reasoner.infer_service_requirements(repo_url="x", readme="", detected={}) is None
+
+
+def test_infer_service_requirements_end_to_end_with_dummy_lm():
+    reasoner = build_reasoner(IsolatedSettings(dspy_enabled=True))
+    lm = DummyLM(
+        [
+            {
+                "reasoning": "README says it needs postgres",
+                "service_name": "paperless-ngx",
+                "summary": "Document management system",
+                "category": "app",
+                "required_dependencies": '["postgres"]',
+                "operator_supplied_env_vars": '["PAPERLESS_SECRET_KEY"]',
+                "confidence": "0.85",
+            }
+        ]
+    )
+    dspy.configure(lm=lm)
+    reasoner._infer_requirements = dspy.ChainOfThought(InferServiceRequirements)
+    reasoner._configured = True
+
+    result = reasoner.infer_service_requirements(
+        repo_url="https://github.com/o/paperless",
+        readme="# Paperless\n\nRequires a PostgreSQL database.",
+        detected={"env_vars": {"PAPERLESS_SECRET_KEY": None}, "ports": ["8000/tcp"]},
+    )
+
+    assert result["confidence"] == 0.85
+    assert result["required_dependencies"] == ["postgres"]
+    assert result["service_name"] == "paperless-ngx"
