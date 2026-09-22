@@ -37,7 +37,7 @@ REQUIRED_RULES_SUMMARY = (
     "every service uses a published image with a pinned version tag (never "
     ":latest, never a build: key), sets a restart: policy, and has a "
     "container_name equal to its service key; an external reverse-proxy "
-    "network uses ${PROXY_NETWORK:-proxy-net} as its key under the top-level "
+    "network uses ${PROXY_NETWORK:-swarm-net} as its key under the top-level "
     "networks: mapping, never a hardcoded name; any host "
     "ports: mapping carries a # temporary comment; no hardcoded credentials — "
     "secrets are ${VAR} interpolations."

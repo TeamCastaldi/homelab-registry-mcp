@@ -21,9 +21,9 @@ services:
     labels:
       - "traefik.enable=true"
     networks:
-      - ${PROXY_NETWORK:-proxy-net}
+      - ${PROXY_NETWORK:-swarm-net}
 networks:
-  ${PROXY_NETWORK:-proxy-net}:
+  ${PROXY_NETWORK:-swarm-net}:
     external: true
 """
 
