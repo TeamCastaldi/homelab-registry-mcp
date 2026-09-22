@@ -72,6 +72,8 @@ src/registry_mcp/
 ├── intake/                # repo intake (conversational deploy Phase 1, ADR-018)
 │   ├── fetch.py           # URL allowlist + shallow clone + symlink-safe file reads
 │   └── parse.py           # deterministic Dockerfile/compose extraction, no LLM
+├── service_deploy/        # conversational deploy Phase 2+ (ADR-019), kept apart from proposal/
+│   └── generator.py       # ComposeGenerator: DSPy GenerateServiceCompose + gates + canonical formatter
 ├── deletion/
 │   └── store.py           # DeletionGateStore: math-challenge request/confirm gate, shared by every hard-delete tool
 ├── providers/             # pluggable write-path backends (behind protocols)
@@ -91,7 +93,8 @@ src/registry_mcp/
 │   ├── secrets.py         # secrets_status/encrypt/decrypt/add/rotate/list_keys (Phase C)
 │   ├── proposal.py        # proposal_create/list_open/get/cancel/verify/normalize (Phase 8)
 │   ├── adoption.py        # proposal_adopt_service[_finalize/_cancel/_get] (Phase 7 brownfield)
-│   └── intake.py          # service-intake-repo (conversational deploy Phase 1, ADR-018)
+│   ├── intake.py          # service-intake-repo + shared run_intake() (conversational deploy Phase 1, ADR-018)
+│   └── service_deploy.py  # service-deploy-generate-compose (conversational deploy Phase 2, ADR-019)
 ├── webhooks/              # inbound HTTP receivers (ADR-010) — alerts → staged proposals
 │   ├── schemas.py         # Pydantic Dockhand payload models + pure parsing helpers
 │   └── dockhand.py        # POST /webhooks/dockhand — update/CVE alert → proposal
@@ -268,8 +271,36 @@ committed.
   low-confidence result is reported as discarded (`inference: null` +
   `inference_rejection_reason`), never returned as if it were a fact — same
   no-fallback shape as `generate_remediation_patch`/`detect_hardcoded_secrets`.
-- Later plan phases (compose generation, node placement, secrets block, PR
-  assembly) are not built yet; see `docs/plans/conversational-deploy.md`.
+- The fetch → parse → gated-inference sequence lives in `run_intake()`
+  (`tools/intake.py`), shared with Phase 2's tool so both see identical facts.
+
+**Compose generation (`docs/plans/conversational-deploy.md` Phase 2, ADR-019,
+`service_deploy/` + `tools/service_deploy.py`):** turns intake's requirements into
+a draft `compose.yaml`. Same `SERVICE_DEPLOY_ENABLED` gate; read-only,
+single-call, nothing persisted or committed.
+- `service-deploy-generate-compose(repo_url, service_name?, target_node?)` re-runs
+  intake via `run_intake()` (never accepts intake JSON from the caller — facts stay
+  ground truth), then `ComposeGenerator`. Fails before cloning when
+  `DSPY_ENABLED=false`: there is nothing to generate and no fallback. Service name
+  is caller's → accepted inference's → repo name, held to a path-safe
+  `^[a-z0-9][a-z0-9._-]{0,62}$` since Phase 5 will use it as a directory.
+- **Conventions are layered:** this repo's own rules (`CANONICAL_FORM_SUMMARY` +
+  `REQUIRED_RULES_SUMMARY`, the Tier 2 checks restated as up-front requirements)
+  are always sent and win on conflict; the homelab repo's spec at
+  `SERVICE_DEPLOY_CONVENTIONS_PATH` is appended best-effort via `GitProvider`
+  (a missing `GIT_*` or failed read never blocks) because that doc is known to
+  drift.
+- `GenerateServiceCompose` (DSPy) emits a complete file on the patch LM's budget.
+  Gates, no fallback: credential scrub (draft and reasoning) → confidence vs
+  `SERVICE_DEPLOY_CONFIDENCE_THRESHOLD` → non-empty → valid YAML → a `services:`
+  mapping containing the requested service key (the stand-in for normalization's
+  equivalence gate, which has no "before" file to compare here). An accepted draft
+  is then run through `normalization/formatter.normalize()` (a formatter failure is
+  a rejection); `rules.check()` Tier 2 findings and formatter `skipped_rules` are
+  returned alongside it — reported, never blocking.
+- Later plan phases (node placement, secrets block, PR assembly) are not built
+  yet; Phase 5's `service-deploy-create` is expected to absorb or replace this
+  tool. See `docs/plans/conversational-deploy.md`.
 
 **Dockhand integration (ADR-013, `integrations/dockhand/` + `discovery/dockhand.py`):**
 read-only httpx client (Bearer-token auth, same shape as Authentik's) for the
@@ -462,6 +493,7 @@ closes that gap without ever exposing a value. Off by default (`INFISICAL_ENABLE
 | `SERVICE_DEPLOY_CONFIDENCE_THRESHOLD` | `0.8` | Below this, `InferServiceRequirements`'s output is discarded and `inference` is left null — same gate value the proposal layer uses |
 | `SERVICE_DEPLOY_CLONE_TIMEOUT_SECONDS` | `60` | Bounds one intake clone against a hung fetch |
 | `SERVICE_DEPLOY_MAX_REPO_MB` | `100` | Repos larger than this are rejected after cloning, before parsing |
+| `SERVICE_DEPLOY_CONVENTIONS_PATH` | `docs/spec/compose.yaml` | Homelab-repo compose spec read via `GIT_*` as *supplementary* context for compose generation (ADR-019); this repo's own canonical rules are always sent and take precedence |
 | `DELETE_CHALLENGE_TTL_MINUTES` | `5` | How long a `registry_delete_service`/`hardware-delete-node` math challenge stays answerable via its `*_confirm` tool before expiring |
 | `DOCKHAND_WEBHOOK_ENABLED` | `false` | Registers `POST /webhooks/dockhand` (ADR-010). `true` with no `DOCKHAND_WEBHOOK_SECRET` leaves the route unregistered, never open |
 | `DOCKHAND_WEBHOOK_PATH` | `/webhooks/dockhand` | |
@@ -585,16 +617,22 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
 
 ## Current Status
 
+- **ADR-019 accepted and implemented — conversational deploy Phase 2, compose
+  generation**: `service_deploy/` (`ComposeGenerator` — layered conventions, the
+  no-fallback gate chain, canonical formatter pass, Tier 2 findings reported), the
+  `GenerateServiceCompose` DSPy signature, `SERVICE_DEPLOY_CONVENTIONS_PATH`, and
+  the read-only `service-deploy-generate-compose` MCP tool (shipped ahead of the
+  plan's Phase 5 so generation quality can be judged on real repos early). Also
+  corrected the proxy-network default to `${PROXY_NETWORK:-swarm-net}` (R-005 text
+  and spec row; detection unchanged). Not yet validated against real repos.
 - **ADR-018 accepted and implemented — conversational deploy Phase 1, repo intake**:
   `intake/` (`fetch.py` — https-only URL allowlist, shallow clone via subprocess
   `git`, symlink-safe file reads; `parse.py` — deterministic Dockerfile/compose
   extraction, no LLM) plus the `InferServiceRequirements` DSPy signature and the
   read-only `service-intake-repo` MCP tool. Off by default
-  (`SERVICE_DEPLOY_ENABLED=false`). Nothing downstream of intake (compose
-  generation, node placement, secrets block, PR assembly) is built yet — see
-  `docs/plans/conversational-deploy.md` for the remaining phases, two of which
-  (the deploy-mechanism fork, and node-identity questions gating Phase 3) are
-  still open per that plan's Phase 0 recon findings.
+  (`SERVICE_DEPLOY_ENABLED=false`). Phase 0 is resolved (deploy mechanism: the CD
+  pipeline, never Dockhand automation); placement, secrets block, and PR assembly
+  (Phases 3–5) are not built yet — see `docs/plans/conversational-deploy.md`.
 - **ADR-017 accepted, implemented, and confirmed live — Infisical whole-project visibility**:
   `InfisicalClient.list_secret_tree()` walks the folder tree under `INFISICAL_SECRET_PATH`
   via `GET /api/v1/folders`, opt-in via `INFISICAL_RECURSIVE_SCAN` (default `false`,

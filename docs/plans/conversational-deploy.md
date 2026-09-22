@@ -9,7 +9,9 @@ directly, 2026-09-22:** he's still on Dockhand today but wants off it; Phase 7
 targets the CD pipeline exclusively for newly-deployed services (no
 `dockhand-redeploy-stack` tool) — see "The deploy-mechanism fork" below.
 **Phase 1 (repo ingestion)
-shipped 2026-09-22 — [ADR-018](../ADRs/ADR-018-Repo-Intake-For-Conversational-Deploy.md).**
+shipped 2026-09-22 — [ADR-018](../ADRs/ADR-018-Repo-Intake-For-Conversational-Deploy.md).
+Phase 2 (compose generation) shipped 2026-09-22 —
+[ADR-019](../ADRs/ADR-019-Compose-Generation-For-Conversational-Deploy.md).**
 Phases 1-2 don't touch node identity, so Phase 1 proceeded without Phase 0's
 open items being resolved; Phase 3 still needs the node-identity question
 settled (de-risked but not resolved, see below) — the deploy-mechanism fork
@@ -63,14 +65,14 @@ phases; add it any time after Phase 5 without blocking anything.
 | Capability | Status | Reuses / precedent |
 |---|---|---|
 | Homelab fact-gathering | Exists | `hardware-capacity-summary`, `hardware-list-nodes`, `registry_list_services`, `traefik_list_routers`, `authentik_list_applications` |
-| Homelab conventions as generation input | Exists, needs wiring | `docs/spec/compose.yaml`, `references/homelab.md` (homelab repo), `normalization/rules.py` canonical shape rules |
+| Homelab conventions as generation input | **Wired (Phase 2)** | `normalization/` canonical rules always; homelab `docs/spec/compose.yaml` supplementary via `SERVICE_DEPLOY_CONVENTIONS_PATH`. `references/homelab.md` deliberately excluded (stale) |
 | Complete-file generation, confidence + YAML gated, no rule-based fallback | Pattern exists | `dspy/signatures.py` (`GenerateRemediationPatch`, `NormalizeConfigFile`) |
 | Branch → commit → PR | Exists as-is | `providers/git/`, `proposal/engine.py`'s `_open_proposal` |
 | Dry-run before any real write | Pattern exists | `PROPOSAL_DRY_RUN`, `NORMALIZATION_DRY_RUN` |
 | Generated-not-guessed secret values | Pattern exists | `adoption/` "rotate" path — `secrets.token_urlsafe`, never DSPy-generated |
 | Two-call human-decision gate before anything commits | Pattern exists | `proposal_adopt_service` → `proposal_adopt_service_finalize` |
 | Repo ingestion (Dockerfile/compose/README → structured requirements) | **New** | closest analog: `adoption/ssh.py`'s live-container inspection, but reads a foreign repo, not a live container |
-| Compose generation for a **new** stack (vs. patching a known file) | **New** | new DSPy signature |
+| Compose generation for a **new** stack (vs. patching a known file) | **Shipped (Phase 2, ADR-019)** | `GenerateServiceCompose` + `service_deploy/ComposeGenerator` |
 | Secrets-block formatter | **New** | tool output only, no file write in this phase |
 | Direct Infisical write | Explicitly deferred | `INFISICAL_ALLOW_WRITE` reserved in schema, ADR-016 |
 | Deploy trigger | **Open — see below** | two real candidates, not obviously interchangeable |
@@ -267,19 +269,30 @@ New package `intake/` (shape mirrors `adoption/`, `normalization/`):
   client outbound fetch to a caller-supplied host, which is the capability worth
   gating from the start, independent of any later write path).
 
-### Phase 2 — Compose generation
+### Phase 2 — Compose generation — **shipped 2026-09-22, [ADR-019](../ADRs/ADR-019-Compose-Generation-For-Conversational-Deploy.md)**
 - New DSPy signature `GenerateServiceCompose(intake, homelab_conventions,
-  target_node) -> compose_yaml`.
+  service_name, target_node) -> compose_yaml` — `service_name` added so the draft's
+  service key (and later its `nodes/<node>/<service>/` directory) is fixed by the
+  caller, not left to the model.
 - New package `service_deploy/` (mirrors `proposal/`'s shape):
   `service_deploy/generator.py` calls the signature, gates on
   `SERVICE_DEPLOY_CONFIDENCE_THRESHOLD` + YAML validity — same no-fallback
   discipline as `GenerateRemediationPatch`. Low-confidence or invalid output is
-  never turned into a draft.
-- Run the result through `normalization/formatter.py`'s canonical-shape rules
-  before it's ever shown to Nathan (this is a fresh file, so `rules.is_equivalent`
-  doesn't apply — there's no "before" — but the same key-order/shape rules do).
-- Needs read access to `docs/spec/compose.yaml` / `references/homelab.md` in the
-  homelab repo — reuse whatever `GitProvider` already exposes for reading a file.
+  never turned into a draft. With no "before" file for `rules.is_equivalent`, a
+  compose-shape gate (a `services:` mapping containing the requested key) takes
+  its place.
+- The result runs through `normalization/formatter.py`'s canonical-shape rules
+  before it's shown to anyone; Tier 2 findings are reported alongside, not
+  blocking.
+- Conventions went further than sketched here: this repo's own canonical rules are
+  always sent and take precedence, and only `docs/spec/compose.yaml` is read from
+  the homelab repo (best-effort, via `GitProvider.read_file`) — both homelab docs
+  were found to drift in Phase 0 recon, and `references/homelab.md` was dropped as
+  input entirely.
+- **Deviation:** a read-only `service-deploy-generate-compose` tool shipped now, not
+  deferred to Phase 5, so generation quality (Phase 6's stated purpose) can be judged
+  on real repos early. Expect Phase 5's `service-deploy-create` to absorb or replace
+  it.
 
 ### Phase 3 — Placement
 No new tool. Orchestration logic queries `hardware-capacity-summary` /
