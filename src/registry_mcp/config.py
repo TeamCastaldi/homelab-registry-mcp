@@ -170,6 +170,11 @@ class Settings(BaseSettings):
     # (or hostile) repo fills this node's disk.
     service_deploy_clone_timeout_seconds: int = Field(default=60, gt=0)
     service_deploy_max_repo_mb: int = Field(default=100, gt=0)
+    # Homelab-repo path (read via GIT_*) handed to compose generation as extra
+    # convention context. Supplementary only: this repo's own canonical rules
+    # (normalization/rules.py) are always included and take precedence, since
+    # the homelab copy has been found to drift.
+    service_deploy_conventions_path: str = Field(default="docs/spec/compose.yaml")
 
     # Deletion confirmation gate — every hard-delete tool (registry_delete_service,
     # hardware-delete-node) requires solving a short arithmetic challenge before
