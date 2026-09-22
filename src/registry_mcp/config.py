@@ -155,6 +155,22 @@ class Settings(BaseSettings):
     # in the registry SQLite (not git-crypt encrypted) until then.
     adoption_draft_ttl_minutes: int = Field(default=60)
 
+    # Conversational service deployment (docs/plans/conversational-deploy.md,
+    # ADR-018) — opt-in. Phase 1 ships only the read-only repo-intake tool, but
+    # the flag lands with it rather than at Phase 6: intake shallow-clones a
+    # caller-supplied URL, so enabling it grants an MCP client outbound network
+    # access to an arbitrary host. That is the capability worth gating, not the
+    # later Git write.
+    service_deploy_enabled: bool = Field(default=False)
+    # Same gate value the proposal layer uses; a below-threshold inference is
+    # discarded and the field left unfilled, never guessed.
+    service_deploy_confidence_threshold: float = Field(default=0.8)
+    # Bounds on one intake clone. A foreign repo is untrusted input: without a
+    # timeout a hung fetch pins the event loop, and without a size cap a large
+    # (or hostile) repo fills this node's disk.
+    service_deploy_clone_timeout_seconds: int = Field(default=60, gt=0)
+    service_deploy_max_repo_mb: int = Field(default=100, gt=0)
+
     # Deletion confirmation gate — every hard-delete tool (registry_delete_service,
     # hardware-delete-node) requires solving a short arithmetic challenge before
     # the row is removed. Not a security boundary (single digits, shown in the
