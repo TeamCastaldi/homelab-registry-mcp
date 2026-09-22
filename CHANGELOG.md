@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.7.1](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.7.0...v1.7.1) (2026-09-22)
+
+
+### Documentation
+
+* add missing DELETE_CHALLENGE_TTL_MINUTES to .env.example ([3b5df1b](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/3b5df1b5f15c3b1cdca0c379c304571b677b3332))
+* add missing SERVICE_DEPLOY_* block to .env.example ([ad6315f](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/ad6315fd7d579df5b8bb3c8bea9be059a3f45ce8))
+
 ## [1.7.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.6.3...v1.7.0) (2026-09-22)
 
 
