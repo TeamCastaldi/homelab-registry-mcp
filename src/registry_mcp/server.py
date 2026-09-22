@@ -32,6 +32,7 @@ from registry_mcp.proposal import AdoptionGenerator, PatchGenerator, ProposalEng
 from registry_mcp.providers.git import GitProvider, build_git_provider
 from registry_mcp.providers.notification import build_notification_provider
 from registry_mcp.registry import RegistryStore
+from registry_mcp.service_deploy import ComposeGenerator
 from registry_mcp.tools import (
     register_adoption_tools,
     register_ansible_inventory_tools,
@@ -43,6 +44,7 @@ from registry_mcp.tools import (
     register_proposal_tools,
     register_registry_tools,
     register_secrets_tools,
+    register_service_deploy_tools,
 )
 from registry_mcp.webhooks import register_webhook_routes
 
@@ -186,6 +188,19 @@ def build_server(settings: Settings | None = None) -> FastMCP:
     )
     register_webhook_routes(mcp, settings, store, proposal_engine, read_only=read_only)
     register_intake_tools(mcp, settings, reasoner)
+    register_service_deploy_tools(
+        mcp,
+        settings,
+        reasoner,
+        ComposeGenerator(
+            reasoner,
+            threshold=settings.service_deploy_confidence_threshold,
+            git=git_provider,
+            repo=settings.git_repo,
+            base=settings.git_base_branch,
+            conventions_path=settings.service_deploy_conventions_path,
+        ),
+    )
 
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def health() -> dict[str, str]:
