@@ -4,13 +4,16 @@
 `homelab-registry-mcp` server; partially resolved — see findings inline below.
 A follow-up recon session scoped directly to `ncastaldi/homelab` (also
 2026-09-22) resolved the convention-freshness item — see "Phase 0 recon
-findings (session 2)". **The deploy-mechanism fork is still open** — that
-session's returned summary didn't cover it, so it needs another dedicated
-pass or Nathan directly. **Phase 1 (repo ingestion)
+findings (session 2)". **The deploy-mechanism fork is now resolved — Nathan
+directly, 2026-09-22:** he's still on Dockhand today but wants off it; Phase 7
+targets the CD pipeline exclusively for newly-deployed services (no
+`dockhand-redeploy-stack` tool) — see "The deploy-mechanism fork" below.
+**Phase 1 (repo ingestion)
 shipped 2026-09-22 — [ADR-018](../ADRs/ADR-018-Repo-Intake-For-Conversational-Deploy.md).**
 Phases 1-2 don't touch node identity, so Phase 1 proceeded without Phase 0's
-open items being resolved; Phase 3 still needs the deploy-mechanism fork
-settled (node identity is now de-risked, see below).
+open items being resolved; Phase 3 still needs the node-identity question
+settled (de-risked but not resolved, see below) — the deploy-mechanism fork
+no longer blocks it.
 **Written:** 2026-09-21.
 **Origin:** Grew out of evaluating whether artifacts in the separate `ncastaldi/ansible`
 repo could feed `homelab-registry-mcp`; that evaluation surfaced open questions
@@ -89,22 +92,28 @@ Phase 7 can be designed:
   though the API has one." Not a default to build toward; a decision to make
   consciously when this phase is reached.
 
-  **Still unresolved as of the 2026-09-22 recon.** Live `dockhand_list_stacks`
-  and `dockhand_list_containers` (via this server's own read-only Dockhand token)
-  both returned zero items across all four registered Dockhand environments
-  (Control Plane, Heimdall, Media, Ollama) — nothing is currently tracked as a
-  Dockhand "stack." Three of the four environments (Heimdall/Media/Ollama) connect
-  through a `hawser-standard` agent whose `hawserLastSeen` is `null`, i.e. this
-  API has never seen that agent check in. That's *consistent* with Path A (Dockhand
-  really is just habit-clicking, nothing real is stack-managed there) but it directly
-  conflicts with this repo's own Current Status note that `homelab-registry-mcp`'s
-  own container "is deployed via Dockhand" — so it may equally be a token-scope or
-  agent-connectivity artifact rather than proof Dockhand is unused. Cannot
-  distinguish the two from this server's API alone; the reusable `deploy.yml`
-  workflow's actual run history lives in `ncastaldi/homelab`'s Actions tab, which
-  this GitHub-scoped session (locked to the `TeamCastaldi` org after first
-  attaching `TeamCastaldi/homelab-registry-mcp`) cannot reach. **Ask Nathan
-  directly, or re-run this check from a session started against `ncastaldi/homelab`.**
+  **Resolved 2026-09-22 — Nathan directly.** He confirmed he is still deploying via
+  Dockhand today — so Dockhand is genuinely load-bearing right now, not just habit;
+  the empty `dockhand_list_stacks`/`dockhand_list_containers` results above were a
+  token-scope or agent-connectivity artifact, not evidence Dockhand is unused. But
+  he wants to move *away* from Dockhand where possible. That's neither Path A nor
+  Path B as originally framed:
+
+  - Not Path A's premise ("Dockhand is just habit, nothing to build") — it's
+    currently real.
+  - Not Path B's conclusion (build `dockhand-redeploy-stack` to automate Dockhand
+    itself) — that would entrench the tool Nathan wants to leave.
+
+  **Decision: build toward Path A's outcome anyway.** The CD pipeline
+  (`docker-stack-deploy` + reusable `deploy.yml`) is already proven end-to-end and
+  is the direction Nathan wants to move toward. So for this plan's Phase 7, a
+  conversationally-deployed service should land on the CD pipeline (a plain
+  `nodes/<node>/<service>/compose.yaml` PR, merged = deployed), never on Dockhand —
+  no `dockhand-redeploy-stack` tool gets built. This doesn't migrate Nathan's
+  *existing* Dockhand-deployed services (that's separate, pre-existing infra, out
+  of this plan's scope) — it just makes sure every *new* service this feature
+  deploys goes straight onto the pipeline he's trying to consolidate onto, rather
+  than adding one more thing clicked in Dockhand.
 
 **Hardware/node identity drift**, surfaced while evaluating the `ncastaldi/ansible` repo,
 unresolved as of this writing:
@@ -191,7 +200,7 @@ touched at all from this vantage point:
 |---|---|
 | `dev5432` vs. `p1ollama` | **Resolved.** Both `hardware-list-nodes` and `dockhand_list_environments` independently confirm 10.0.0.203 = `p1ollama`/"Ollama". |
 | `p410`/`panoptichron` placement risk | **De-risked, not resolved.** Not present in `hardware-list-nodes` (checked confirmed + `hardware-list-unconfirmed` + `hardware-list-stale`, all empty for it) — Phase 3 can't accidentally target it. Its actual identity/purpose is still unknown from here. |
-| Deploy-mechanism fork | **Still open, new discrepancy surfaced.** `dockhand_list_stacks`/`dockhand_list_containers` are empty across all 4 Dockhand environments, three of which show a never-checked-in `hawser` agent (`hawserLastSeen: null`) — weak evidence for Path A, but it conflicts with this repo's own Current Status claim that `homelab-registry-mcp` itself deploys via Dockhand, so treat it as inconclusive rather than a resolution. |
+| Deploy-mechanism fork | **Resolved — Nathan directly, 2026-09-22 (see "The deploy-mechanism fork" above).** Dockhand is genuinely in use today; the empty `dockhand_list_stacks`/`dockhand_list_containers` results were a scope/connectivity artifact, not evidence of disuse. Direction: move away from Dockhand — Phase 7 targets the CD pipeline exclusively. |
 | Convention freshness | **Resolved (see "Phase 0 recon findings (session 2)" below).** Both files have real drift/staleness — not yet trustworthy as Phase 2 generation input. |
 
 ## Phase 0 recon findings (session 2, 2026-09-22)
@@ -312,14 +321,16 @@ Nathan confirmed as the starting point.
   real repos before trusting it live.
 
 ### Phase 7 — Deploy automation
-Design depends entirely on Phase 0's fork resolution:
-- **Path A** (CD pipeline already covers it): no new tool. Harden/verify the
-  existing `docker-stack-deploy` role covers the chosen node; have
-  `service-deploy-finalize`'s PR body state which mechanism deploys it, mirroring
-  how `APPLY_MODE` already shapes PR descriptions elsewhere.
-- **Path B** (Dockhand is genuinely load-bearing): new `dockhand-redeploy-stack`
-  tool in `integrations/dockhand/`, gated behind its own opt-in flag, with an ADR
-  amending ADR-013 written first — not bundled into this phase silently.
+**Resolved 2026-09-22 (Nathan directly) — targets Path A's outcome exclusively.**
+Nathan is still deploying via Dockhand today but wants to move away from it, so
+this phase never builds Dockhand automation (`dockhand-redeploy-stack`, Path B) —
+that would entrench the tool he's trying to leave. Instead: no new deploy tool.
+Harden/verify the existing `docker-stack-deploy` role covers the chosen node;
+`service-deploy-finalize`'s PR body states that merging it is the deploy step
+(mirroring how `APPLY_MODE` already shapes PR descriptions elsewhere). This only
+governs *newly* conversationally-deployed services — it doesn't migrate Nathan's
+existing Dockhand-managed services onto the CD pipeline; that's separate,
+pre-existing infra work outside this plan's scope.
 
 ### Phase 8 — Direct Infisical write (deferred, not scheduled)
 Only after Phase 4's copy/paste block has been used for real, for a while. Flip on
