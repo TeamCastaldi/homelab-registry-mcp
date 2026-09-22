@@ -90,6 +90,7 @@ class Reasoner:
         self._revise: Any = None
         self._detect_secrets: Any = None
         self._normalize: Any = None
+        self._infer_requirements: Any = None
 
     # -- lazy setup --------------------------------------------------------
     def _ensure(self) -> None:
@@ -102,6 +103,7 @@ class Reasoner:
             DetectHardcodedSecrets,
             GenerateRemediationPatch,
             InferServiceMetadata,
+            InferServiceRequirements,
             NormalizeConfigFile,
             ResolveServiceIdentity,
             SummarizeAccessAudit,
@@ -134,6 +136,8 @@ class Reasoner:
         self._normalize = dspy.ChainOfThought(NormalizeConfigFile)
         # Also emits a whole file; reuse the patch LM's larger token budget.
         self._normalize.set_lm(self._patch_lm)
+        # Emits only short fields, so the default token budget is enough.
+        self._infer_requirements = dspy.ChainOfThought(InferServiceRequirements)
         self._load_compiled()
         self._configured = True
         _log.info("reasoning_configured", model=self._settings.dspy_model)
@@ -153,6 +157,7 @@ class Reasoner:
             (self._revise, "apply_review_feedback.json"),
             (self._detect_secrets, "detect_hardcoded_secrets.json"),
             (self._normalize, "normalize_config.json"),
+            (self._infer_requirements, "infer_service_requirements.json"),
         ):
             full = os.path.join(path, fname)
             if not os.path.exists(full):
@@ -413,6 +418,39 @@ class Reasoner:
         return {
             "normalized_file": getattr(pred, "normalized_file", "") or "",
             "commit_message": getattr(pred, "commit_message", "") or "",
+            "confidence": _as_float(getattr(pred, "confidence", 0.0)),
+            "reasoning": getattr(pred, "reasoning", "") or "",
+        }
+
+    def infer_service_requirements(
+        self, *, repo_url: str, readme: str, detected: dict
+    ) -> dict | None:
+        """Fill the gaps deterministic repo parsing (``intake/parse.py``) left.
+
+        Returns the raw module outputs (including ``confidence``) so the
+        intake tool can enforce ``SERVICE_DEPLOY_CONFIDENCE_THRESHOLD`` — the
+        same split the write-path modules use, keeping a feature's threshold
+        owned by that feature rather than by ``DSPY_CONFIDENCE_THRESHOLD``.
+        Returns None only when the reasoning layer is disabled or the call
+        errors; the deterministic facts stand on their own either way, so
+        there is nothing to fall back to and nothing to hand-fill.
+        """
+        if not self.enabled:
+            return None
+        self._ensure()
+        try:
+            pred = self._infer_requirements(repo_url=repo_url, readme=readme, detected=detected)
+        except Exception as exc:
+            _log.warning("reasoning_failed", op="infer_service_requirements", error=str(exc))
+            return None
+        return {
+            "service_name": (getattr(pred, "service_name", "") or "").strip(),
+            "summary": (getattr(pred, "summary", "") or "").strip(),
+            "category": (getattr(pred, "category", "") or "").strip().lower(),
+            "required_dependencies": list(getattr(pred, "required_dependencies", []) or []),
+            "operator_supplied_env_vars": list(
+                getattr(pred, "operator_supplied_env_vars", []) or []
+            ),
             "confidence": _as_float(getattr(pred, "confidence", 0.0)),
             "reasoning": getattr(pred, "reasoning", "") or "",
         }
