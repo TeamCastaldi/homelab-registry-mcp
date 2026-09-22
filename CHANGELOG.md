@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.3](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.6.2...v1.6.3) (2026-09-22)
+
+
+### Documentation
+
+* **plans:** add conversational service deployment build plan ([fd3a332](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/fd3a33221f66ceda9c84ac60969661af926ff8ce))
+
 ## [1.6.2](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.6.1...v1.6.2) (2026-09-21)
 
 
