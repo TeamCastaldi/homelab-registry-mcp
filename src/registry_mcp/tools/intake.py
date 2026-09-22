@@ -27,6 +27,68 @@ _log = get_logger("tools.intake")
 _READ_ONLY = ToolAnnotations(readOnlyHint=True)
 
 
+async def run_intake(settings: Settings, reasoner: Reasoner, repo_url: str) -> dict[str, Any]:
+    """Fetch, parse, and (confidence-gated) infer one repo's requirements.
+
+    Shared by `service-intake-repo` and the later-phase tools that build on
+    its output, so every caller gets the same ground-truth facts and the same
+    inference gate. Callers own the `SERVICE_DEPLOY_ENABLED` check. Returns
+    `{"error": ...}` when the fetch itself fails.
+    """
+    try:
+        snapshot = await fetch_repo(
+            repo_url,
+            timeout_seconds=settings.service_deploy_clone_timeout_seconds,
+            max_repo_mb=settings.service_deploy_max_repo_mb,
+        )
+    except IntakeError as exc:
+        return {"error": str(exc)}
+
+    requirements = parse_snapshot(snapshot)
+
+    result: dict[str, Any] = {
+        "repo_url": snapshot.repo_url,
+        "dockerfile_found": snapshot.dockerfile is not None,
+        "readme_found": snapshot.readme is not None,
+        "compose_path": snapshot.compose_path,
+        "requirements": requirements.as_dict(),
+        "skipped_files": snapshot.skipped,
+        "inference": None,
+    }
+
+    if not reasoner.enabled:
+        result["inference_rejection_reason"] = (
+            "reasoning layer disabled; set DSPY_ENABLED=true for dependency/"
+            "operator-env-var inference"
+        )
+        return result
+
+    try:
+        inferred = reasoner.infer_service_requirements(
+            repo_url=snapshot.repo_url,
+            readme=snapshot.readme or "",
+            detected=requirements.as_dict(),
+        )
+    except Exception as exc:  # reasoning must never break intake
+        _log.warning("intake_inference_failed", repo_url=snapshot.repo_url, error=str(exc))
+        result["inference_rejection_reason"] = f"reasoning call failed: {exc}"
+        return result
+
+    threshold = settings.service_deploy_confidence_threshold
+    if inferred is None:
+        result["inference_rejection_reason"] = "reasoning call returned no result"
+        return result
+    confidence = inferred.get("confidence", 0.0)
+    if confidence < threshold:
+        result["inference_rejection_reason"] = (
+            f"confidence {confidence:.2f} below threshold {threshold:.2f}"
+        )
+        return result
+
+    result["inference"] = inferred
+    return result
+
+
 def register_intake_tools(mcp: FastMCP, settings: Settings, reasoner: Reasoner) -> None:
     @mcp.tool(name="service-intake-repo", annotations=_READ_ONLY)
     async def service_intake_repo(repo_url: str) -> dict[str, Any]:
@@ -52,56 +114,4 @@ def register_intake_tools(mcp: FastMCP, settings: Settings, reasoner: Reasoner) 
                 "error": "Conversational deploy is disabled. "
                 "Set SERVICE_DEPLOY_ENABLED=true to enable."
             }
-
-        try:
-            snapshot = await fetch_repo(
-                repo_url,
-                timeout_seconds=settings.service_deploy_clone_timeout_seconds,
-                max_repo_mb=settings.service_deploy_max_repo_mb,
-            )
-        except IntakeError as exc:
-            return {"error": str(exc)}
-
-        requirements = parse_snapshot(snapshot)
-
-        result: dict[str, Any] = {
-            "repo_url": snapshot.repo_url,
-            "dockerfile_found": snapshot.dockerfile is not None,
-            "readme_found": snapshot.readme is not None,
-            "compose_path": snapshot.compose_path,
-            "requirements": requirements.as_dict(),
-            "skipped_files": snapshot.skipped,
-            "inference": None,
-        }
-
-        if not reasoner.enabled:
-            result["inference_rejection_reason"] = (
-                "reasoning layer disabled; set DSPY_ENABLED=true for dependency/"
-                "operator-env-var inference"
-            )
-            return result
-
-        try:
-            inferred = reasoner.infer_service_requirements(
-                repo_url=snapshot.repo_url,
-                readme=snapshot.readme or "",
-                detected=requirements.as_dict(),
-            )
-        except Exception as exc:  # reasoning must never break intake
-            _log.warning("intake_inference_failed", repo_url=snapshot.repo_url, error=str(exc))
-            result["inference_rejection_reason"] = f"reasoning call failed: {exc}"
-            return result
-
-        threshold = settings.service_deploy_confidence_threshold
-        if inferred is None:
-            result["inference_rejection_reason"] = "reasoning call returned no result"
-            return result
-        confidence = inferred.get("confidence", 0.0)
-        if confidence < threshold:
-            result["inference_rejection_reason"] = (
-                f"confidence {confidence:.2f} below threshold {threshold:.2f}"
-            )
-            return result
-
-        result["inference"] = inferred
-        return result
+        return await run_intake(settings, reasoner, repo_url)

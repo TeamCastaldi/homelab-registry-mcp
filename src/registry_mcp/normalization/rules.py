@@ -254,7 +254,7 @@ def check(doc: Any, *, raw_text: str, path: str) -> list[Finding]:
                 R_HARDCODED_NETWORK,
                 path,
                 None,
-                "external network name is hardcoded, not ${PROXY_NETWORK:-proxy-net}",
+                "external network name is hardcoded, not ${PROXY_NETWORK:-swarm-net}",
             )
         )
 

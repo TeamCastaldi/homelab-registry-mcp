@@ -10,6 +10,7 @@ from registry_mcp.tools.linking import register_linking_tools
 from registry_mcp.tools.proposal import register_proposal_tools
 from registry_mcp.tools.registry import register_registry_tools
 from registry_mcp.tools.secrets import register_secrets_tools
+from registry_mcp.tools.service_deploy import register_service_deploy_tools
 
 __all__ = [
     "register_adoption_tools",
@@ -22,4 +23,5 @@ __all__ = [
     "register_proposal_tools",
     "register_registry_tools",
     "register_secrets_tools",
+    "register_service_deploy_tools",
 ]

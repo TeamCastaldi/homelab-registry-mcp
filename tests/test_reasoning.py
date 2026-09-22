@@ -13,6 +13,7 @@ from dspy.utils.dummies import DummyLM
 from conftest import IsolatedSettings
 from registry_mcp.dspy import build_reasoner
 from registry_mcp.dspy.signatures import (
+    GenerateServiceCompose,
     InferServiceRequirements,
     NormalizeConfigFile,
     ResolveServiceIdentity,
@@ -40,6 +41,10 @@ def test_disabled_reasoner_short_circuits():
     assert "error" in summary and "DSPY_ENABLED" in summary["error"]
     assert (
         reasoner.infer_service_requirements(repo_url="https://x/y", readme="", detected={}) is None
+    )
+    assert (
+        reasoner.generate_service_compose(intake={}, homelab_conventions="", service_name="x")
+        is None
     )
 
 
@@ -285,3 +290,82 @@ def test_infer_service_requirements_end_to_end_with_dummy_lm():
     assert result["confidence"] == 0.85
     assert result["required_dependencies"] == ["postgres"]
     assert result["service_name"] == "paperless-ngx"
+
+
+# --- GenerateServiceCompose: raw passthrough, caller owns the gate ---------
+
+_COMPOSE = "services:\n  app:\n    image: ghcr.io/o/app:1.2.3\n"
+
+
+def test_generate_service_compose_returns_raw_outputs_with_confidence():
+    reasoner = _enabled_reasoner()
+    seen = {}
+
+    def _fake(**kw):
+        seen.update(kw)
+        return SimpleNamespace(compose_yaml=_COMPOSE, confidence=0.3, reasoning="no image")
+
+    reasoner._generate_compose = _fake
+
+    result = reasoner.generate_service_compose(
+        intake={"ports": ["8000/tcp"]},
+        homelab_conventions="2-space indent",
+        service_name="app",
+        target_node="heimdall",
+    )
+
+    # A low score is returned, not swallowed: ComposeGenerator decides.
+    assert result == {"compose_yaml": _COMPOSE, "confidence": 0.3, "reasoning": "no image"}
+    assert seen == {
+        "intake": {"ports": ["8000/tcp"]},
+        "homelab_conventions": "2-space indent",
+        "service_name": "app",
+        "target_node": "heimdall",
+    }
+
+
+def test_generate_service_compose_tolerates_missing_fields():
+    reasoner = _enabled_reasoner()
+    reasoner._generate_compose = lambda **kw: SimpleNamespace(confidence="not-a-number")
+
+    result = reasoner.generate_service_compose(intake={}, homelab_conventions="", service_name="x")
+
+    assert result == {"compose_yaml": "", "confidence": 0.0, "reasoning": ""}
+
+
+def test_generate_service_compose_survives_module_error():
+    reasoner = _enabled_reasoner()
+
+    def _boom(**kw):
+        raise RuntimeError("LM exploded")
+
+    reasoner._generate_compose = _boom
+    assert (
+        reasoner.generate_service_compose(intake={}, homelab_conventions="", service_name="x")
+        is None
+    )
+
+
+def test_generate_service_compose_end_to_end_with_dummy_lm():
+    reasoner = build_reasoner(IsolatedSettings(dspy_enabled=True))
+    lm = DummyLM(
+        [
+            {
+                "reasoning": "published image found in README",
+                "compose_yaml": _COMPOSE,
+                "confidence": "0.9",
+            }
+        ]
+    )
+    dspy.configure(lm=lm)
+    reasoner._generate_compose = dspy.ChainOfThought(GenerateServiceCompose)
+    reasoner._configured = True
+
+    result = reasoner.generate_service_compose(
+        intake={"ports": ["8000/tcp"], "env_vars": {"SECRET_KEY": None}},
+        homelab_conventions="2-space indent",
+        service_name="app",
+    )
+
+    assert result["confidence"] == 0.9
+    assert "ghcr.io/o/app:1.2.3" in result["compose_yaml"]
