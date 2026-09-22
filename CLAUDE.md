@@ -69,6 +69,9 @@ src/registry_mcp/
 ├── adoption/              # brownfield adoption (Phase 7) — see docs/plans/updated-phases.md
 │   ├── ssh.py             # SSH docker-inspect/cat helpers against a HardwareNode
 │   └── store.py           # AdoptionDraftStore: the pause point between draft and finalize
+├── intake/                # repo intake (conversational deploy Phase 1, ADR-018)
+│   ├── fetch.py           # URL allowlist + shallow clone + symlink-safe file reads
+│   └── parse.py           # deterministic Dockerfile/compose extraction, no LLM
 ├── deletion/
 │   └── store.py           # DeletionGateStore: math-challenge request/confirm gate, shared by every hard-delete tool
 ├── providers/             # pluggable write-path backends (behind protocols)
@@ -87,7 +90,8 @@ src/registry_mcp/
 │   ├── hardware.py        # hardware-add-node/get/list/update/delete (math-gated) + link/capacity tools
 │   ├── secrets.py         # secrets_status/encrypt/decrypt/add/rotate/list_keys (Phase C)
 │   ├── proposal.py        # proposal_create/list_open/get/cancel/verify/normalize (Phase 8)
-│   └── adoption.py        # proposal_adopt_service[_finalize/_cancel/_get] (Phase 7 brownfield)
+│   ├── adoption.py        # proposal_adopt_service[_finalize/_cancel/_get] (Phase 7 brownfield)
+│   └── intake.py          # service-intake-repo (conversational deploy Phase 1, ADR-018)
 ├── webhooks/              # inbound HTTP receivers (ADR-010) — alerts → staged proposals
 │   ├── schemas.py         # Pydantic Dockhand payload models + pure parsing helpers
 │   └── dockhand.py        # POST /webhooks/dockhand — update/CVE alert → proposal
@@ -234,6 +238,38 @@ GitOps-managed) under management without leaking its hardcoded secrets. Off by d
   remote Git provider, on that same branch.
 - `AdoptionDraft` rows hold the captured live secret values only long enough for the
   operator to answer (`ADOPTION_DRAFT_TTL_MINUTES`, default 60) before expiring.
+
+**Repo intake (`docs/plans/conversational-deploy.md` Phase 1, ADR-018, `intake/` +
+`tools/intake.py`):** the first slice of the conversational deploy flow — turns a
+foreign source repo's URL into structured runtime requirements. Off by default
+(`SERVICE_DEPLOY_ENABLED=false`); read-only, single-call, nothing drafted or
+committed.
+- `service-intake-repo(repo_url)` shallow-clones the repo (`intake/fetch.py`,
+  shells out to `git` the way `gitcrypt.run`/`adoption/ssh.py` do — never
+  `providers/git/`, which is bound to the operator's own `GIT_TOKEN` and must
+  never be offered to a stranger's host), reads its Dockerfile/compose file/README,
+  and discards the clone before returning. `intake/parse.py` then deterministically
+  extracts base image, ports, env vars, volumes, and dependencies — no LLM, same
+  discipline that keeps `reconcile.py` detection-only; compose wins over Dockerfile
+  on conflict.
+- **The URL is an allowlist, not a denylist**: only `https://` is accepted.
+  `ext::` (arbitrary command execution), `file://` (local disk read), and
+  `ssh://`/scp-style (`git@host:path`, would spend the control-plane `SSH_KEY_PATH`
+  on a foreign host) are all rejected — a private-range `https` host (a homelab's
+  own Gitea) stays allowed, since the scheme is the boundary, not the address.
+- **Cloned content is untrusted too**: a repo carrying `README.md -> /etc/passwd`
+  would otherwise hand host files back to an MCP client, so every file read refuses
+  symlinks outright and re-verifies containment after resolving — the same
+  two-step discipline `gitcrypt.check_path` applies to repo-relative writes.
+- `InferServiceRequirements` (DSPy) fills only what the README implies and
+  deterministic parsing structurally can't get (backing services, which env vars
+  need an operator-supplied value) — the detected facts are ground truth it may
+  not contradict. Confidence-gated on `SERVICE_DEPLOY_CONFIDENCE_THRESHOLD`; a
+  low-confidence result is reported as discarded (`inference: null` +
+  `inference_rejection_reason`), never returned as if it were a fact — same
+  no-fallback shape as `generate_remediation_patch`/`detect_hardcoded_secrets`.
+- Later plan phases (compose generation, node placement, secrets block, PR
+  assembly) are not built yet; see `docs/plans/conversational-deploy.md`.
 
 **Dockhand integration (ADR-013, `integrations/dockhand/` + `discovery/dockhand.py`):**
 read-only httpx client (Bearer-token auth, same shape as Authentik's) for the
@@ -422,6 +458,10 @@ closes that gap without ever exposing a value. Off by default (`INFISICAL_ENABLE
 | `ADOPTION_ENABLED` | `false` | Enables the `proposal_adopt_service*` brownfield adoption tools |
 | `SSH_DEFAULT_USER` | `root` | User for the ad-hoc SSH connection adoption uses to inspect a live container; reuses `SSH_KEY_PATH` |
 | `ADOPTION_DRAFT_TTL_MINUTES` | `60` | How long a drafted adoption may await the operator's keep/rotate decision before expiring |
+| `SERVICE_DEPLOY_ENABLED` | `false` | Enables the `service-intake-repo` MCP tool (conversational deploy Phase 1, ADR-018) — grants an MCP client outbound `https` fetch to a caller-supplied host, so it's gated separately from the (not-yet-built) write path |
+| `SERVICE_DEPLOY_CONFIDENCE_THRESHOLD` | `0.8` | Below this, `InferServiceRequirements`'s output is discarded and `inference` is left null — same gate value the proposal layer uses |
+| `SERVICE_DEPLOY_CLONE_TIMEOUT_SECONDS` | `60` | Bounds one intake clone against a hung fetch |
+| `SERVICE_DEPLOY_MAX_REPO_MB` | `100` | Repos larger than this are rejected after cloning, before parsing |
 | `DELETE_CHALLENGE_TTL_MINUTES` | `5` | How long a `registry_delete_service`/`hardware-delete-node` math challenge stays answerable via its `*_confirm` tool before expiring |
 | `DOCKHAND_WEBHOOK_ENABLED` | `false` | Registers `POST /webhooks/dockhand` (ADR-010). `true` with no `DOCKHAND_WEBHOOK_SECRET` leaves the route unregistered, never open |
 | `DOCKHAND_WEBHOOK_PATH` | `/webhooks/dockhand` | |
@@ -545,6 +585,16 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
 
 ## Current Status
 
+- **ADR-018 accepted and implemented — conversational deploy Phase 1, repo intake**:
+  `intake/` (`fetch.py` — https-only URL allowlist, shallow clone via subprocess
+  `git`, symlink-safe file reads; `parse.py` — deterministic Dockerfile/compose
+  extraction, no LLM) plus the `InferServiceRequirements` DSPy signature and the
+  read-only `service-intake-repo` MCP tool. Off by default
+  (`SERVICE_DEPLOY_ENABLED=false`). Nothing downstream of intake (compose
+  generation, node placement, secrets block, PR assembly) is built yet — see
+  `docs/plans/conversational-deploy.md` for the remaining phases, two of which
+  (the deploy-mechanism fork, and node-identity questions gating Phase 3) are
+  still open per that plan's Phase 0 recon findings.
 - **ADR-017 accepted, implemented, and confirmed live — Infisical whole-project visibility**:
   `InfisicalClient.list_secret_tree()` walks the folder tree under `INFISICAL_SECRET_PATH`
   via `GET /api/v1/folders`, opt-in via `INFISICAL_RECURSIVE_SCAN` (default `false`,

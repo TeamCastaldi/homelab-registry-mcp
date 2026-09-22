@@ -1,16 +1,18 @@
 # Conversational Service Deployment — Build Plan
 
-**Status:** Proposed — not started. Phase 0 recon run 2026-09-22 against the live
+**Status:** In progress. Phase 0 recon run 2026-09-22 against the live
 `homelab-registry-mcp` server; partially resolved — see findings inline below.
 Two items still block Phase 3/7 and need Nathan directly or a session scoped to
-`ncastaldi/homelab` (see "Phase 0 recon findings").
+`ncastaldi/homelab` (see "Phase 0 recon findings"). **Phase 1 (repo ingestion)
+shipped 2026-09-22 — [ADR-018](../ADRs/ADR-018-Repo-Intake-For-Conversational-Deploy.md).**
+Phases 1-2 don't touch node identity, so Phase 1 proceeded without Phase 0's two
+open items being resolved; Phase 3 still needs them.
 **Written:** 2026-09-21.
 **Origin:** Grew out of evaluating whether artifacts in the separate `ncastaldi/ansible`
 repo could feed `homelab-registry-mcp`; that evaluation surfaced open questions
 (below) that block part of this plan, and the goal itself expanded into this
-document. No ADR exists yet — specific decisions below should each become their
-own ADR at implementation time, the same way every other phase in this codebase
-has (ADR-010, ADR-013, ADR-015, ADR-016, ...).
+document. Each phase gets its own ADR at implementation time, the same way every
+other phase in this codebase has (ADR-010, ADR-013, ADR-015, ADR-016, ADR-018, ...).
 
 ## Goal
 
@@ -191,17 +193,29 @@ Resolve the deploy-mechanism fork and the node-identity questions above. Confirm
 the convention docs are current enough to trust as generation input. Everything
 past this phase assumes these are settled.
 
-### Phase 1 — Repo ingestion
+### Phase 1 — Repo ingestion — **shipped 2026-09-22, [ADR-018](../ADRs/ADR-018-Repo-Intake-For-Conversational-Deploy.md)**
 New package `intake/` (shape mirrors `adoption/`, `normalization/`):
 - `intake/fetch.py` — shallow-fetch a repo, locate Dockerfile / `docker-compose.yml`
-  / `compose.yaml` / README.
+  / `compose.yaml` / README. Went further than originally sketched here: the URL is
+  an https-only allowlist (rejects `ext::`/`file://`/`ssh://`/scp-style, real
+  argument-injection and arbitrary-command/disk-read/foreign-SSH-key vectors on
+  `git clone`), and every file read is symlink-contained the same way
+  `gitcrypt.check_path` contains repo-relative writes — a cloned repo is untrusted
+  content, not just an untrusted URL.
 - `intake/parse.py` — deterministic parsing only: exposed ports, env vars, volumes,
   base image. No LLM here, same discipline as `reconcile.py` staying detection-only.
+  Compose wins over Dockerfile on conflict; Dockerfile-only facts stay additive.
 - New DSPy signature `InferServiceRequirements` (`dspy/signatures.py`) — only for
   what deterministic parsing can't get (e.g. "does this need a database" from README
-  prose). Confidence-gated; discard and leave unfilled below threshold, never guess.
+  prose). Confidence-gated on `SERVICE_DEPLOY_CONFIDENCE_THRESHOLD`; a
+  below-threshold result is discarded and reported as discarded
+  (`inference: null` + `inference_rejection_reason`), never guessed.
 - New MCP tool `service-intake-repo(repo_url)` → structured requirements JSON.
   Read-only, no confirm gate needed — it writes nothing.
+- `SERVICE_DEPLOY_ENABLED` landed with this phase rather than at Phase 6 as
+  originally sketched below — see ADR-018's rationale (intake itself grants an MCP
+  client outbound fetch to a caller-supplied host, which is the capability worth
+  gating from the start, independent of any later write path).
 
 ### Phase 2 — Compose generation
 - New DSPy signature `GenerateServiceCompose(intake, homelab_conventions,
@@ -248,8 +262,9 @@ Nathan confirmed as the starting point.
   that seeds a `service-deploy-create` call.
 
 ### Phase 6 — Dry run + feature gate
-- `SERVICE_DEPLOY_ENABLED` (off by default), matching `NORMALIZATION_ENABLED` /
-  `ADOPTION_ENABLED`.
+- ~~`SERVICE_DEPLOY_ENABLED`~~ — landed with Phase 1 instead (ADR-018); intake's
+  outbound-fetch capability needed gating from its own introduction, independent
+  of this phase's write-path dry-run concern.
 - `SERVICE_DEPLOY_DRY_RUN` (recommend defaulting true on first rollout, matching
   `PROPOSAL_DRY_RUN`'s stance) — `service-deploy-finalize` logs the would-be PR
   instead of opening it. Use this to validate output quality against a handful of
