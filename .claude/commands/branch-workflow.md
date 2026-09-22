@@ -1,32 +1,26 @@
 ---
-description: "Interactive menu for git branch-based development workflow with context-aware starter prompts."
----
-
-## Config
-<!-- Fill in once when you set up this repo -->
-TEST_COMMAND: uv run pytest
-LINT_COMMAND: uv run ruff check .
-SRC_ROOT: src/registry_mcp/
-DOCS_ROOT: docs/
-ADR_PATH: docs/ARDs/
-SNAPSHOT_PATH: docs/session-history/
-
+description: Interactive menu for starting a new unit of work on a branch, with a context-aware starter checklist per work type.
+argument-hint: "[optional: what you're working on]"
 ---
 
 # Branch Workflow
 
-[ROLE]
-You are a Senior Development Lead facilitating feature-branch development workflow.
+Read `TEST_COMMAND`, `DOCS_ROOT`, `ADR_PATH` and `SNAPSHOT_PATH` from the `## Session Config` section of `CLAUDE.md`. If that section is missing, say so and ask rather than guessing — a wrong test command turns every checklist below into a false reassurance.
 
-[PHASE 1: CONTEXT SCAN]
+**Role:** Senior Development Lead facilitating feature-branch development.
+
+## Phase 1: Context scan
+
 Before presenting the menu:
 
-1. Run `git status` — verify clean working tree
-2. Run `git branch` — confirm on `main`
-3. Run `git pull origin main` — ensure up to date
-4. Find the most recent snapshot in `{SNAPSHOT_PATH}` for project context
+1. Run `git status` — verify a clean working tree.
+2. Run `git branch` — confirm the current branch.
+3. Run `git pull origin main` — ensure up to date.
+4. Find the most recent snapshot in `{SNAPSHOT_PATH}` for project context.
 
-[PHASE 2: WORK TYPE MENU]
+If the user passed an argument, treat it as their answer to "what are you working on" and skip straight to inferring the work type — still confirm the type before creating a branch.
+
+## Phase 2: Work type menu
 
 ```
 🌿 BRANCH WORKFLOW
@@ -46,9 +40,11 @@ Latest commit: {last commit}
 Reply with: WORK: <number>
 ```
 
-[PHASE 3: BRANCH CREATION & STARTER PROMPTS]
+## Phase 3: Branch creation and starter checklist
 
-## 1. FEATURE (feature/)
+Branch names are snake_case after the prefix.
+
+### 1. FEATURE (`feature/`)
 
 Ask: "What feature are you building?"
 Branch: `git checkout -b feature/{snake_case_name}`
@@ -67,14 +63,14 @@ STEPS:
 2. Implement core logic
 3. Add unit tests
 4. Add integration tests if needed
-5. Update relevant docs (spec, ARD if applicable)
+5. Update relevant docs (spec, ADR if applicable)
 6. Run: {TEST_COMMAND}
 7. Commit: feat: {description}
 
 Describe the feature in detail.
 ```
 
-## 2. FIX (fix/)
+### 2. FIX (`fix/`)
 
 Ask: "What bug are you fixing?"
 Branch: `git checkout -b fix/{snake_case_name}`
@@ -97,7 +93,7 @@ Commit: fix: {description}
 Describe the bug and any error messages.
 ```
 
-## 3. DOCS (docs/)
+### 3. DOCS (`docs/`)
 
 Ask: "What documentation are you updating?"
 Branch: `git checkout -b docs/{snake_case_name}`
@@ -123,7 +119,9 @@ Commit: docs: {description}
 What are you documenting?
 ```
 
-## 4. REFACTOR (refactor/)
+An architecture decision gets its own file in `{ADR_PATH}`, a row in that folder's README Index, and a link from `CLAUDE.md`'s Decision log — never the decision's reasoning pasted into `CLAUDE.md` itself.
+
+### 4. REFACTOR (`refactor/`)
 
 Ask: "What are you refactoring?"
 Branch: `git checkout -b refactor/{snake_case_name}`
@@ -147,7 +145,7 @@ Commit: refactor: {description}
 What are you refactoring and why?
 ```
 
-## 5. TEST (test/)
+### 5. TEST (`test/`)
 
 Ask: "What are you testing?"
 Branch: `git checkout -b test/{snake_case_name}`
@@ -167,7 +165,7 @@ Commit: test: {description}
 What behavior are you testing?
 ```
 
-## 6. EXPERIMENT (experiment/)
+### 6. EXPERIMENT (`experiment/`)
 
 Ask: "What are you exploring?"
 Branch: `git checkout -b experiment/{snake_case_name}`

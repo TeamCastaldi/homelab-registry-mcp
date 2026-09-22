@@ -17,6 +17,17 @@ uv run ruff format .                    # format (line-length: 100)
 
 CI runs `ruff check`, `ruff format --check`, `pytest -q`, and `ansible-lint` (against `ansible/`) on every push.
 
+## Session Config
+
+| Value | Setting |
+|---|---|
+| `TEST_COMMAND` | `uv run pytest` |
+| `LINT_COMMAND` | `uv run ruff check .` |
+| `SRC_ROOT` | `src/registry_mcp/` |
+| `DOCS_ROOT` | `docs/` |
+| `ADR_PATH` | `docs/ADRs/` |
+| `SNAPSHOT_PATH` | `docs/session-history/` |
+
 ## Project Structure
 
 ```

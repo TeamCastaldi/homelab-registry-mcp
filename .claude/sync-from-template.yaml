@@ -1,0 +1,7 @@
+# .claude/sync-from-template.yaml
+# Fill in once, when this repo is set up. Committed to the repo so it travels
+# with clones and doesn't live only in one machine's git config.
+template_repo_url: https://github.com/TeamCastaldi/project-template.git
+template_ref: main
+sync_paths:
+  - .claude
