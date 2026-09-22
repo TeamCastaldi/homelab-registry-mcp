@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from conftest import IsolatedSettings
 from registry_mcp.intake import (
     IntakeError,
     RepoSnapshot,
@@ -23,6 +24,8 @@ from registry_mcp.intake import (
     parse_snapshot,
 )
 from registry_mcp.intake import fetch as fetch_mod
+from registry_mcp.tools import intake as intake_tools_mod
+from registry_mcp.tools.intake import register_intake_tools
 
 
 class TestCheckRepoUrl:
@@ -371,3 +374,170 @@ class TestParseSnapshot:
             "sources",
             "warnings",
         }
+
+
+# ---------------------------------------------------------------------------
+# service-intake-repo MCP tool
+# ---------------------------------------------------------------------------
+
+
+class FakeReasoner:
+    def __init__(self, *, enabled=True, result=None, raises=None):
+        self.enabled = enabled
+        self._result = result
+        self._raises = raises
+        self.calls: list[dict] = []
+
+    def infer_service_requirements(self, **kwargs):
+        self.calls.append(kwargs)
+        if self._raises is not None:
+            raise self._raises
+        return self._result
+
+
+def _make_mcp():
+    tools: dict = {}
+
+    class _FakeMCP:
+        def tool(self, *args, **kwargs):
+            def decorator(fn):
+                tools[fn.__name__] = fn
+                return fn
+
+            return decorator
+
+    return _FakeMCP(), tools
+
+
+def _intake_settings(**overrides):
+    base = dict(
+        service_deploy_enabled=True,
+        service_deploy_confidence_threshold=0.8,
+        service_deploy_clone_timeout_seconds=5,
+        service_deploy_max_repo_mb=10,
+    )
+    base.update(overrides)
+    return IsolatedSettings(**base)
+
+
+def _register(monkeypatch, snapshot=None, *, settings=None, reasoner=None, fetch_error=None):
+    mcp, tools = _make_mcp()
+    settings = settings or _intake_settings()
+    reasoner = reasoner or FakeReasoner(enabled=False)
+
+    async def fake_fetch_repo(url, *, timeout_seconds, max_repo_mb):
+        if fetch_error is not None:
+            raise fetch_error
+        return snapshot
+
+    monkeypatch.setattr(intake_tools_mod, "fetch_repo", fake_fetch_repo)
+    register_intake_tools(mcp, settings, reasoner)
+    return tools["service_intake_repo"], reasoner
+
+
+class TestServiceIntakeRepoTool:
+    async def test_disabled_feature_flag_returns_error(self, monkeypatch):
+        tool, _ = _register(
+            monkeypatch,
+            RepoSnapshot(repo_url="x"),
+            settings=_intake_settings(service_deploy_enabled=False),
+        )
+        result = await tool(repo_url="https://example.com/o/p")
+        assert "SERVICE_DEPLOY_ENABLED" in result["error"]
+
+    async def test_fetch_error_becomes_error_dict(self, monkeypatch):
+        tool, _ = _register(monkeypatch, fetch_error=IntakeError("Unsupported URL scheme"))
+        result = await tool(repo_url="file:///etc/passwd")
+        assert result == {"error": "Unsupported URL scheme"}
+
+    async def test_deterministic_requirements_passthrough(self, monkeypatch):
+        snapshot = RepoSnapshot(
+            repo_url="https://example.com/o/p",
+            dockerfile="FROM alpine:3.20\nEXPOSE 80\n",
+            compose="services:\n  app:\n    image: ghcr.io/o/app:1\n",
+            compose_path="compose.yaml",
+            readme="# App",
+            skipped=["weird-symlink (symlink, refused)"],
+        )
+        tool, _ = _register(monkeypatch, snapshot)
+
+        result = await tool(repo_url=snapshot.repo_url)
+
+        assert result["repo_url"] == snapshot.repo_url
+        assert result["dockerfile_found"] is True
+        assert result["readme_found"] is True
+        assert result["compose_path"] == "compose.yaml"
+        assert result["requirements"]["base_image"] == "ghcr.io/o/app:1"
+        assert result["skipped_files"] == ["weird-symlink (symlink, refused)"]
+
+    async def test_reasoning_disabled_leaves_inference_null(self, monkeypatch):
+        snapshot = RepoSnapshot(repo_url="x", dockerfile="FROM alpine\n")
+        tool, reasoner = _register(monkeypatch, snapshot, reasoner=FakeReasoner(enabled=False))
+
+        result = await tool(repo_url="x")
+
+        assert result["inference"] is None
+        assert "DSPY_ENABLED" in result["inference_rejection_reason"]
+        assert reasoner.calls == []  # never called when disabled
+
+    async def test_inference_above_threshold_is_included(self, monkeypatch):
+        snapshot = RepoSnapshot(repo_url="x", dockerfile="FROM alpine\n")
+        inferred = {
+            "service_name": "paperless-ngx",
+            "summary": "Document management",
+            "category": "app",
+            "required_dependencies": ["postgres"],
+            "operator_supplied_env_vars": ["SECRET_KEY"],
+            "confidence": 0.9,
+            "reasoning": "README mentions postgres",
+        }
+        tool, _ = _register(
+            monkeypatch,
+            snapshot,
+            settings=_intake_settings(service_deploy_confidence_threshold=0.8),
+            reasoner=FakeReasoner(enabled=True, result=inferred),
+        )
+
+        result = await tool(repo_url="x")
+
+        assert result["inference"] == inferred
+        assert "inference_rejection_reason" not in result
+
+    async def test_inference_below_threshold_is_discarded(self, monkeypatch):
+        snapshot = RepoSnapshot(repo_url="x", dockerfile="FROM alpine\n")
+        low_confidence = {"service_name": "guess", "confidence": 0.3}
+        tool, _ = _register(
+            monkeypatch,
+            snapshot,
+            settings=_intake_settings(service_deploy_confidence_threshold=0.8),
+            reasoner=FakeReasoner(enabled=True, result=low_confidence),
+        )
+
+        result = await tool(repo_url="x")
+
+        # The guess is never returned as if it were fact, matching the
+        # write-path modules' no-fallback discipline.
+        assert result["inference"] is None
+        assert "confidence 0.30 below threshold 0.80" in result["inference_rejection_reason"]
+
+    async def test_inference_none_result_is_reported(self, monkeypatch):
+        snapshot = RepoSnapshot(repo_url="x", dockerfile="FROM alpine\n")
+        tool, _ = _register(monkeypatch, snapshot, reasoner=FakeReasoner(enabled=True, result=None))
+        result = await tool(repo_url="x")
+        assert result["inference"] is None
+        assert "no result" in result["inference_rejection_reason"]
+
+    async def test_reasoning_exception_does_not_break_intake(self, monkeypatch):
+        snapshot = RepoSnapshot(repo_url="x", dockerfile="FROM alpine\n")
+        tool, _ = _register(
+            monkeypatch,
+            snapshot,
+            reasoner=FakeReasoner(enabled=True, raises=RuntimeError("LM exploded")),
+        )
+
+        result = await tool(repo_url="x")
+
+        assert result["inference"] is None
+        assert "reasoning call failed" in result["inference_rejection_reason"]
+        # Deterministic facts must still be present despite the failure.
+        assert result["requirements"]["base_image"] == "alpine"

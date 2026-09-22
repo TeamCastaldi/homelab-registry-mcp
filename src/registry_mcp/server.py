@@ -38,6 +38,7 @@ from registry_mcp.tools import (
     register_discovery_tools,
     register_event_tools,
     register_hardware_tools,
+    register_intake_tools,
     register_linking_tools,
     register_proposal_tools,
     register_registry_tools,
@@ -184,6 +185,7 @@ def build_server(settings: Settings | None = None) -> FastMCP:
         read_only=read_only,
     )
     register_webhook_routes(mcp, settings, store, proposal_engine, read_only=read_only)
+    register_intake_tools(mcp, settings, reasoner)
 
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def health() -> dict[str, str]:
