@@ -141,7 +141,7 @@ def test_check_flags_hardcoded_proxy_network():
 def test_check_accepts_interpolated_proxy_network():
     doc = {
         "services": {"a": {"image": "x:1", "restart": "always"}},
-        "networks": {"${PROXY_NETWORK:-proxy-net}": {"external": True}},
+        "networks": {"${PROXY_NETWORK:-swarm-net}": {"external": True}},
     }
     findings = check(doc, raw_text="", path="x/compose.yaml")
     assert not any(f.rule_id == "R-005" for f in findings)

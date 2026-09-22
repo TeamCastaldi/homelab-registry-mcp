@@ -72,7 +72,7 @@ untouched.
 | R-002 | Service defines a `build:` key | SOP-001: "Do not include a `build:` key" |
 | R-003 | Service has no `restart:` policy | House style — services should survive a host reboot |
 | R-004 | `ports:` present without an accompanying `# temporary` comment | SOP-001: ports are a pre-Traefik interim state and must be flagged as such |
-| R-005 | Proxy network is a literal string instead of `${PROXY_NETWORK:-proxy-net}` | [ADR-003](../ARDs/ADR-003-OOBE-Decisions.md): "`compose.yaml` uses `${PROXY_NETWORK:-proxy-net}` for the proxy network name, never a hardcoded string" |
+| R-005 | Proxy network is a literal string instead of `${PROXY_NETWORK:-swarm-net}` | [ADR-003](../ADRs/ADR-003-OOBE-Decisions.md): "`compose.yaml` uses `${PROXY_NETWORK:-proxy-net}` for the proxy network name, never a hardcoded string" — the default has since become `swarm-net`; the rule itself (interpolate, never hardcode) is unchanged |
 | R-006 | A value looks like a hardcoded secret (reuses the `_CREDENTIAL_RE` heuristic from `proposal/generator.py`) | ADR-003: "`compose.yaml` never contains hardcoded secrets" |
 | R-007 | A service's `container_name` differs from its service key | House style — avoids two names for one container |
 
