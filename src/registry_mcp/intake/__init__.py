@@ -28,11 +28,21 @@ from registry_mcp.intake.fetch import (
     collect_from_dir,
     fetch_repo,
 )
+from registry_mcp.intake.parse import (
+    ServiceRequirements,
+    parse_compose,
+    parse_dockerfile,
+    parse_snapshot,
+)
 
 __all__ = [
     "IntakeError",
     "RepoSnapshot",
+    "ServiceRequirements",
     "check_repo_url",
     "collect_from_dir",
     "fetch_repo",
+    "parse_compose",
+    "parse_dockerfile",
+    "parse_snapshot",
 ]

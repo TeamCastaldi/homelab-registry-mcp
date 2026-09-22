@@ -12,7 +12,16 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from registry_mcp.intake import IntakeError, check_repo_url, collect_from_dir, fetch_repo
+from registry_mcp.intake import (
+    IntakeError,
+    RepoSnapshot,
+    check_repo_url,
+    collect_from_dir,
+    fetch_repo,
+    parse_compose,
+    parse_dockerfile,
+    parse_snapshot,
+)
 from registry_mcp.intake import fetch as fetch_mod
 
 
@@ -173,3 +182,192 @@ class TestFetchRepo:
             await fetch_repo("https://example.com/o/p", timeout_seconds=5, max_repo_mb=1)
 
         assert created and not created[0].exists()
+
+
+class TestParseDockerfile:
+    def test_extracts_base_image_ports_env_and_volumes(self):
+        req = parse_dockerfile(
+            "# a comment\n"
+            "FROM python:3.12-slim\n"
+            "ENV APP_PORT=8080 LOG_LEVEL=info\n"
+            "EXPOSE 8080 9090/udp\n"
+            'VOLUME ["/data"]\n'
+        )
+
+        assert req.base_image == "python:3.12-slim"
+        assert req.ports == ["8080/tcp", "9090/udp"]
+        assert req.env_vars == {"APP_PORT": "8080", "LOG_LEVEL": "info"}
+        assert req.volumes == ["/data"]
+
+    def test_joins_continuation_lines(self):
+        req = parse_dockerfile("ENV A=1 \\\n    B=2 \\\n    C=3\n")
+        assert req.env_vars == {"A": "1", "B": "2", "C": "3"}
+
+    def test_supports_legacy_env_form(self):
+        req = parse_dockerfile("ENV GREETING hello there\n")
+        assert req.env_vars == {"GREETING": "hello there"}
+
+    def test_handles_quoted_env_value(self):
+        req = parse_dockerfile('ENV MOTD="hello world" MODE=prod\n')
+        assert req.env_vars == {"MOTD": "hello world", "MODE": "prod"}
+
+    def test_multistage_resolves_final_from_to_real_image(self):
+        # The last FROM names a build stage, not an image; the runtime base is
+        # the image that stage was built from.
+        req = parse_dockerfile(
+            'FROM golang:1.22 AS builder\nRUN go build\nFROM builder\nCMD ["/app"]\n'
+        )
+        assert req.base_image == "golang:1.22"
+
+    def test_multistage_keeps_distinct_final_image(self):
+        req = parse_dockerfile("FROM golang:1.22 AS builder\nFROM alpine:3.20\n")
+        assert req.base_image == "alpine:3.20"
+
+    def test_space_separated_volume_form(self):
+        req = parse_dockerfile("VOLUME /data /config\n")
+        assert req.volumes == ["/data", "/config"]
+
+    def test_lowercase_instructions(self):
+        req = parse_dockerfile("from alpine:3.20\nexpose 80\n")
+        assert req.base_image == "alpine:3.20"
+        assert req.ports == ["80/tcp"]
+
+    def test_empty_dockerfile_yields_nothing(self):
+        req = parse_dockerfile("# only a comment\n\n")
+        assert req.base_image is None
+        assert req.ports == []
+
+
+class TestParseCompose:
+    def test_extracts_across_services(self):
+        req = parse_compose(
+            """
+            services:
+              app:
+                image: ghcr.io/o/app:1.2.3
+                ports: ["8080:80"]
+                environment:
+                  DATABASE_URL: postgres://db/app
+                  OPTIONAL_KEY:
+                volumes: ["appdata:/var/lib/app"]
+                depends_on: [db]
+              db:
+                image: postgres:16
+            """
+        )
+
+        assert req.base_image == "ghcr.io/o/app:1.2.3"
+        assert req.ports == ["80/tcp"]
+        assert req.env_vars == {"DATABASE_URL": "postgres://db/app", "OPTIONAL_KEY": None}
+        assert req.volumes == ["/var/lib/app"]
+        assert req.depends_on == ["db"]
+        assert req.service_names == ["app", "db"]
+
+    def test_port_forms_reduce_to_container_side(self):
+        req = parse_compose(
+            """
+            services:
+              app:
+                ports:
+                  - "80"
+                  - "127.0.0.1:8080:8081"
+                  - "5353:5353/udp"
+                  - target: 9000
+                    published: 9999
+            """
+        )
+        assert req.ports == ["80/tcp", "8081/tcp", "5353/udp", "9000/tcp"]
+
+    def test_list_style_environment(self):
+        req = parse_compose(
+            """
+            services:
+              app:
+                environment:
+                  - TZ=UTC
+                  - PASSTHROUGH
+            """
+        )
+        assert req.env_vars == {"TZ": "UTC", "PASSTHROUGH": None}
+
+    def test_long_form_volume_uses_target(self):
+        req = parse_compose(
+            """
+            services:
+              app:
+                volumes:
+                  - type: bind
+                    source: ./conf
+                    target: /etc/app
+            """
+        )
+        assert req.volumes == ["/etc/app"]
+
+    def test_depends_on_mapping_form(self):
+        req = parse_compose(
+            """
+            services:
+              app:
+                depends_on:
+                  db:
+                    condition: service_healthy
+            """
+        )
+        assert req.depends_on == ["db"]
+
+    def test_invalid_yaml_warns_rather_than_raising(self):
+        req = parse_compose("services: [unclosed\n")
+        assert req.warnings
+        assert "could not be parsed" in req.warnings[0]
+
+    def test_missing_services_key_warns(self):
+        req = parse_compose("version: '3'\n")
+        assert any("no `services`" in warning for warning in req.warnings)
+
+
+class TestParseSnapshot:
+    def test_compose_wins_over_dockerfile_on_conflict(self):
+        snap = RepoSnapshot(
+            repo_url="https://example.com/o/p",
+            dockerfile="FROM python:3.12\nENV LOG_LEVEL=debug\nEXPOSE 8080\n",
+            compose="services:\n  app:\n    image: ghcr.io/o/app:1\n"
+            "    environment:\n      LOG_LEVEL: info\n",
+            compose_path="compose.yaml",
+        )
+
+        req = parse_snapshot(snap)
+
+        # Compose describes how it actually runs, so its image and value win.
+        assert req.base_image == "ghcr.io/o/app:1"
+        assert req.env_vars["LOG_LEVEL"] == "info"
+        # The Dockerfile's EXPOSE is additive — compose never contradicted it.
+        assert "8080/tcp" in req.ports
+        assert "compose.yaml" in req.sources
+        assert "Dockerfile" in req.sources
+
+    def test_dockerfile_only_repo(self):
+        snap = RepoSnapshot(repo_url="x", dockerfile="FROM alpine:3.20\nEXPOSE 80\n")
+        req = parse_snapshot(snap)
+        assert req.base_image == "alpine:3.20"
+        assert req.ports == ["80/tcp"]
+        assert req.warnings == []
+
+    def test_empty_repo_warns_instead_of_looking_self_sufficient(self):
+        req = parse_snapshot(RepoSnapshot(repo_url="x"))
+        assert req.sources == []
+        assert any("no Dockerfile or compose file" in warning for warning in req.warnings)
+
+    def test_as_dict_is_json_shaped(self):
+        req = parse_snapshot(RepoSnapshot(repo_url="x", dockerfile="FROM alpine\n"))
+        payload = req.as_dict()
+        assert payload["base_image"] == "alpine"
+        assert set(payload) == {
+            "base_image",
+            "ports",
+            "env_vars",
+            "volumes",
+            "depends_on",
+            "service_names",
+            "sources",
+            "warnings",
+        }
