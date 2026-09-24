@@ -4,6 +4,7 @@ network — same duck-typed style as ``test_proposal_engine.py``.
 """
 
 from conftest import IsolatedSettings
+from registry_mcp.models import ProposalStatus
 from registry_mcp.normalization.engine import NormalizationEngine, schedule_seconds
 from registry_mcp.normalization.formatter import normalize as format_file
 from registry_mcp.normalization.generator import NormalizationGenerator
@@ -338,7 +339,11 @@ class FakeGit:
         self.commits = []
         self.deletes = []
         self.opened = []
+        self.pr_states = {}
         self._truncated = truncated
+
+    async def get_pr_state(self, repo, number):
+        return self.pr_states.get(number, "open")
 
     async def list_files(self, repo, ref):
         if self._truncated:
@@ -468,6 +473,24 @@ async def test_run_sweep_dedupes_against_open_proposal():
     second = await engine.run_sweep()
     assert "skipped" in second["items"][0]
     assert len(git.branches) == 1  # no second branch/PR
+
+
+async def test_run_sweep_reopens_node_once_its_pr_is_merged():
+    """A merged normalization PR used to stay `open` forever, so every later
+    sweep for that node was skipped as a duplicate."""
+    files = {"nodes/pi/plex/compose.yaml": _compose("plex")}
+    engine, proposals, git = _engine(files)
+    first = await engine.run_sweep()
+    first_pr = first["items"][0]["pr_number"]
+
+    git.pr_states[first_pr] = "merged"
+    git.files["nodes/pi/plex/compose.yaml"] = _compose("plex")  # drifted again
+    second = await engine.run_sweep()
+
+    assert "pr_number" in second["items"][0]
+    assert len(git.opened) == 2
+    retired = next(p for p in proposals.list_all() if p.pr_number == first_pr)
+    assert retired.status == ProposalStatus.merged
 
 
 async def test_run_sweep_dry_run_makes_no_git_writes():

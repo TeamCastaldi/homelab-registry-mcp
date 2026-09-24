@@ -59,6 +59,7 @@ src/registry_mcp/
 │   ├── generator.py       # calls DSPy GenerateRemediationPatch + confidence/YAML gates
 │   ├── adoption.py        # AdoptionGenerator: calls DSPy DetectHardcodedSecrets + same gates
 │   ├── engine.py          # create per finding, verification sweep, after_discovery hook
+│   ├── lifecycle.py       # retire_if_finished: merged/closed PR → merged/cancelled (shared with normalization)
 │   └── store.py           # Proposal CRUD (shares the registry SQLite engine)
 ├── normalization/         # normalization engine — see docs/specs/spec-compose-normal-form.md
 │   ├── rules.py           # rule IDs, canonical key orders, equivalence-guarantee projection
@@ -171,8 +172,16 @@ at all, and `PROPOSAL_AUTO_CREATE=true` for unattended creation.
   commit → open PR (labelled) → notify → persist `Proposal`. `PROPOSAL_DRY_RUN=true`
   stops before any Git write and returns the patch for review.
 - The engine consumes `GitProvider`/`NotificationProvider` protocols (Gitea/GitHub + Ntfy/Smtp/Null
-  shipped); the discovery engine's `on_pass_complete` hook runs the verification sweep
-  (and auto-create when enabled) after each pass — wrapped so it never breaks discovery.
+  shipped); the discovery engine's `on_pass_complete` hook runs the PR-state sync, the
+  verification sweep, and auto-create (when enabled) after each pass — wrapped so it never
+  breaks discovery.
+- **Proposal lifecycle:** `proposal/lifecycle.py`'s `retire_if_finished` reads the PR's state
+  (`GitProvider.get_pr_state`) and moves a merged PR's proposal to `merged` and a closed one to
+  `cancelled` — both periodically (`sync_pr_states`) and at every dedupe point (`_open_proposal`,
+  the normalization per-node check), so a finished PR never blocks the next proposal. A merged
+  `auth_mode_conflict` PR stays `open` until discovery sees the conflict clear; the verification
+  sweep only ever marks `auth_mode_conflict` proposals `verified` — image-update, CVE, adoption,
+  and normalization proposals resolve on merge.
 - `NotificationProvider.send()` takes an optional `diff` — Smtp renders it into a templated
   HTML email (PR summary + truncated diff + Approve/Request Changes/View Diff buttons); Ntfy/Null
   ignore it (a full diff has no place in a mobile push).

@@ -504,3 +504,37 @@ async def test_github_delete_file_missing_file_is_a_noop():
     fake = FakeGitHub()
     await _gh(fake).delete_file(REPO, "nope.yaml", "patch/x", "chore: remove")
     assert fake.deletes == []
+
+
+# --- PR state (both providers) ---------------------------------------------
+
+
+@pytest.mark.parametrize("provider_cls", [GiteaGitProvider, GitHubGitProvider])
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        ({"state": "open", "merged": False}, "open"),
+        ({"state": "closed", "merged": True}, "merged"),
+        ({"state": "closed", "merged": False}, "closed"),
+    ],
+)
+async def test_get_pr_state(provider_cls, payload, expected):
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(f"{request.method} {request.url.path}")
+        return httpx.Response(200, json={"number": 7, **payload})
+
+    provider = provider_cls("https://git.test", "tok", transport=httpx.MockTransport(handler))
+    assert await provider.get_pr_state(REPO, 7) == expected
+    assert seen[0].startswith("GET ") and seen[0].endswith(f"/repos/{REPO}/pulls/7")
+
+
+@pytest.mark.parametrize("provider_cls", [GiteaGitProvider, GitHubGitProvider])
+async def test_get_pr_state_error_raises(provider_cls):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"message": "Not Found"})
+
+    provider = provider_cls("https://git.test", "tok", transport=httpx.MockTransport(handler))
+    with pytest.raises(GitError):
+        await provider.get_pr_state(REPO, 999)

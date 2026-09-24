@@ -57,6 +57,16 @@ class ProposalStore:
             )
             return session.exec(statement).first()
 
+    def latest(self, service_id: str, finding_type: FindingType) -> Proposal | None:
+        """The most recent proposal for a service and finding, in any status."""
+        with Session(self.engine) as session:
+            statement = (
+                select(Proposal)
+                .where(Proposal.service_id == service_id, Proposal.finding_type == finding_type)
+                .order_by(col(Proposal.created_at).desc())
+            )
+            return session.exec(statement).first()
+
     def find_open_by_path(self, file_path: str, finding_type: FindingType) -> Proposal | None:
         """Like ``find_open`` but keyed on ``file_path`` instead of
         ``service_id`` — normalization proposals are batched per node

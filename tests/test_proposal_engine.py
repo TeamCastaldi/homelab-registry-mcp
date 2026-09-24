@@ -47,6 +47,7 @@ class FakeGit:
         self.opened = []
         self.closed = []
         self.comments = comments or {}
+        self.pr_states = {}
 
     async def read_file(self, repo, path, ref):
         return self.files.get(path, "services: {}\n")
@@ -75,6 +76,9 @@ class FakeGit:
 
     async def close_pr(self, repo, number):
         self.closed.append(number)
+
+    async def get_pr_state(self, repo, number):
+        return self.pr_states.get(number, "open")
 
     async def list_pr_comments(self, repo, number):
         return self.comments.get(number, [])
@@ -231,6 +235,113 @@ async def test_sweep_marks_verified_when_conflict_clears(store):
     assert refreshed.status == ProposalStatus.verified
     assert refreshed.resolved_at is not None
     assert any("secured" in s["title"] for s in notifier.sent)
+
+
+async def test_sweep_leaves_non_auth_proposals_open(store):
+    """An image-update PR has no discovery-visible resolution signal; the sweep
+    used to mark it `verified` on the next pass because the service simply had
+    no auth conflict, which also dropped its dedupe guard."""
+    service = store.create_service(Service(name="app", display_name="App", host="workload-01"))
+    notifier = FakeNotifier()
+    engine, proposals = _engine(store, notifier=notifier)
+    await engine.create_for_image_update(
+        service.id, image="ghcr.io/x/app", current_tag="1.0", new_tag="1.1"
+    )
+
+    await engine.after_discovery()
+
+    assert [p.status for p in proposals.list_all()] == [ProposalStatus.open]
+    assert not any("secured" in s["title"] for s in notifier.sent)
+
+
+async def test_after_discovery_retires_merged_and_closed_prs(store):
+    service = store.create_service(Service(name="app", display_name="App", host="workload-01"))
+    other = store.create_service(Service(name="db", display_name="DB", host="workload-01"))
+    git = FakeGit()
+    engine, proposals = _engine(store, git=git)
+    merged = await engine.create_for_image_update(
+        service.id, image="ghcr.io/x/app", current_tag="1.0", new_tag="1.1"
+    )
+    closed = await engine.create_for_image_update(
+        other.id, image="ghcr.io/x/db", current_tag="15", new_tag="16"
+    )
+    git.pr_states = {merged["pr_number"]: "merged", closed["pr_number"]: "closed"}
+
+    await engine.after_discovery()
+
+    assert proposals.get(merged["id"]).status == ProposalStatus.merged
+    assert proposals.get(closed["id"]).status == ProposalStatus.cancelled
+    assert proposals.list_open() == []
+
+
+async def test_merged_auth_conflict_pr_waits_for_verification(store):
+    """A merged auth fix is only done once discovery sees the conflict clear."""
+    service = _conflicted(store)
+    git = FakeGit()
+    engine, proposals = _engine(store, git=git)
+    created = await engine.create_for_service(service.id)
+    git.pr_states[created["pr_number"]] = "merged"
+
+    await engine.after_discovery()
+    assert proposals.get(created["id"]).status == ProposalStatus.open
+
+    store.update_service(service.id, {"auth_mode_conflict": False}, actor="discovery:traefik")
+    await engine.after_discovery()
+    assert proposals.get(created["id"]).status == ProposalStatus.verified
+
+
+async def test_auto_create_does_not_reopen_a_pr_a_human_closed(store):
+    service = _conflicted(store)
+    git = FakeGit()
+    engine, proposals = _engine(store, settings=_settings(proposal_auto_create=True), git=git)
+    await engine.after_discovery()
+    assert len(git.opened) == 1
+
+    git.pr_states[proposals.list_all()[0].pr_number] = "closed"
+    await engine.after_discovery()
+    await engine.after_discovery()
+
+    assert len(git.opened) == 1
+    assert [p.status for p in proposals.list_all()] == [ProposalStatus.cancelled]
+
+    # An explicit request still reopens it.
+    reopened = await engine.create_for_service(service.id)
+    assert "pr_number" in reopened
+    assert len(git.opened) == 2
+
+
+async def test_image_update_after_merged_pr_opens_a_new_proposal(store):
+    service = store.create_service(Service(name="app", display_name="App", host="workload-01"))
+    git = FakeGit()
+    engine, proposals = _engine(store, git=git)
+    first = await engine.create_for_image_update(
+        service.id, image="ghcr.io/x/app", current_tag="1.0", new_tag="1.1"
+    )
+    git.pr_states[first["pr_number"]] = "merged"
+
+    second = await engine.create_for_image_update(
+        service.id, image="ghcr.io/x/app", current_tag="1.1", new_tag="1.2"
+    )
+
+    assert "skipped" not in second
+    assert second["pr_number"] != first["pr_number"]
+    assert proposals.get(first["id"]).status == ProposalStatus.merged
+
+
+async def test_image_update_still_dedupes_against_an_open_pr(store):
+    service = store.create_service(Service(name="app", display_name="App", host="workload-01"))
+    git = FakeGit()
+    engine, _ = _engine(store, git=git)
+    await engine.create_for_image_update(
+        service.id, image="ghcr.io/x/app", current_tag="1.0", new_tag="1.1"
+    )
+
+    second = await engine.create_for_image_update(
+        service.id, image="ghcr.io/x/app", current_tag="1.0", new_tag="1.2"
+    )
+
+    assert second["skipped"] == "open proposal already exists"
+    assert len(git.opened) == 1
 
 
 async def test_cancel_closes_pr_and_marks_cancelled(store):

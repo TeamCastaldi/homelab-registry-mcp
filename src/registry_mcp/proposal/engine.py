@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from registry_mcp.logging import get_logger
 from registry_mcp.models import FindingType, Proposal, ProposalStatus
 from registry_mcp.models.service import utcnow
+from registry_mcp.proposal.lifecycle import retire_if_finished
 from registry_mcp.providers.git import GitError
 
 if TYPE_CHECKING:
@@ -86,6 +87,11 @@ class ProposalEngine:
 
     def _apply_footer(self) -> str:
         return _APPLY_FOOTER.get(self._settings.apply_mode, _APPLY_FOOTER["manual"])
+
+    async def _retire_if_finished(self, proposal: Proposal) -> bool:
+        return await retire_if_finished(
+            proposal, proposals=self._proposals, git=self._git, repo=self._settings.git_repo
+        )
 
     @staticmethod
     def _assert_feature_branch(branch: str, base: str) -> None:
@@ -185,7 +191,7 @@ class ProposalEngine:
         if not fixed_tag:
             reason = f"no fixed version available upstream ({cve_text})"
             existing = self._proposals.find_open(service.id, FindingType.vulnerability_scan)
-            if existing is not None:
+            if existing is not None and not await self._retire_if_finished(existing):
                 return {
                     "skipped": "open proposal already exists",
                     "proposal": existing.model_dump(mode="json"),
@@ -224,7 +230,8 @@ class ProposalEngine:
         context: str = "",
     ) -> dict[str, Any]:
         existing = self._proposals.find_open(service.id, finding)
-        if existing is not None:
+        # A proposal whose PR already merged or closed must not block a new one.
+        if existing is not None and not await self._retire_if_finished(existing):
             return {
                 "skipped": "open proposal already exists",
                 "proposal": existing.model_dump(mode="json"),
@@ -329,10 +336,27 @@ class ProposalEngine:
         return proposal.model_dump(mode="json")
 
     # -- verification ------------------------------------------------------
+    async def sync_pr_states(self) -> None:
+        """Retire every open proposal whose PR merged or was closed, so
+        `proposal_list_open` and the dedupe checks reflect the hosting side."""
+        if not self.configured:
+            return
+        for proposal in self._proposals.list_open():
+            await self._retire_if_finished(proposal)
+
     async def sweep_verifications(self) -> list[Proposal]:
-        """Mark open proposals verified when their conflict has cleared."""
+        """Mark open auth-conflict proposals verified when the conflict has cleared.
+
+        Only an `auth_mode_conflict` has a resolution signal discovery can
+        observe. Image-update, CVE, and adoption proposals resolve when their
+        PR merges (`sync_pr_states`) — treating a conflict-free service as
+        "verified" would close them, and drop their dedupe guard, on the very
+        next discovery pass.
+        """
         verified: list[Proposal] = []
         for proposal in self._proposals.list_open(exclude_normalization=True):
+            if proposal.finding_type != FindingType.auth_mode_conflict:
+                continue
             if proposal.service_id is None:
                 continue
             service = self._store.get_service(proposal.service_id)
@@ -364,13 +388,15 @@ class ProposalEngine:
         return (utcnow() - created).days
 
     async def after_discovery(self) -> None:
-        """Scheduler hook: verify open proposals, and (if enabled) open new ones.
+        """Scheduler hook: retire finished PRs, verify open proposals, and (if
+        enabled) open new ones.
 
         Wrapped so a proposal failure never disrupts the discovery pass.
         """
         if not self.configured:
             return
         try:
+            await self.sync_pr_states()
             await self.sweep_verifications()
             if self._settings.proposal_auto_create:
                 await self._auto_create()
@@ -382,6 +408,11 @@ class ProposalEngine:
             if not service.auth_mode_conflict or service.stale:
                 continue
             if self._proposals.find_open(service.id, FindingType.auth_mode_conflict):
+                continue
+            # A closed PR is a human "no": auto-create must not reopen it on the
+            # next pass. `proposal_create` still can, deliberately.
+            latest = self._proposals.latest(service.id, FindingType.auth_mode_conflict)
+            if latest is not None and latest.status == ProposalStatus.cancelled:
                 continue
             try:
                 await self.create_for_service(service.id, actor="discovery:auto")
