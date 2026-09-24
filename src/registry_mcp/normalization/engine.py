@@ -11,6 +11,7 @@ rather than raising past the caller.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -205,7 +206,8 @@ class NormalizationEngine:
 
         changes: list[_FileChange] = []
         for report in reports:
-            change = self._process_file(report)
+            # May escalate to a blocking DSPy call; keep it off the event loop.
+            change = await asyncio.to_thread(self._process_file, report)
             if change is not None:
                 changes.append(change)
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -19,6 +20,7 @@ from registry_mcp.logging import get_logger
 from registry_mcp.models import DiscoveryEvent, DiscoveryStatus, Service, SourceType
 from registry_mcp.models.service import utcnow
 from registry_mcp.registry import RegistryStore
+from registry_mcp.registry.reconcile import match_service
 
 _log = get_logger("discovery.engine")
 
@@ -145,6 +147,44 @@ class DiscoveryEngine:
 
         return {"identity_resolver": identity_resolver, "metadata_enricher": metadata_enricher}
 
+    async def _reasoning_for(self, discovered: list[DiscoveredService]) -> dict[str, Any]:
+        """Run the reasoning calls in a worker thread *before* reconcile opens its
+        write session, and hand reconcile pure lookups of the answers.
+
+        The calls are blocking LLM round-trips: made inside reconcile they froze
+        the event loop (every MCP session, the webhook, the scheduler) and held
+        SQLite's write lock for their whole duration. Only candidates with no
+        deterministic match are sent — reconcile tries `match_service` first and
+        consults the resolver only when it fails, so the answers line up.
+        """
+        extra = self._reconcile_extra()
+        if not extra:
+            return {}
+        resolve, enrich = extra["identity_resolver"], extra["metadata_enricher"]
+        services = self._store.list_services()
+        matched: dict[str, str | None] = {}
+        enriched: dict[str, dict[str, Any] | None] = {}
+
+        def work() -> None:
+            for item in discovered:
+                if match_service(services, item) is not None:
+                    continue
+                hit = resolve(item, services)
+                matched[item.external_id] = hit.name if hit else None
+                if hit is None:
+                    enriched[item.external_id] = enrich(item)
+
+        await asyncio.to_thread(work)
+
+        def identity_resolver(item: DiscoveredService, current: list[Service]) -> Service | None:
+            name = matched.get(item.external_id)
+            return next((s for s in current if s.name == name), None) if name else None
+
+        def metadata_enricher(item: DiscoveredService) -> dict[str, Any] | None:
+            return enriched.get(item.external_id)
+
+        return {"identity_resolver": identity_resolver, "metadata_enricher": metadata_enricher}
+
     async def run_source(self, source: SourceType) -> DiscoveryEvent:
         started = utcnow()
         src = self._sources.get(source)
@@ -158,11 +198,12 @@ class DiscoveryEngine:
             )
         try:
             discovered = await src.discover()
+            reasoning = await self._reasoning_for(discovered)
             counts = self._store.reconcile(
                 source,
                 discovered,
                 stale_threshold=self._stale_threshold,
-                **self._reconcile_extra(),
+                **reasoning,
             )
             status = DiscoveryStatus.ok
             error = None

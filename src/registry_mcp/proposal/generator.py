@@ -8,6 +8,7 @@ autonomous proposal generation responsible.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 from dataclasses import dataclass, field
@@ -108,7 +109,9 @@ class PatchGenerator:
         context: str = "",
     ) -> PatchResult:
         existing_middlewares = await self._fetch_existing_middlewares()
-        raw = self._reasoner.generate_remediation_patch(
+        # A blocking LLM round-trip: off the event loop, or every MCP session stalls.
+        raw = await asyncio.to_thread(
+            self._reasoner.generate_remediation_patch,
             service=service,
             finding_type=finding_type,
             current_file=current_file,
@@ -171,8 +174,11 @@ class PatchGenerator:
         YAML validity. No rule-based fallback — a failed gate is a rejection,
         never a hand-applied change.
         """
-        raw = self._reasoner.apply_review_feedback(
-            file_path=file_path, current_file=current_file, feedback=feedback
+        raw = await asyncio.to_thread(
+            self._reasoner.apply_review_feedback,
+            file_path=file_path,
+            current_file=current_file,
+            feedback=feedback,
         )
         if raw is None:
             return PatchResult(

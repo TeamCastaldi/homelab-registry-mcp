@@ -606,3 +606,21 @@ async def test_run_sweep_keeps_deterministic_partial_when_dspy_rejects():
     assert "pr_number" in result["items"][0]
     assert "version" not in git.commits[-1]["content"]
     assert "# pin this before merging" in git.commits[-1]["content"]
+
+
+async def test_run_sweep_escalation_runs_off_the_event_loop():
+    from conftest import BlockingCall
+
+    files = {
+        "nodes/pi/plex/compose.yaml": (
+            "services:\n  plex:\n    restart: unless-stopped\n"
+            "    # pin this before merging\n    image: x:1\n"
+        )
+    }
+    reasoner = FakeReasoner(_PLEX_NORMALIZED)
+    reasoner.normalize_config = BlockingCall(_PLEX_NORMALIZED)
+    engine, _, git = _engine(files, generator=NormalizationGenerator(reasoner, threshold=0.8))
+
+    result = await reasoner.normalize_config.assert_off_loop(engine.run_sweep())
+
+    assert "pr_number" in result["items"][0]

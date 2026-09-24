@@ -153,8 +153,10 @@ nodes, stored in the same SQLite database as services.
 **Reasoning layer (Phase 7, `dspy/`):** DSPy enrichment modules, off by default
 (`DSPY_ENABLED=false`). They *reason and return typed results — they never write*.
 The detection layer (`reconcile.py`) and discovery engine stay LLM-free: the engine
-injects the reasoner's callables into `store.reconcile`, so `reconcile.py` never imports
-dspy. Three modules, each confidence-gated (DSPy 3.x removed `dspy.Assert`, so gates are
+runs the reasoner in a worker thread *before* reconcile opens its write session
+(`DiscoveryEngine._reasoning_for`) and injects pure lookups of the answers into
+`store.reconcile`, so `reconcile.py` never imports dspy and SQLite's write lock is never
+held across an LLM round-trip. Three modules, each confidence-gated (DSPy 3.x removed `dspy.Assert`, so gates are
 explicit threshold checks; below threshold → discard and fall back to deterministic):
 - `ResolveServiceIdentity` — fuzzy cross-source match *only when deterministic matching fails*
 - `InferServiceMetadata` — infer display_name/category/auth_mode/notes for new Traefik-only services
@@ -532,6 +534,7 @@ Copy `.env.example` to `.env` and fill in the upstream URLs before running local
 - **An inbound webhook never mutates, and never guesses**: `webhooks/` receivers parse, validate, and hand off to the proposal engine — they never write the registry or touch a container. An alert that doesn't carry enough to build a correct change (a digest where a tag is needed) is acknowledged with a reason, never turned into a speculative PR. Unactionable alerts answer 200 so the sender doesn't retry forever; only malformed input or failed auth earns a non-2xx.
 - **No LLM calls in the detection layer**: `reconcile.py` and discovery sources stay deterministic. Reasoning (DSPy) lives in `dspy/` and is wired in via injected callables; those layers never `import dspy`.
 - **DSPy/`dspy/` subpackage does not shadow the library**: Python 3 absolute imports resolve `import dspy` to the top-level package; the library is imported lazily so a disabled reasoning layer adds no startup cost.
+- **LLM calls never run on the event loop**: every `Reasoner` call is a blocking litellm round-trip, so async code reaches it through `asyncio.to_thread` — otherwise every MCP session, the webhook, and the scheduler freeze for the whole call. Tests pin this with `conftest.BlockingCall`.
 - **Never call `dspy.configure()`**: DSPy 3.x lets only the first thread that ever calls it call it again, and a `Reasoner` is reached from both the event loop and `asyncio.to_thread` workers. `Reasoner._ensure()` (lock-guarded) binds every module to its own LM with `set_lm()` instead — after `_load_compiled()`, since `Predict.load_state()` resets `.lm`.
 - **Naming**: kebab-case for MCP tool names, snake_case for Python, PascalCase for classes.
 - **Log secrets are redacted**: any field named `token`, `password`, `secret`, `key`, `authorization`, `api_key` is replaced with `***redacted***` before writing to logs.

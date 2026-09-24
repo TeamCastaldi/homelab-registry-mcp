@@ -283,3 +283,37 @@ def test_traefik_discovery_can_promote_auth_mode_when_no_authentik(store):
     svc = store.get_service("dashboard")
     assert svc is not None
     assert svc.auth_mode == AuthMode.basic
+
+
+# --- reasoning runs off the event loop, before the write session opens -----
+
+
+async def test_reasoning_runs_off_the_loop_and_outside_the_write_session(store):
+    """The resolver and enricher are blocking LLM round-trips. Called inside
+    reconcile they froze the event loop and held SQLite's write lock for the
+    whole call; they now run in a worker thread before the session opens."""
+    import asyncio
+    import time
+
+    from conftest import BlockingCall
+    from registry_mcp.models import DiscoveryStatus, Service
+
+    store.create_service(Service(name="vault", display_name="Vault"))
+    reasoner = _FakeReasoner()
+    reasoner.resolve_identity = BlockingCall("vault")
+    engine = DiscoveryEngine(
+        store,
+        {SourceType.traefik: _Source(SourceType.traefik, [_traefik_item("vaultwarden")])},
+        reasoner=reasoner,
+    )
+
+    task = asyncio.create_task(engine.run_source(SourceType.traefik))
+    await reasoner.resolve_identity.wait_entered(task)
+    started = time.monotonic()
+    store.create_service(Service(name="other", display_name="Other"))
+    assert time.monotonic() - started < 1  # no reconcile write lock to wait behind
+
+    reasoner.resolve_identity.release.set()
+    event = await task
+    assert event.status == DiscoveryStatus.ok
+    assert {s.name for s in store.list_services()} == {"vault", "other"}  # merged, not created

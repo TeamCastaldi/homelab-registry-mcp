@@ -541,3 +541,19 @@ class TestServiceIntakeRepoTool:
         assert "reasoning call failed" in result["inference_rejection_reason"]
         # Deterministic facts must still be present despite the failure.
         assert result["requirements"]["base_image"] == "alpine"
+
+
+async def test_requirement_inference_runs_off_the_event_loop(monkeypatch):
+    from conftest import BlockingCall
+
+    reasoner = FakeReasoner(enabled=True)
+    reasoner.infer_service_requirements = BlockingCall(None)
+    tool, _ = _register(
+        monkeypatch,
+        RepoSnapshot(repo_url="https://example.com/o/p", dockerfile="FROM python:3.12\n"),
+        reasoner=reasoner,
+    )
+    result = await reasoner.infer_service_requirements.assert_off_loop(
+        tool(repo_url="https://example.com/o/p")
+    )
+    assert result["inference"] is None

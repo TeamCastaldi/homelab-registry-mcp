@@ -159,3 +159,29 @@ async def test_revise_credentials_are_scrubbed():
     assert result.ok is True
     assert "abcdefghijklmnopqrstuvwxyz0123456789" not in result.patch
     assert "AUTHENTIK_TOKEN: <replace-with-credential>" in result.patch
+
+
+async def test_patch_generation_runs_off_the_event_loop():
+    from conftest import BlockingCall
+
+    reasoner = FakeReasoner(VALID)
+    reasoner.generate_remediation_patch = BlockingCall(VALID)
+    result = await reasoner.generate_remediation_patch.assert_off_loop(
+        _call(PatchGenerator(reasoner, threshold=0.8))
+    )
+    assert result.ok
+
+
+async def test_revision_runs_off_the_event_loop():
+    from conftest import BlockingCall
+
+    reasoner = FakeReasoner(None, VALID_REVISION)
+    reasoner.apply_review_feedback = BlockingCall(VALID_REVISION)
+    result = await reasoner.apply_review_feedback.assert_off_loop(
+        PatchGenerator(reasoner, threshold=0.8).revise(
+            file_path="nodes/workload-01/plex/compose.yaml",
+            current_file="services: {}\n",
+            feedback="add a restart policy",
+        )
+    )
+    assert result.ok

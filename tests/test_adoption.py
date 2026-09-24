@@ -506,6 +506,40 @@ class TestProposalAdoptService:
         assert "error" in result
         assert "docker inspect failed" in result["error"]
 
+    async def test_secret_detection_runs_off_the_event_loop(self, store, hardware_store):
+        from conftest import BlockingCall
+
+        node = _node(hardware_store)
+        service = _docker_service(store)
+        hardware_store.link_service(service.id, node.id)
+        reasoner = FakeReasoner()
+        reasoner.detect_hardcoded_secrets = BlockingCall(VALID)
+        tools, _, _ = _setup(
+            store, hardware_store, generator=AdoptionGenerator(reasoner, threshold=0.8)
+        )
+        inspect_data = {
+            "Config": {
+                "Env": ["TOKEN=supersecretvalue"],
+                "Labels": {
+                    "com.docker.compose.project.config_files": "/srv/legacy/docker-compose.yml",
+                },
+            }
+        }
+        with (
+            patch(
+                "registry_mcp.tools.adoption.remote.inspect_container",
+                new=AsyncMock(return_value=inspect_data),
+            ),
+            patch(
+                "registry_mcp.tools.adoption.remote.read_remote_file",
+                new=AsyncMock(return_value="services:\n  legacy:\n    image: legacy:1.0\n"),
+            ),
+        ):
+            result = await reasoner.detect_hardcoded_secrets.assert_off_loop(
+                tools["proposal_adopt_service"](service.id)
+            )
+        assert "draft_id" in result
+
     async def test_option_shaped_ssh_user_never_reaches_a_subprocess(self, store, hardware_store):
         node = _node(hardware_store)
         service = _docker_service(store)

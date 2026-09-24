@@ -15,6 +15,7 @@ a normalization sweep treats them.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -113,7 +114,9 @@ class ComposeGenerator:
         self, *, intake: dict, service_name: str, target_node: str = ""
     ) -> ComposeDraft:
         conventions = await self._conventions()
-        raw = self._reasoner.generate_service_compose(
+        # A blocking LLM round-trip: off the event loop, or every MCP session stalls.
+        raw = await asyncio.to_thread(
+            self._reasoner.generate_service_compose,
             intake=intake,
             homelab_conventions=conventions,
             service_name=service_name,
