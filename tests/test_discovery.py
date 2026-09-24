@@ -521,3 +521,98 @@ def test_manual_service_with_a_lost_discovery_source_goes_stale(store):
         store.reconcile(SourceType.traefik, [], stale_threshold=2)
 
     assert store.get_service("app").stale is True
+
+
+# --- connect tools: base-URL allowlist and trimmed overview (SSRF) -----------
+
+
+def _connect_with(store, monkeypatch, response: httpx.Response):
+    """A connect server whose Traefik/Authentik clients answer `response` and
+    record every URL actually requested."""
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        return response
+
+    real_traefik = discovery_tools.TraefikClient
+    real_authentik = discovery_tools.AuthentikClient
+
+    def traefik_factory(base_url, **kwargs):
+        return real_traefik(base_url, transport=httpx.MockTransport(handler), backoff=0, retries=1)
+
+    def authentik_factory(base_url, token, **kwargs):
+        return real_authentik(
+            base_url, token, transport=httpx.MockTransport(handler), backoff=0, retries=1
+        )
+
+    monkeypatch.setattr(discovery_tools, "TraefikClient", traefik_factory)
+    monkeypatch.setattr(discovery_tools, "AuthentikClient", authentik_factory)
+    mcp = FastMCP(name="test")
+    register_discovery_tools(mcp, DiscoveryEngine(store, {}, stale_threshold=1))
+    return mcp, seen
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://10.0.0.9:2375/containers/json?",  # `?` would swallow /api/overview
+        "http://t/#",
+        "file:///etc/passwd",
+        "ftp://t",
+        "t:8080",
+    ],
+)
+async def test_connect_traefik_rejects_non_base_urls_without_a_request(store, monkeypatch, url):
+    server, seen = _connect_with(store, monkeypatch, httpx.Response(200, json={"http": {}}))
+    result = await call(server, "discovery_connect_traefik", {"url": url})
+    assert result["ok"] is False
+    assert seen == []
+
+
+async def test_connect_authentik_rejects_a_query_url_without_a_request(store, monkeypatch):
+    server, seen = _connect_with(store, monkeypatch, httpx.Response(200, json={"results": []}))
+    result = await call(
+        server, "discovery_connect_authentik", {"url": "https://a/api/v3?x=", "token": "t"}
+    )
+    assert result["ok"] is False
+    assert seen == []
+
+
+async def test_connect_traefik_never_echoes_a_non_traefik_body(store, monkeypatch):
+    body = {"Id": "abc", "Env": ["DB_PASSWORD=hunter2"]}
+    server, seen = _connect_with(store, monkeypatch, httpx.Response(200, json=body))
+    result = await call(server, "discovery_connect_traefik", {"url": "http://10.0.0.9:2375"})
+    assert result["ok"] is False
+    assert "not like the Traefik API" in result["error"]
+    assert "hunter2" not in str(result)
+    assert seen == ["http://10.0.0.9:2375/api/overview"]
+
+
+async def test_connect_traefik_returns_only_overview_counts(store, monkeypatch):
+    body = {
+        "http": {
+            "routers": {"total": 3, "warnings": 0, "errors": 1, "detail": {"x": "y"}},
+            "services": {"total": 2},
+            "extra": {"secret": "s"},
+        },
+        "tcp": {"routers": {"total": 0}},
+        "features": {"tracing": "otel"},
+        "providers": ["docker"],
+    }
+    server, _ = _connect_with(store, monkeypatch, httpx.Response(200, json=body))
+    result = await call(server, "discovery_connect_traefik", {"url": "http://t"})
+    assert result["overview"] == {
+        "http": {
+            "routers": {"total": 3, "warnings": 0, "errors": 1},
+            "services": {"total": 2},
+        },
+        "tcp": {"routers": {"total": 0}},
+    }
+
+
+async def test_connect_traefik_reports_a_non_json_body(store, monkeypatch):
+    server, _ = _connect_with(store, monkeypatch, httpx.Response(200, text="<html>hi</html>"))
+    result = await call(server, "discovery_connect_traefik", {"url": "http://t"})
+    assert result["ok"] is False
+    assert "non-JSON" in result["error"]

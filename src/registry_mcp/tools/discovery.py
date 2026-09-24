@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlparse
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
@@ -34,6 +35,47 @@ def _invalid_connection_params(timeout_seconds: float, retries: int) -> str | No
     if retries < 1:
         return f"retries must be at least 1, got {retries}"
     return None
+
+
+def _invalid_base_url(url: str) -> str | None:
+    """Reject anything but a plain http(s) base URL.
+
+    The clients append their own API path, so a `?` or `#` in a caller's URL
+    would swallow it (`http://10.0.0.9:2375/containers/json?` turns
+    `/api/overview` into a query string), letting these tools fetch an
+    arbitrary internal endpoint from this node's network position.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return f"url must be an http(s) URL with a host, got {url!r}"
+    if "?" in url or "#" in url:
+        return "url must be a base URL, without a query string or fragment"
+    return None
+
+
+_OVERVIEW_SECTIONS = ("http", "tcp", "udp")
+_OVERVIEW_KINDS = ("routers", "services", "middlewares")
+
+
+def _overview_summary(overview: Any) -> dict[str, Any] | None:
+    """Traefik's /api/overview trimmed to its router/service/middleware counts,
+    or None when the body isn't Traefik-shaped. A tool that echoed the whole
+    body would hand back any JSON a caller-supplied URL returned."""
+    if not isinstance(overview, dict) or not isinstance(overview.get("http"), dict):
+        return None
+    summary: dict[str, Any] = {}
+    for section in _OVERVIEW_SECTIONS:
+        block = overview.get(section)
+        if not isinstance(block, dict):
+            continue
+        kept = {
+            kind: {k: v for k, v in block[kind].items() if isinstance(v, int)}
+            for kind in _OVERVIEW_KINDS
+            if isinstance(block.get(kind), dict)
+        }
+        if kept:
+            summary[section] = kept
+    return summary
 
 
 def register_discovery_tools(mcp: FastMCP, engine: DiscoveryEngine) -> None:
@@ -79,16 +121,23 @@ def register_discovery_tools(mcp: FastMCP, engine: DiscoveryEngine) -> None:
         live-tests the URL (fetches Traefik's overview); never writes a file,
         since the container has no filesystem access to the host's .env.
         """
-        if error := _invalid_connection_params(timeout_seconds, retries):
+        if error := _invalid_base_url(url) or _invalid_connection_params(timeout_seconds, retries):
             return {"ok": False, "error": error}
         client = TraefikClient(url, timeout=timeout_seconds, retries=retries)
         try:
             overview = await client.overview()
         except TraefikError as exc:
             return {"ok": False, "error": str(exc)}
+        summary = _overview_summary(overview)
+        if summary is None:
+            return {
+                "ok": False,
+                "error": f"{url} answered, but not like the Traefik API "
+                "(its /api/overview has no `http` section)",
+            }
         return {
             "ok": True,
-            "overview": overview,
+            "overview": summary,
             "env_lines": [
                 f"TRAEFIK_API_URL={url}",
                 f"TRAEFIK_TIMEOUT_SECONDS={timeout_seconds}",
@@ -107,7 +156,7 @@ def register_discovery_tools(mcp: FastMCP, engine: DiscoveryEngine) -> None:
         once Authentik exists. Only live-tests the credentials (lists
         applications); never writes a file, and never echoes the token back.
         """
-        if error := _invalid_connection_params(timeout_seconds, retries):
+        if error := _invalid_base_url(url) or _invalid_connection_params(timeout_seconds, retries):
             return {"ok": False, "error": error}
         client = AuthentikClient(url, token, timeout=timeout_seconds, retries=retries)
         try:
