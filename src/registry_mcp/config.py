@@ -199,6 +199,10 @@ class Settings(BaseSettings):
     secrets_repo_path: str | None = Field(default=None)
     secrets_key_path: str | None = Field(default=None)
     secrets_git_crypt_key: str | None = Field(default=None)
+    # secrets_decrypt is the one tool that hands a plaintext secret value to
+    # an MCP client (ADR-016's Infisical tool never does), so it is opt-in on
+    # its own. secrets_list_keys reports key names without values either way.
+    secrets_allow_decrypt: bool = Field(default=False)
 
     # Read-only Infisical integration (ADR-016) — off by default. Reads
     # which secret keys exist at a project/environment/path; never a

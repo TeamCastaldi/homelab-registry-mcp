@@ -486,6 +486,7 @@ closes that gap without ever exposing a value. Off by default (`INFISICAL_ENABLE
 | `SECRETS_REPO_PATH` | unset | Absolute path to the cloned private homelab repo on this node. `pydantic-settings` reads `.env` as literal strings — `$HOME`/`~` are not expanded, so use a concrete absolute path (e.g. `/opt/homelab` on the Pi, `/Users/you/homelab` on macOS) |
 | `SECRETS_KEY_PATH` | unset | Absolute path to the exported git-crypt key file (priority over env var); same no-expansion caveat as `SECRETS_REPO_PATH` |
 | `SECRETS_GIT_CRYPT_KEY` | unset | Base64-encoded git-crypt key bytes (fallback when no key file) |
+| `SECRETS_ALLOW_DECRYPT` | `false` | Enables `secrets_decrypt`, the only tool that returns a plaintext secret value to an MCP client. `secrets_list_keys` (names only) works regardless. Both re-lock the repo after reading if they had to unlock it |
 | `INFISICAL_ENABLED` | `false` | Enables the read-only `infisical_status` MCP tool (ADR-016) |
 | `INFISICAL_BASE_URL` | unset | e.g. `https://infisical.example.com` (self-hosted) |
 | `INFISICAL_CLIENT_ID` / `INFISICAL_CLIENT_SECRET` | unset | Universal Auth Machine Identity credential (see `docs/SOPs/SOP-005-Connect-Infisical-Machine-Identity.md`); how this reaches the running process is a deployment concern — it can't be sourced from Infisical itself without being circular |

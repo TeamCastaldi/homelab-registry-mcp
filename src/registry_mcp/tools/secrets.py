@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -63,6 +64,24 @@ def register_secrets_tools(mcp: FastMCP, settings: Settings, read_only: bool = F
                 "Run system_health_check for details."
             }
         return None
+
+    async def _read_then_relock(repo: Path, key: bytes, target: Path) -> tuple[str, str | None]:
+        """Read `target` from the unlocked working tree, then lock the repo again
+        if this call was what unlocked it — plaintext stays on disk only for the
+        length of the call. Returns (content, warning); a failed re-lock is a
+        warning, since the read itself succeeded. `_ensure_unlocked`'s
+        RuntimeError propagates to the caller."""
+        was_locked = _is_locked(repo)
+        await _ensure_unlocked(repo, key)
+        warning = None
+        try:
+            content = target.read_text()
+        finally:
+            if was_locked:
+                rc, _, stderr = await _run(["git-crypt", "lock"], cwd=repo)
+                if rc != 0:
+                    warning = f"repo left unlocked: git-crypt lock failed: {stderr.strip()}"
+        return content, warning
 
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def secrets_status() -> dict[str, Any]:
@@ -127,16 +146,22 @@ def register_secrets_tools(mcp: FastMCP, settings: Settings, read_only: bool = F
 
         return {"encrypted": path, "gitattributes_updated": True}
 
-    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     async def secrets_decrypt(path: str) -> dict[str, Any]:
-        """Read an encrypted .env file without writing plaintext to disk.
+        """Return the plaintext of an encrypted file. Off unless SECRETS_ALLOW_DECRYPT=true.
 
         Returns a parsed key/value dict for .env files; raw string for other formats.
-        The repo is unlocked in-place to read the file — no separate plaintext copy
-        is written. Values are returned to the AI context only.
+        A locked repo is unlocked in place to read the file and locked again
+        afterwards. For key names only, use secrets_list_keys instead.
         """
         if err := _guard(settings):
             return err
+        if not settings.secrets_allow_decrypt:
+            return {
+                "error": "secrets_decrypt is disabled: it returns plaintext secret values to "
+                "the MCP client. Set SECRETS_ALLOW_DECRYPT=true to enable it, or use "
+                "secrets_list_keys for key names only."
+            }
         try:
             repo = _repo(settings)
             key = _key_bytes(settings)
@@ -152,12 +177,14 @@ def register_secrets_tools(mcp: FastMCP, settings: Settings, read_only: bool = F
             return {"error": f"File not found: {path}"}
 
         try:
-            await _ensure_unlocked(repo, key)
+            content, warning = await _read_then_relock(repo, key, target)
         except RuntimeError as exc:
             return {"error": str(exc)}
 
-        content = target.read_text()
-        return {"path": path, "content": _detect_format(target, content)}
+        result: dict[str, Any] = {"path": path, "content": _detect_format(target, content)}
+        if warning:
+            result["warning"] = warning
+        return result
 
     @mcp.tool(
         annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True)
@@ -268,9 +295,12 @@ def register_secrets_tools(mcp: FastMCP, settings: Settings, read_only: bool = F
             ),
         }
 
-    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     async def secrets_list_keys(path: str) -> dict[str, Any]:
-        """List the keys present in an encrypted .env file without revealing their values."""
+        """List the keys present in an encrypted .env file without revealing their values.
+
+        A locked repo is unlocked in place to read the file and locked again afterwards.
+        """
         if err := _guard(settings):
             return err
         try:
@@ -288,10 +318,11 @@ def register_secrets_tools(mcp: FastMCP, settings: Settings, read_only: bool = F
             return {"error": f"File not found: {path}"}
 
         try:
-            await _ensure_unlocked(repo, key_bytes)
+            content, warning = await _read_then_relock(repo, key_bytes, target)
         except RuntimeError as exc:
             return {"error": str(exc)}
 
-        content = target.read_text()
-        data = _parse_dotenv(content)
-        return {"path": path, "keys": list(data.keys())}
+        result: dict[str, Any] = {"path": path, "keys": list(_parse_dotenv(content).keys())}
+        if warning:
+            result["warning"] = warning
+        return result

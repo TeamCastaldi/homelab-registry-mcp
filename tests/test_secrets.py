@@ -246,7 +246,11 @@ class TestSecretsDecrypt:
         key_file = tmp_path / "git-crypt.key"
         key_file.write_bytes(b"fakekey")
 
-        settings = _settings(secrets_repo_path=str(tmp_path), secrets_key_path=str(key_file))
+        settings = _settings(
+            secrets_repo_path=str(tmp_path),
+            secrets_key_path=str(key_file),
+            secrets_allow_decrypt=True,
+        )
 
         with patch("registry_mcp.tools.secrets._ensure_unlocked", new=AsyncMock()):
             mcp, tools = _make_mcp()
@@ -261,7 +265,11 @@ class TestSecretsDecrypt:
         key_file = tmp_path / "git-crypt.key"
         key_file.write_bytes(b"fakekey")
 
-        settings = _settings(secrets_repo_path=str(tmp_path), secrets_key_path=str(key_file))
+        settings = _settings(
+            secrets_repo_path=str(tmp_path),
+            secrets_key_path=str(key_file),
+            secrets_allow_decrypt=True,
+        )
 
         with patch("registry_mcp.tools.secrets._ensure_unlocked", new=AsyncMock()):
             mcp, tools = _make_mcp()
@@ -273,7 +281,11 @@ class TestSecretsDecrypt:
     async def test_missing_file_returns_error(self, tmp_path: Path) -> None:
         key_file = tmp_path / "git-crypt.key"
         key_file.write_bytes(b"fakekey")
-        settings = _settings(secrets_repo_path=str(tmp_path), secrets_key_path=str(key_file))
+        settings = _settings(
+            secrets_repo_path=str(tmp_path),
+            secrets_key_path=str(key_file),
+            secrets_allow_decrypt=True,
+        )
 
         with patch("registry_mcp.tools.secrets._ensure_unlocked", new=AsyncMock()):
             mcp, tools = _make_mcp()
@@ -285,7 +297,11 @@ class TestSecretsDecrypt:
     async def test_rejects_absolute_path(self, tmp_path: Path) -> None:
         key_file = tmp_path / "git-crypt.key"
         key_file.write_bytes(b"fakekey")
-        settings = _settings(secrets_repo_path=str(tmp_path), secrets_key_path=str(key_file))
+        settings = _settings(
+            secrets_repo_path=str(tmp_path),
+            secrets_key_path=str(key_file),
+            secrets_allow_decrypt=True,
+        )
 
         mcp, tools = _make_mcp()
         register_secrets_tools(mcp, settings)  # type: ignore[arg-type]
@@ -457,7 +473,11 @@ class TestSecretsToolHardening:
     def _tools(self, tmp_path: Path) -> dict:
         key_file = tmp_path / "git-crypt.key"
         key_file.write_bytes(b"fakekey")
-        settings = _settings(secrets_repo_path=str(tmp_path), secrets_key_path=str(key_file))
+        settings = _settings(
+            secrets_repo_path=str(tmp_path),
+            secrets_key_path=str(key_file),
+            secrets_allow_decrypt=True,
+        )
         mcp, tools = _make_mcp()
         register_secrets_tools(mcp, settings)  # type: ignore[arg-type]
         return tools
@@ -510,3 +530,91 @@ class TestSecretsToolHardening:
             result = await tools["secrets_decrypt"](".git/config")
         assert ".git/" in result["error"]
         assert "token" not in str(result)
+
+
+# ---------------------------------------------------------------------------
+# Decrypt policy: opt-in, and never leave a repo decrypted that was locked
+# ---------------------------------------------------------------------------
+
+
+class TestDecryptPolicy:
+    def _locked_repo(self, tmp_path: Path) -> Path:
+        (tmp_path / ".gitattributes").write_text(".env filter=git-crypt diff=git-crypt\n")
+        (tmp_path / ".env").write_bytes(b"\x00GITCRYPT\x00ciphertext")
+        (tmp_path / "git-crypt.key").write_bytes(b"fakekey")
+        return tmp_path
+
+    def _tools(self, repo: Path, **overrides) -> dict:
+        settings = _settings(
+            secrets_repo_path=str(repo),
+            secrets_key_path=str(repo / "git-crypt.key"),
+            **overrides,
+        )
+        mcp, tools = _make_mcp()
+        register_secrets_tools(mcp, settings)  # type: ignore[arg-type]
+        return tools
+
+    @staticmethod
+    def _fake_unlock(repo: Path) -> AsyncMock:
+        async def unlock(_repo, _key):
+            (repo / ".env").write_text("FOO=bar\n")
+
+        return AsyncMock(side_effect=unlock)
+
+    async def test_decrypt_is_off_by_default(self, tmp_path: Path) -> None:
+        repo = self._locked_repo(tmp_path)
+        unlock = self._fake_unlock(repo)
+        with patch("registry_mcp.tools.secrets._ensure_unlocked", new=unlock):
+            result = await self._tools(repo)["secrets_decrypt"](".env")
+        assert "SECRETS_ALLOW_DECRYPT" in result["error"]
+        unlock.assert_not_awaited()
+
+    @pytest.mark.parametrize(
+        ("tool", "expected"),
+        [
+            ("secrets_decrypt", {"content": {"FOO": "bar"}}),
+            ("secrets_list_keys", {"keys": ["FOO"]}),
+        ],
+    )
+    async def test_relocks_a_repo_it_unlocked(
+        self, tmp_path: Path, tool: str, expected: dict
+    ) -> None:
+        repo = self._locked_repo(tmp_path)
+        run = AsyncMock(return_value=(0, "", ""))
+        with (
+            patch("registry_mcp.tools.secrets._ensure_unlocked", new=self._fake_unlock(repo)),
+            patch("registry_mcp.tools.secrets._run", new=run),
+        ):
+            result = await self._tools(repo, secrets_allow_decrypt=True)[tool](".env")
+
+        for key, value in expected.items():
+            assert result[key] == value
+        assert "warning" not in result
+        run.assert_awaited_once()
+        assert run.await_args.args[0] == ["git-crypt", "lock"]
+
+    async def test_leaves_an_already_unlocked_repo_alone(self, tmp_path: Path) -> None:
+        repo = self._locked_repo(tmp_path)
+        (repo / ".env").write_text("FOO=bar\n")  # the operator already unlocked it
+        run = AsyncMock(return_value=(0, "", ""))
+        with (
+            patch("registry_mcp.tools.secrets._ensure_unlocked", new=AsyncMock()),
+            patch("registry_mcp.tools.secrets._run", new=run),
+        ):
+            result = await self._tools(repo)["secrets_list_keys"](".env")
+
+        assert result["keys"] == ["FOO"]
+        run.assert_not_awaited()
+
+    async def test_a_failed_relock_is_reported_as_a_warning(self, tmp_path: Path) -> None:
+        repo = self._locked_repo(tmp_path)
+        run = AsyncMock(return_value=(1, "", "Working directory not clean"))
+        with (
+            patch("registry_mcp.tools.secrets._ensure_unlocked", new=self._fake_unlock(repo)),
+            patch("registry_mcp.tools.secrets._run", new=run),
+        ):
+            result = await self._tools(repo, secrets_allow_decrypt=True)["secrets_decrypt"](".env")
+
+        assert result["content"] == {"FOO": "bar"}
+        assert "repo left unlocked" in result["warning"]
+        assert "Working directory not clean" in result["warning"]
