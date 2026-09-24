@@ -618,3 +618,33 @@ class TestDecryptPolicy:
         assert result["content"] == {"FOO": "bar"}
         assert "repo left unlocked" in result["warning"]
         assert "Working directory not clean" in result["warning"]
+
+
+# ---------------------------------------------------------------------------
+# secrets_rotate
+# ---------------------------------------------------------------------------
+
+
+class TestSecretsRotate:
+    async def test_returns_manual_steps_and_changes_nothing(self, tmp_path: Path) -> None:
+        """git-crypt has no rotation command; `git-crypt init` on an initialized
+        repo always fails, so the old automation could never succeed."""
+        key_file = tmp_path / "git-crypt.key"
+        key_file.write_bytes(b"fakekey")
+        settings = _settings(secrets_repo_path=str(tmp_path), secrets_key_path=str(key_file))
+        run = AsyncMock(return_value=(0, "", ""))
+        unlock = AsyncMock()
+        with (
+            patch("registry_mcp.tools.secrets._run", new=run),
+            patch("registry_mcp.tools.secrets._ensure_unlocked", new=unlock),
+        ):
+            mcp, tools = _make_mcp()
+            register_secrets_tools(mcp, settings)  # type: ignore[arg-type]
+            result = await tools["secrets_rotate"]("")
+
+        assert "not automated" in result["error"]
+        steps = " ".join(result["manual_steps"])
+        assert "git add --renormalize ." in steps
+        assert "/tmp" not in steps
+        run.assert_not_awaited()
+        unlock.assert_not_awaited()

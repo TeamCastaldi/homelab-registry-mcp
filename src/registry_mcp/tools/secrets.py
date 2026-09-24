@@ -36,6 +36,26 @@ from registry_mcp.gitcrypt import serialize_dotenv as _serialize_dotenv
 # `registry_mcp.tools.secrets._run` — are unaffected.
 
 
+# git-crypt has no key-rotation command, so secrets_rotate returns these steps
+# rather than half-automating a procedure that can leave the repo unreadable.
+_MANUAL_ROTATION_STEPS = (
+    "In the homelab repo clone, unlock it and make sure `git status` is clean.",
+    "Move the current key aside: `mv .git/git-crypt .git/git-crypt.old` "
+    "(keep it until the last step passes).",
+    "Run `git-crypt init` to generate a new key.",
+    "Re-encrypt every protected file with the new key: `git add --renormalize .`, then "
+    "`git commit -m 'chore: re-encrypt with a new git-crypt key'` and push.",
+    "Run `git-crypt export-key <new-key-file>`, `chmod 400` it, and store it in your "
+    "password manager.",
+    "Point SECRETS_KEY_PATH or SECRETS_GIT_CRYPT_KEY at the new key (in Infisical, for "
+    "Dockhand-deployed stacks) and redeploy.",
+    "Verify: a fresh clone unlocks with the new key and `git-crypt status` reports no "
+    "unencrypted protected files. Only then delete .git/git-crypt.old.",
+    "Commits made before the rotation still decrypt with the old key. If that key may be "
+    "compromised, rotate the secrets themselves too.",
+)
+
+
 def _guard(settings: Settings) -> dict[str, Any] | None:
     """Return an error dict if secrets tools are disabled, else None."""
     if not settings.secrets_enabled:
@@ -53,8 +73,8 @@ def register_secrets_tools(mcp: FastMCP, settings: Settings, read_only: bool = F
 
     When `read_only` is set (startup health check failed; see
     `system_health_check`), the tools that mutate the homelab repo
-    (encrypt/add/rotate) refuse to run regardless of git-crypt configuration;
-    status/decrypt/list_keys stay usable.
+    (encrypt/add) refuse to run regardless of git-crypt configuration, as does
+    rotate (which only returns manual steps); status/decrypt/list_keys stay usable.
     """
 
     def _read_only_error() -> dict[str, Any] | None:
@@ -238,61 +258,24 @@ def register_secrets_tools(mcp: FastMCP, settings: Settings, read_only: bool = F
 
         return {"path": path, "key": key, "staged": True}
 
-    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True))
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def secrets_rotate(path: str) -> dict[str, Any]:
-        """Re-encrypt the homelab repo with a new git-crypt key.
+        """Explain how to rotate the homelab repo's git-crypt key. Changes nothing.
 
-        Exports a new key to <SECRETS_KEY_PATH>.new (or /tmp/git-crypt-new.key if
-        SECRETS_KEY_PATH is unset). Historical commits remain accessible via the old
-        key — true history rewrite is out of scope. Store the new key in your password
-        manager and discard the old one.
-
-        `path` is not used for filtering — rotation affects the entire repo. It is
-        accepted for API symmetry and future per-file rotation support.
+        git-crypt has no key-rotation command, and the automation this tool used
+        to attempt could never succeed: `git-crypt init` refuses to run on a repo
+        that is already initialized, and it would have exported the new key to a
+        predictable /tmp path. Returns the manual procedure instead. `path` is
+        unused and kept for API compatibility.
         """
         if err := _read_only_error():
             return err
         if err := _guard(settings):
             return err
-        try:
-            repo = _repo(settings)
-            key_bytes = _key_bytes(settings)
-        except RuntimeError as exc:
-            return {"error": str(exc)}
-
-        try:
-            await _ensure_unlocked(repo, key_bytes)
-        except RuntimeError as exc:
-            return {"error": str(exc)}
-
-        # Determine where to export the new key
-        if settings.secrets_key_path:
-            new_key_path = settings.secrets_key_path + ".new"
-        else:
-            new_key_path = "/tmp/git-crypt-new.key"
-
-        # Re-init generates a fresh key in .git/git-crypt/
-        rc, _, stderr = await _run(["git-crypt", "init"], cwd=repo)
-        if rc != 0:
-            return {"error": f"git-crypt init failed: {stderr.strip()}"}
-
-        rc, _, stderr = await _run(["git-crypt", "export-key", new_key_path], cwd=repo)
-        if rc != 0:
-            return {"error": f"git-crypt export-key failed: {stderr.strip()}"}
-
-        # Lock and re-unlock with new key so the working tree reflects new encryption
-        await _run(["git-crypt", "lock"], cwd=repo)
-        rc, _, stderr = await _run(["git-crypt", "unlock", new_key_path], cwd=repo)
-        if rc != 0:
-            return {"error": f"Re-unlock with new key failed: {stderr.strip()}"}
-
         return {
-            "rotated": True,
-            "new_key_path": new_key_path,
-            "warning": (
-                "Old key still decrypts historical commits. "
-                "Store the new key in your password manager and discard the old key."
-            ),
+            "error": "secrets_rotate is not automated: git-crypt has no key-rotation "
+            "command. Rotate the key by hand with manual_steps.",
+            "manual_steps": list(_MANUAL_ROTATION_STEPS),
         }
 
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
