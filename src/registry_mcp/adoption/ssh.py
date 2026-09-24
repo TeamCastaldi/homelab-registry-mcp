@@ -15,6 +15,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
+import shlex
+
+# A leading "-" turns `user@host` into an ssh option (-oProxyCommand=... runs a
+# command on *this* node), so user and host must be plain names.
+_SSH_USER_RE = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
+_SSH_HOST_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.:-]{0,252}")
 
 
 class SSHError(RuntimeError):
@@ -32,6 +39,10 @@ async def _run(cmd: list[str]) -> tuple[int, str, str]:
 
 
 def _ssh_base(key_path: str, user: str, host: str) -> list[str]:
+    if not _SSH_USER_RE.fullmatch(user):
+        raise SSHError(f"refusing unsafe SSH user {user!r}")
+    if not _SSH_HOST_RE.fullmatch(host):
+        raise SSHError(f"refusing unsafe SSH host {host!r}")
     return [
         "ssh",
         "-i",
@@ -42,13 +53,22 @@ def _ssh_base(key_path: str, user: str, host: str) -> list[str]:
         "StrictHostKeyChecking=accept-new",
         "-o",
         "ConnectTimeout=10",
+        "--",
         f"{user}@{host}",
     ]
 
 
+def _remote_command(*argv: str) -> str:
+    """ssh joins trailing args with spaces for the remote login shell; quote each
+    word so a label-supplied path can never become a second command."""
+    return shlex.join(argv)
+
+
 async def inspect_container(*, key_path: str, user: str, host: str, container: str) -> dict:
     """Return the parsed `docker inspect` output for one container on a remote host."""
-    rc, out, err = await _run([*_ssh_base(key_path, user, host), "docker", "inspect", container])
+    rc, out, err = await _run(
+        [*_ssh_base(key_path, user, host), _remote_command("docker", "inspect", "--", container)]
+    )
     if rc != 0:
         raise SSHError(f"docker inspect {container!r} on {host} failed: {err.strip()}")
     try:
@@ -62,7 +82,9 @@ async def inspect_container(*, key_path: str, user: str, host: str, container: s
 
 async def read_remote_file(*, key_path: str, user: str, host: str, path: str) -> str:
     """cat a file on the remote host. Raises SSHError if it can't be read."""
-    rc, out, err = await _run([*_ssh_base(key_path, user, host), "cat", path])
+    rc, out, err = await _run(
+        [*_ssh_base(key_path, user, host), _remote_command("cat", "--", path)]
+    )
     if rc != 0:
         raise SSHError(f"reading {path!r} on {host} failed: {err.strip()}")
     return out

