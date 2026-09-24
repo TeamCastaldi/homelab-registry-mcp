@@ -252,6 +252,13 @@ GitOps-managed) under management without leaking its hardcoded secrets. Off by d
   remote Git provider, on that same branch.
 - `AdoptionDraft` rows hold the captured live secret values only long enough for the
   operator to answer (`ADOPTION_DRAFT_TTL_MINUTES`, default 60) before expiring.
+- **Live values never reach the LLM provider**: `AdoptionGenerator` masks every live env
+  value of 8+ characters in the compose text as a `<value-of:KEY>` placeholder and sends
+  `container_env` as names only. The model interpolates the secrets as `${KEY}` and copies
+  the other placeholders, which are then restored to their real values. An altered or
+  invented placeholder rejects the result. The credential scrub runs after the restore, so
+  a secret the model wrongly kept is still caught. Shorter values and secrets that aren't
+  whole env values (e.g. embedded in a URL) are not masked.
 
 **Repo intake (`docs/plans/conversational-deploy.md` Phase 1, ADR-018, `intake/` +
 `tools/intake.py`):** the first slice of the conversational deploy flow — turns a

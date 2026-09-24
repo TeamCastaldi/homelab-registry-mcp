@@ -135,6 +135,88 @@ class TestAdoptionGenerator:
         assert "TOKEN: <replace-with-credential>" in result.reasoning
 
 
+class RecordingReasoner:
+    """Captures exactly what would be sent to the LLM provider."""
+
+    def __init__(self, sanitized_compose: str, keys=("TOKEN",)):
+        self.sent: dict = {}
+        self._result = {
+            **VALID,
+            "sanitized_compose": sanitized_compose,
+            "detected_secret_keys": list(keys),
+        }
+
+    def detect_hardcoded_secrets(self, **kwargs):
+        self.sent = kwargs
+        return self._result
+
+
+_TOKEN = "abcdefghijklmnopqrstuvwxyz0123456789"
+_LEGACY = (
+    "services:\n  legacy:\n    image: legacy:1.0\n    environment:\n"
+    f"      TOKEN: {_TOKEN}\n      TZ: America/New_York\n      LOG_LEVEL: info\n"
+)
+_LIVE_ENV = {"TOKEN": _TOKEN, "TZ": "America/New_York", "LOG_LEVEL": "info"}
+
+
+class TestAdoptionValueMasking:
+    """Live secret values must never reach the LLM provider."""
+
+    def test_live_values_never_reach_the_reasoner(self):
+        reasoner = RecordingReasoner(_LEGACY)
+        AdoptionGenerator(reasoner, threshold=0.8).generate(
+            compose_content=_LEGACY, container_env=_LIVE_ENV, container_labels={}
+        )
+        sent = str(reasoner.sent)
+        assert _TOKEN not in sent
+        assert "America/New_York" not in sent
+        assert "TOKEN: <value-of:TOKEN>" in reasoner.sent["compose_content"]
+        assert "LOG_LEVEL: info" in reasoner.sent["compose_content"]  # too short to mask
+        assert reasoner.sent["container_env"] == {
+            "TOKEN": "<value-of:TOKEN>",
+            "TZ": "<value-of:TZ>",
+            "LOG_LEVEL": "<value-of:LOG_LEVEL>",
+        }
+
+    def test_kept_placeholders_are_restored(self):
+        reply = (
+            "services:\n  legacy:\n    image: legacy:1.0\n    environment:\n"
+            "      TOKEN: ${TOKEN}\n      TZ: <value-of:TZ>\n      LOG_LEVEL: info\n"
+        )
+        result = AdoptionGenerator(RecordingReasoner(reply), threshold=0.8).generate(
+            compose_content=_LEGACY, container_env=_LIVE_ENV, container_labels={}
+        )
+        assert result.ok is True
+        assert "TZ: America/New_York" in result.sanitized_compose
+        assert "TOKEN: ${TOKEN}" in result.sanitized_compose
+
+    def test_an_altered_placeholder_is_rejected(self):
+        reply = "services:\n  legacy:\n    environment:\n      TZ: <value-of:TIMEZONE>\n"
+        result = AdoptionGenerator(RecordingReasoner(reply), threshold=0.8).generate(
+            compose_content=_LEGACY, container_env=_LIVE_ENV, container_labels={}
+        )
+        assert result.ok is False
+        assert "placeholder" in result.rejection_reason
+
+    def test_a_secret_the_model_kept_is_still_scrubbed(self):
+        reply = "services:\n  legacy:\n    environment:\n      TOKEN: <value-of:TOKEN>\n"
+        result = AdoptionGenerator(RecordingReasoner(reply, keys=()), threshold=0.8).generate(
+            compose_content=_LEGACY, container_env=_LIVE_ENV, container_labels={}
+        )
+        assert _TOKEN not in result.sanitized_compose
+        assert "TOKEN: <replace-with-credential>" in result.sanitized_compose
+
+    def test_overlapping_values_round_trip_exactly(self):
+        compose = "x: password1234\ny: password123\n"
+        env = {"A": "password123", "B": "password1234"}
+        reasoner = RecordingReasoner("x: <value-of:B>\ny: <value-of:A>\n", keys=())
+        result = AdoptionGenerator(reasoner, threshold=0.8).generate(
+            compose_content=compose, container_env=env, container_labels={}
+        )
+        assert reasoner.sent["compose_content"] == "x: <value-of:B>\ny: <value-of:A>\n"
+        assert result.sanitized_compose == compose
+
+
 # ---------------------------------------------------------------------------
 # SSH helpers
 # ---------------------------------------------------------------------------
