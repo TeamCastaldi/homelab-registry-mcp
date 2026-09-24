@@ -12,6 +12,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from registry_mcp.config import Settings
+from registry_mcp.errors import resource_or_raise
 from registry_mcp.integrations.dockhand.client import DockhandClient, DockhandError
 
 _READ_ONLY = ToolAnnotations(readOnlyHint=True)
@@ -89,10 +90,10 @@ def register_dockhand_tools(mcp: FastMCP, settings: Settings) -> None:
         optionally filtered to one container, under `items`."""
         return await _call_list("list_vulnerabilities", container_id)
 
-    @mcp.resource("dockhand://stacks/{stack_id}")
+    @mcp.resource("dockhand://stacks/{stack_id}", mime_type="application/json")
     async def dockhand_stack_resource(stack_id: str) -> dict[str, Any]:
         """Full detail for a single Dockhand stack by id."""
-        return await _call("get_stack", stack_id)
+        return resource_or_raise(await _call("get_stack", stack_id))
 
     @mcp.prompt()
     def diagnose_stack(stack_id: str) -> str:

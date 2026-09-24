@@ -10,6 +10,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from registry_mcp.config import Settings
+from registry_mcp.errors import resource_or_raise
 from registry_mcp.integrations.authentik.client import AuthentikClient, AuthentikError
 
 if TYPE_CHECKING:
@@ -162,10 +163,10 @@ def register_authentik_tools(
         """List Authentik groups, optionally filtered by a search term, under `items`."""
         return await _call_list("list_groups", search)
 
-    @mcp.resource("authentik://applications/{slug}")
+    @mcp.resource("authentik://applications/{slug}", mime_type="application/json")
     async def authentik_application_resource(slug: str) -> dict[str, Any]:
         """Full detail for a single Authentik application by slug."""
-        return await _call("get_application", slug)
+        return resource_or_raise(await _call("get_application", slug))
 
     @mcp.prompt()
     def audit_application_access(slug: str) -> str:

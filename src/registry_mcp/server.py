@@ -53,6 +53,63 @@ from registry_mcp.tools import (
 )
 from registry_mcp.webhooks import register_webhook_routes
 
+# Tools that only touch this server's own state: its SQLite DB, the local
+# homelab clone (secrets_*), and the Ansible inventory file. Every other tool
+# reaches an external system (Traefik, Authentik, Dockhand, Infisical, a Git
+# host, SSH, a cloned repo, an LLM provider) and is marked open-world — which
+# is also the MCP default when the hint is absent, hence this explicit list.
+_CLOSED_WORLD_TOOLS = frozenset(
+    {
+        "registry_add_service",
+        "registry_get_service",
+        "registry_list_services",
+        "registry_update_service",
+        "registry_delete_service",
+        "registry_delete_service_confirm",
+        "events_list_discoveries",
+        "events_list_changes",
+        "events_get_for_service",
+        "discovery_status",
+        "discovery_list_stale",
+        "service_link_authentik",
+        "hardware-add-node",
+        "hardware-get-node",
+        "hardware-list-nodes",
+        "hardware-update-node",
+        "hardware-delete-node",
+        "hardware-delete-node-confirm",
+        "hardware-link-service",
+        "hardware-node-services",
+        "hardware-list-unconfirmed",
+        "hardware-list-stale",
+        "hardware-capacity-summary",
+        "hardware-discovery-status",
+        "ansible-inventory-sync-node",
+        "ansible-inventory-sync-node-confirm",
+        "proposal_list_open",
+        "proposal_get",
+        "proposal_adopt_service_cancel",
+        "proposal_adopt_service_get",
+        "secrets_status",
+        "secrets_encrypt",
+        "secrets_decrypt",
+        "secrets_add",
+        "secrets_rotate",
+        "secrets_list_keys",
+        "health",
+        "system_health_check",
+    }
+)
+
+
+def _apply_open_world_hints(mcp: FastMCP) -> None:
+    """Set `openWorldHint` on every registered tool, keeping its other hints."""
+    for tool in mcp._tool_manager.list_tools():  # noqa: SLF001
+        annotations = tool.annotations or ToolAnnotations()
+        tool.annotations = annotations.model_copy(
+            update={"openWorldHint": tool.name not in _CLOSED_WORLD_TOOLS}
+        )
+
 
 def _csv(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
@@ -261,6 +318,7 @@ def build_app(settings: Settings | None = None) -> tuple[FastMCP, Runtime]:
             **current.to_dict(),
         }
 
+    _apply_open_world_hints(mcp)
     return mcp, Runtime(
         settings=settings,
         read_only=read_only,

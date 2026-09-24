@@ -19,17 +19,13 @@ from weakref import WeakKeyDictionary
 
 from mcp.types import CallToolResult, TextContent
 
+from registry_mcp.errors import reports_error
 from registry_mcp.logging.events import get_logger
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import Context, FastMCP
 
 _logger = get_logger("registry.tool_calls")
-
-
-def _reports_error(result: Any) -> bool:
-    """Tools report failure by returning a dict with a non-empty top-level `error`."""
-    return isinstance(result, dict) and bool(result.get("error"))
 
 
 def _error_result(result: dict[str, Any]) -> CallToolResult:
@@ -96,7 +92,7 @@ def install_tool_call_logging(server: FastMCP) -> None:
         except Exception:
             _logger.info("tool_call", tool_name=name, session_id=session_id, success=False)
             raise
-        failed = _reports_error(result)
+        failed = reports_error(result)
         _logger.info("tool_call", tool_name=name, session_id=session_id, success=not failed)
         if not convert_result:
             return result

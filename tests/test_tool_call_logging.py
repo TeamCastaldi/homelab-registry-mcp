@@ -142,9 +142,9 @@ async def test_context_alongside_an_error_is_kept(server):
     ],
 )
 def test_only_a_non_empty_top_level_error_is_a_failure(result, is_error):
-    from registry_mcp.logging.tool_calls import _reports_error
+    from registry_mcp.errors import reports_error
 
-    assert _reports_error(result) is is_error
+    assert reports_error(result) is is_error
 
 
 def test_real_client_sees_is_error_on_a_reported_error(server):
