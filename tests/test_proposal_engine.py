@@ -59,7 +59,9 @@ class FakeGit:
         self.branches.append(branch)
 
     async def commit_file(self, repo, path, content, branch, message):
-        self.commits.append({"path": path, "content": content, "branch": branch})
+        self.commits.append(
+            {"path": path, "content": content, "branch": branch, "message": message}
+        )
         self.files[path] = content
 
     async def delete_file(self, repo, path, branch, message):
@@ -155,6 +157,39 @@ async def test_create_opens_pr_and_records_proposal(store):
     assert len(proposals.list_open()) == 1
     assert notifier.sent[0]["url"] == result["pr_url"]
     assert notifier.sent[0]["diff"] == VALID_PATCH["patch"]
+
+
+async def test_credential_in_generated_text_never_reaches_git_or_notification(store):
+    leaked = "abcdefghijklmnopqrstuvwxyz0123456789"
+    quoted = f"drop the hardcoded AUTHENTIK_TOKEN={leaked}"
+    reasoner = FakeReasoner(
+        {
+            **VALID_PATCH,
+            "commit_message": quoted,
+            "pr_title": quoted,
+            "pr_body": quoted,
+            "reasoning": quoted,
+        },
+        revision_result={**VALID_REVISION, "commit_message": quoted, "reasoning": quoted},
+    )
+    service = _conflicted(store)
+    notifier = FakeNotifier()
+    git = FakeGit()
+    settings = _settings(proposal_comment_allowed_users="nathan")
+    engine, proposals = _engine(
+        store, settings=settings, git=git, notifier=notifier, reasoner=reasoner
+    )
+
+    created = await engine.create_for_service(service.id)
+    comment = {"id": 501, "user": {"login": "nathan"}, "body": "please add a restart policy"}
+    await engine.apply_review_feedback(proposals.get(created["id"]), comment)
+
+    assert len(git.commits) == 2  # the PR's commit and the revision
+    outbound = [c["message"] for c in git.commits]
+    outbound += [f"{pr['title']}\n{pr['body']}" for pr in git.opened]
+    outbound += [f"{sent['title']}\n{sent['body']}" for sent in notifier.sent]
+    assert all(leaked not in text for text in outbound)
+    assert "AUTHENTIK_TOKEN=<replace-with-credential>" in git.commits[-1]["message"]
 
 
 async def test_create_dry_run_opens_no_pr(store):
