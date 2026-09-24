@@ -4,6 +4,7 @@ import asyncio
 import threading
 
 import pytest
+from mcp.types import CallToolResult
 from pydantic_settings import SettingsConfigDict
 
 from registry_mcp.config import Settings
@@ -35,6 +36,16 @@ class IsolatedSettings(Settings):
     ):
         # Honor only constructor kwargs; ignore env vars, .env, and secrets files.
         return (init_settings,)
+
+
+def tool_payload(result):
+    """The structured payload of a `FastMCP.call_tool()` result: a success is a
+    `(content, structured)` tuple, a reported error a `CallToolResult` with
+    `isError` set and the tool's `{"error": ...}` dict as structured content."""
+    if isinstance(result, CallToolResult):
+        assert result.isError, "a CallToolResult here is always a reported error"
+        return result.structuredContent
+    return result[1]
 
 
 class BlockingCall:

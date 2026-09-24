@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 import registry_mcp.tools.linking as linking_tools
-from conftest import IsolatedSettings
+from conftest import IsolatedSettings, tool_payload
 from registry_mcp.discovery.base import DiscoveredService
 from registry_mcp.discovery.engine import DiscoveryEngine
 from registry_mcp.models import AuthMode, SourceType
@@ -48,7 +48,7 @@ class FakeSource:
 
 
 async def call(server, name, args):
-    return (await server.call_tool(name, args))[1]
+    return tool_payload(await server.call_tool(name, args))
 
 
 # --- automatic linking via the reconciler ---------------------------------

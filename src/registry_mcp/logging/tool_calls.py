@@ -4,13 +4,20 @@ Deliberately omits arguments and results: `_redact` in `logging/events.py`
 catches secret-shaped *key names*, but not e.g. `secrets_add`'s `value`
 param, which carries a secret under an innocuous name. Omitting args/results
 entirely sidesteps that gap rather than relying on an exhaustive redaction list.
+
+The same wrapper is where a tool's reported failure becomes an MCP one: tools
+return `{"error": ...}` (sometimes with context alongside), and the MCP spec
+reports tool-execution errors as results with `isError: true`.
 """
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 from weakref import WeakKeyDictionary
+
+from mcp.types import CallToolResult, TextContent
 
 from registry_mcp.logging.events import get_logger
 
@@ -18,6 +25,22 @@ if TYPE_CHECKING:
     from mcp.server.fastmcp import Context, FastMCP
 
 _logger = get_logger("registry.tool_calls")
+
+
+def _reports_error(result: Any) -> bool:
+    """Tools report failure by returning a dict with a non-empty top-level `error`."""
+    return isinstance(result, dict) and bool(result.get("error"))
+
+
+def _error_result(result: dict[str, Any]) -> CallToolResult:
+    """The same payload clients received before, now flagged `isError: true`.
+    The SDK passes a CallToolResult through as-is, skipping output-schema
+    validation — which describes the success shape, not this one."""
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps(result, indent=2, default=str))],
+        structuredContent=result,
+        isError=True,
+    )
 
 
 def install_tool_call_logging(server: FastMCP) -> None:
@@ -67,11 +90,18 @@ def install_tool_call_logging(server: FastMCP) -> None:
     ) -> Any:
         session_id = _session_id(context)
         try:
-            result = await original(name, arguments, context=context, convert_result=convert_result)
+            # Always take the raw result, so a reported error is still visible
+            # before it is converted to MCP content.
+            result = await original(name, arguments, context=context, convert_result=False)
         except Exception:
             _logger.info("tool_call", tool_name=name, session_id=session_id, success=False)
             raise
-        _logger.info("tool_call", tool_name=name, session_id=session_id, success=True)
-        return result
+        failed = _reports_error(result)
+        _logger.info("tool_call", tool_name=name, session_id=session_id, success=not failed)
+        if not convert_result:
+            return result
+        if failed:
+            return _error_result(result)
+        return tool_manager.get_tool(name).fn_metadata.convert_result(result)
 
     tool_manager.call_tool = _call_tool_with_logging  # type: ignore[method-assign]

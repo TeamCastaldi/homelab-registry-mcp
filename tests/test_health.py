@@ -1,6 +1,6 @@
 """Phase 1 smoke tests: server builds and the health tool returns OK."""
 
-from conftest import IsolatedSettings
+from conftest import IsolatedSettings, tool_payload
 from registry_mcp import __version__
 from registry_mcp.health import check_health
 from registry_mcp.server import build_server
@@ -14,7 +14,7 @@ def test_build_server_registers_health(server):
 async def test_health_returns_ok(server):
     result = await server.call_tool("health", {})
     # call_tool returns (content_blocks, structured_result); inspect the structured payload.
-    payload = result[1]
+    payload = tool_payload(result)
     assert payload["status"] == "ok"
     assert payload["service"] == "homelab-registry-mcp"
     assert payload["version"] == __version__
@@ -111,7 +111,7 @@ async def test_system_health_check_always_registered(server):
 async def test_system_health_check_reports_read_only_when_unconfigured(tmp_path):
     server = build_server(IsolatedSettings(registry_db_path=str(tmp_path / "r.db")))
     result = await server.call_tool("system_health_check", {})
-    payload = result[1]
+    payload = tool_payload(result)
     assert payload["mode"] == "read-only"
     assert payload["healthy"] is False
 
@@ -127,7 +127,7 @@ async def test_system_health_check_reports_read_write_when_healthy(tmp_path):
         )
     )
     result = await server.call_tool("system_health_check", {})
-    payload = result[1]
+    payload = tool_payload(result)
     assert payload["mode"] == "read-write"
     assert payload["healthy"] is True
 
@@ -140,7 +140,7 @@ async def test_system_health_check_reports_read_write_when_healthy(tmp_path):
 async def test_secrets_encrypt_read_only_when_health_checks_fail(tmp_path):
     server = build_server(IsolatedSettings(registry_db_path=str(tmp_path / "r.db")))
     result = await server.call_tool("secrets_encrypt", {"path": "nodes/host/app/.env"})
-    payload = result[1]
+    payload = tool_payload(result)
     assert "error" in payload
     assert "read-only mode" in payload["error"]
 
@@ -148,7 +148,7 @@ async def test_secrets_encrypt_read_only_when_health_checks_fail(tmp_path):
 async def test_secrets_add_read_only_when_health_checks_fail(tmp_path):
     server = build_server(IsolatedSettings(registry_db_path=str(tmp_path / "r.db")))
     result = await server.call_tool("secrets_add", {"key": "FOO", "value": "bar", "path": ".env"})
-    payload = result[1]
+    payload = tool_payload(result)
     assert "error" in payload
     assert "read-only mode" in payload["error"]
 
@@ -156,7 +156,7 @@ async def test_secrets_add_read_only_when_health_checks_fail(tmp_path):
 async def test_secrets_rotate_read_only_when_health_checks_fail(tmp_path):
     server = build_server(IsolatedSettings(registry_db_path=str(tmp_path / "r.db")))
     result = await server.call_tool("secrets_rotate", {"path": ""})
-    payload = result[1]
+    payload = tool_payload(result)
     assert "error" in payload
     assert "read-only mode" in payload["error"]
 
@@ -166,6 +166,6 @@ async def test_secrets_status_not_gated_by_read_only(tmp_path):
     read-only mode — it fails only on its own pre-existing config guard."""
     server = build_server(IsolatedSettings(registry_db_path=str(tmp_path / "r.db")))
     result = await server.call_tool("secrets_status", {})
-    payload = result[1]
+    payload = tool_payload(result)
     assert "error" in payload
     assert "read-only mode" not in payload["error"]

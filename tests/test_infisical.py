@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 import registry_mcp.integrations.infisical.tools as infisical_tools
-from conftest import IsolatedSettings
+from conftest import IsolatedSettings, tool_payload
 from registry_mcp.integrations.infisical import (
     InfisicalClient,
     InfisicalError,
@@ -370,7 +370,7 @@ def _patch_client(monkeypatch, transport):
 
 
 async def call(server, name, args):
-    return (await server.call_tool(name, args))[1]
+    return tool_payload(await server.call_tool(name, args))
 
 
 async def test_tool_returns_keys(infisical_settings_kwargs, monkeypatch):

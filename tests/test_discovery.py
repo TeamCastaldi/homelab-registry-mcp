@@ -5,7 +5,7 @@ import pytest
 from mcp.server.fastmcp import FastMCP
 
 import registry_mcp.tools.discovery as discovery_tools
-from conftest import IsolatedSettings
+from conftest import IsolatedSettings, tool_payload
 from registry_mcp.discovery.authentik import AuthentikDiscoverySource
 from registry_mcp.discovery.base import DiscoveredService
 from registry_mcp.discovery.docker import DockerDiscoverySource
@@ -268,7 +268,7 @@ def discovery_server(store):
 
 
 async def call(server, name, args):
-    return (await server.call_tool(name, args))[1]
+    return tool_payload(await server.call_tool(name, args))
 
 
 async def test_tool_run_now_and_status(discovery_server):

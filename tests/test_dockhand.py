@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 import registry_mcp.integrations.dockhand.tools as dockhand_tools
-from conftest import IsolatedSettings
+from conftest import IsolatedSettings, tool_payload
 from registry_mcp.integrations.dockhand import DockhandClient, DockhandError
 from registry_mcp.server import build_server
 
@@ -125,7 +125,7 @@ def dockhand_server(tmp_path, monkeypatch):
 
 
 async def call(server, name, args):
-    return (await server.call_tool(name, args))[1]
+    return tool_payload(await server.call_tool(name, args))
 
 
 async def test_tool_list_environments(dockhand_server):

@@ -6,6 +6,7 @@ import logging
 import structlog
 from sqlmodel import Session
 
+from conftest import tool_payload
 from registry_mcp.config import Settings
 from registry_mcp.logging import configure_logging, get_logger
 from registry_mcp.models import (
@@ -19,7 +20,7 @@ from registry_mcp.models import (
 
 
 async def call(server, name, args):
-    return (await server.call_tool(name, args))[1]
+    return tool_payload(await server.call_tool(name, args))
 
 
 def test_crud_emits_change_events(store):

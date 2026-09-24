@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import dspy
 from dspy.utils.dummies import DummyLM
 
-from conftest import IsolatedSettings
+from conftest import IsolatedSettings, tool_payload
 from registry_mcp.dspy import build_reasoner
 from registry_mcp.dspy.signatures import (
     GenerateServiceCompose,
@@ -206,7 +206,9 @@ def test_normalize_config_end_to_end_with_dummy_lm():
 
 async def test_summarize_events_tool_disabled(tmp_path):
     server = build_server(IsolatedSettings(registry_db_path=str(tmp_path / "r.db")))
-    result = (await server.call_tool("authentik_summarize_events", {"slug": "vaultwarden"}))[1]
+    result = tool_payload(
+        await server.call_tool("authentik_summarize_events", {"slug": "vaultwarden"})
+    )
     assert "error" in result and "DSPY_ENABLED" in result["error"]
 
 

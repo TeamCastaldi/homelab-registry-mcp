@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 import registry_mcp.integrations.authentik.tools as authentik_tools
-from conftest import IsolatedSettings
+from conftest import IsolatedSettings, tool_payload
 from registry_mcp.integrations.authentik import AuthentikClient, AuthentikError
 from registry_mcp.server import build_server
 
@@ -128,7 +128,7 @@ def authentik_server(tmp_path, monkeypatch):
 
 
 async def call(server, name, args):
-    return (await server.call_tool(name, args))[1]
+    return tool_payload(await server.call_tool(name, args))
 
 
 async def test_tool_list_applications(authentik_server):

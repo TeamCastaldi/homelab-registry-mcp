@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from ruamel.yaml import YAML
 
-from conftest import IsolatedSettings
+from conftest import IsolatedSettings, tool_payload
 from registry_mcp.server import build_server
 
 _yaml = YAML()
 
 
 async def call(server, name, args):
-    return (await server.call_tool(name, args))[1]
+    return tool_payload(await server.call_tool(name, args))
 
 
 def _answer(challenge_text: str) -> int:
