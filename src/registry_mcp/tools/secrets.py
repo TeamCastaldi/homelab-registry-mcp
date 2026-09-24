@@ -8,9 +8,13 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from registry_mcp.config import Settings
+from registry_mcp.gitcrypt import check_attr_path as _check_attr_path
+from registry_mcp.gitcrypt import check_dotenv_entry as _check_dotenv_entry
 from registry_mcp.gitcrypt import check_path as _check_path
 from registry_mcp.gitcrypt import detect_format as _detect_format
+from registry_mcp.gitcrypt import ensure_gitattributes_entry as _ensure_gitattributes_entry
 from registry_mcp.gitcrypt import ensure_unlocked as _ensure_unlocked
+from registry_mcp.gitcrypt import has_gitattributes_entry as _has_gitattributes_entry
 from registry_mcp.gitcrypt import is_dotenv_content as _is_dotenv_content  # noqa: F401
 from registry_mcp.gitcrypt import is_locked as _is_locked
 from registry_mcp.gitcrypt import key_bytes as _key_bytes
@@ -106,18 +110,12 @@ def register_secrets_tools(mcp: FastMCP, settings: Settings, read_only: bool = F
 
         try:
             _check_path(repo, path)
+            _check_attr_path(path)
         except ValueError as exc:
             return {"error": str(exc)}
 
-        gitattributes = repo / ".gitattributes"
-        current = gitattributes.read_text() if gitattributes.exists() else ""
-
-        entry = f"{path} filter=git-crypt diff=git-crypt"
-        if entry in current:
+        if not await _ensure_gitattributes_entry(repo, path):
             return {"encrypted": path, "gitattributes_updated": False, "note": "Already present."}
-
-        updated = current.rstrip("\n") + ("\n" if current else "") + entry + "\n"
-        gitattributes.write_text(updated)
 
         rc, _, stderr = await _run(["git", "add", ".gitattributes"], cwd=repo)
         if rc != 0:
@@ -183,14 +181,15 @@ def register_secrets_tools(mcp: FastMCP, settings: Settings, read_only: bool = F
 
         try:
             target = _check_path(repo, path)
+            _check_attr_path(path)
+            _check_dotenv_entry(key, value)
         except ValueError as exc:
             return {"error": str(exc)}
 
         # Ensure the file is tracked by git-crypt
         gitattributes = repo / ".gitattributes"
         current_attrs = gitattributes.read_text() if gitattributes.exists() else ""
-        entry = f"{path} filter=git-crypt diff=git-crypt"
-        if entry not in current_attrs:
+        if not _has_gitattributes_entry(current_attrs, path):
             result = await secrets_encrypt(path)  # type: ignore[name-defined]
             if "error" in result:
                 return result

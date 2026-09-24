@@ -9,6 +9,12 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from registry_mcp.config import Settings
+from registry_mcp.gitcrypt import (
+    check_attr_path,
+    check_dotenv_entry,
+    check_path,
+    has_gitattributes_entry,
+)
 from registry_mcp.tools.secrets import (
     _detect_format,
     _is_dotenv_content,
@@ -389,3 +395,118 @@ class TestSecretsListKeys:
         assert result["keys"] == ["SECRET_A", "SECRET_B"]
         assert "hunter2" not in str(result)
         assert "password123" not in str(result)
+
+
+# ---------------------------------------------------------------------------
+# Path and entry guards (registry_mcp.gitcrypt, shared with adoption)
+# ---------------------------------------------------------------------------
+
+
+class TestGitcryptGuards:
+    @pytest.mark.parametrize("path", [".git/config", ".git/hooks/pre-commit", "sub/.GIT/HEAD"])
+    def test_check_path_rejects_git_internals(self, tmp_path: Path, path: str) -> None:
+        with pytest.raises(ValueError, match=r"\.git/"):
+            check_path(tmp_path, path)
+
+    def test_check_path_rejects_a_symlink_into_git(self, tmp_path: Path) -> None:
+        (tmp_path / ".git" / "hooks").mkdir(parents=True)
+        (tmp_path / "hooks").symlink_to(tmp_path / ".git" / "hooks")
+        with pytest.raises(ValueError, match=r"\.git/"):
+            check_path(tmp_path, "hooks/pre-commit")
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "x\n*.env -filter -diff\ny",  # a newline would add a rule turning encryption off
+            "my app/.env",
+            "nodes/*/.env",
+            'a"b/.env',
+            "nodes/pi/.gitattributes",
+        ],
+    )
+    def test_check_attr_path_rejects_non_literal_patterns(self, path: str) -> None:
+        with pytest.raises(ValueError):
+            check_attr_path(path)
+
+    def test_check_attr_path_accepts_a_plain_path(self) -> None:
+        check_attr_path("nodes/pi/app/.env")
+
+    def test_entry_match_is_exact_not_substring(self) -> None:
+        current = "nodes/pi/app/.env filter=git-crypt diff=git-crypt\n"
+        assert has_gitattributes_entry(current, "nodes/pi/app/.env")
+        assert not has_gitattributes_entry(current, "app/.env")
+
+    @pytest.mark.parametrize(
+        ("key", "value"),
+        [
+            ("BAD KEY", "v"),
+            ("[core]\n\tfsmonitor", "x"),
+            ("1ABC", "v"),
+            ("OK", "a\nINJECTED=1"),
+            ("OK", "a\rb"),
+        ],
+    )
+    def test_check_dotenv_entry_rejects_bad_keys_and_line_breaks(
+        self, key: str, value: str
+    ) -> None:
+        with pytest.raises(ValueError):
+            check_dotenv_entry(key, value)
+
+
+class TestSecretsToolHardening:
+    def _tools(self, tmp_path: Path) -> dict:
+        key_file = tmp_path / "git-crypt.key"
+        key_file.write_bytes(b"fakekey")
+        settings = _settings(secrets_repo_path=str(tmp_path), secrets_key_path=str(key_file))
+        mcp, tools = _make_mcp()
+        register_secrets_tools(mcp, settings)  # type: ignore[arg-type]
+        return tools
+
+    async def test_encrypt_rejects_gitattributes_injection(self, tmp_path: Path) -> None:
+        tools = self._tools(tmp_path)
+        run = AsyncMock(return_value=(0, "", ""))
+        with patch("registry_mcp.tools.secrets._run", new=run):
+            result = await tools["secrets_encrypt"]("x\n*.env -filter -diff\ny")
+        assert "error" in result
+        assert not (tmp_path / ".gitattributes").exists()
+        run.assert_not_awaited()
+
+    async def test_add_gets_its_own_entry_beside_a_longer_listed_path(self, tmp_path: Path) -> None:
+        """`app/.env` used to count as covered by `nodes/pi/app/.env` (a substring
+        match), so the new file was staged without ever being encrypted."""
+        (tmp_path / ".gitattributes").write_text(
+            "nodes/pi/app/.env filter=git-crypt diff=git-crypt\n"
+        )
+        tools = self._tools(tmp_path)
+        with (
+            patch("registry_mcp.tools.secrets._ensure_unlocked", new=AsyncMock()),
+            patch("registry_mcp.tools.secrets._run", new=AsyncMock(return_value=(0, "", ""))),
+        ):
+            result = await tools["secrets_add"]("KEY", "value", "app/.env")
+
+        assert result["staged"] is True
+        lines = (tmp_path / ".gitattributes").read_text().splitlines()
+        assert "app/.env filter=git-crypt diff=git-crypt" in lines
+
+    async def test_add_rejects_a_value_with_a_line_break(self, tmp_path: Path) -> None:
+        tools = self._tools(tmp_path)
+        with patch("registry_mcp.tools.secrets._ensure_unlocked", new=AsyncMock()):
+            result = await tools["secrets_add"]("KEY", "v\nINJECTED=1", ".env")
+        assert "line break" in result["error"]
+        assert not (tmp_path / ".env").exists()
+
+    async def test_add_refuses_a_git_hook(self, tmp_path: Path) -> None:
+        tools = self._tools(tmp_path)
+        result = await tools["secrets_add"]("A", "$(touch /tmp/pwned)", ".git/hooks/pre-commit")
+        assert ".git/" in result["error"]
+
+    async def test_decrypt_refuses_git_config(self, tmp_path: Path) -> None:
+        (tmp_path / ".git").mkdir()
+        (tmp_path / ".git" / "config").write_text(
+            '[remote "origin"]\n\turl = https://token@git.example/o/r\n'
+        )
+        tools = self._tools(tmp_path)
+        with patch("registry_mcp.tools.secrets._ensure_unlocked", new=AsyncMock()):
+            result = await tools["secrets_decrypt"](".git/config")
+        assert ".git/" in result["error"]
+        assert "token" not in str(result)

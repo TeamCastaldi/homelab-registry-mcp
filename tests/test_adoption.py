@@ -660,6 +660,44 @@ class TestProposalAdoptServiceFinalize:
         assert git.commits and git.opened
         assert adoption_store.get(drafted["draft_id"]).status == AdoptionDraftStatus.finalized
 
+    async def test_finalize_refuses_a_live_value_with_a_line_break(self, store, hardware_store):
+        """A captured value with a line break would write extra `.env` lines."""
+        tools, _, _ = _setup(store, hardware_store, git=FakeGit())
+        node = _node(hardware_store)
+        service = _docker_service(store)
+        hardware_store.link_service(service.id, node.id)
+        inspect_data = {
+            "Config": {
+                "Env": ["TOKEN=live\nINJECTED=1"],
+                "Labels": {
+                    "com.docker.compose.project.config_files": "/srv/legacy/docker-compose.yml",
+                },
+            }
+        }
+        with (
+            patch(
+                "registry_mcp.tools.adoption.remote.inspect_container",
+                new=AsyncMock(return_value=inspect_data),
+            ),
+            patch(
+                "registry_mcp.tools.adoption.remote.read_remote_file",
+                new=AsyncMock(return_value="services: {}\n"),
+            ),
+        ):
+            drafted = await tools["proposal_adopt_service"](service.id)
+
+        with (
+            patch("registry_mcp.gitcrypt.repo_path", return_value=Path("/repo")),
+            patch("registry_mcp.gitcrypt.key_bytes", return_value=b"key"),
+            patch("registry_mcp.gitcrypt.git_checkout_branch", new=AsyncMock()) as checkout,
+            patch("pathlib.Path.write_text") as write_text,
+        ):
+            result = await tools["proposal_adopt_service_finalize"](drafted["draft_id"], "keep")
+
+        assert "line break" in result["error"]
+        checkout.assert_not_awaited()
+        write_text.assert_not_called()
+
     async def test_finalize_rotate_generates_new_value(self, store, hardware_store):
         git = FakeGit()
         tools, adoption_store, proposals = _setup(store, hardware_store, git=git)

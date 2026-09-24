@@ -322,6 +322,11 @@ def register_adoption_tools(
             env_path = str(Path(draft.target_file_path).parent / ".env")
             try:
                 gitcrypt.check_path(local_repo, env_path)
+                gitcrypt.check_attr_path(env_path)
+                # Captured live values are container data; one with a line
+                # break would write extra, unintended .env lines.
+                for env_key, env_value in env_data.items():
+                    gitcrypt.check_dotenv_entry(env_key, env_value)
             except ValueError as exc:
                 return {"error": str(exc)}
 

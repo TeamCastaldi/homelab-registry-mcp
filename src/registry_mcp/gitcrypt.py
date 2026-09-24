@@ -20,6 +20,14 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from registry_mcp.config import Settings
 
+# A git-crypt path is written verbatim into .gitattributes as a pattern:
+# whitespace splits it into extra attributes, a newline adds a whole rule
+# (`*.env -filter -diff` would silently turn encryption off repo-wide), and
+# glob, escape, comment, and quote characters change what the pattern matches.
+_UNSAFE_ATTR_CHARS = re.compile(r"[\s*?\[\]!#\\\"]")
+# A .env key as shells and docker compose read it.
+_DOTENV_KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
 
 async def run(cmd: list[str], cwd: Path) -> tuple[int, str, str]:
     """Run a subprocess, return (returncode, stdout, stderr)."""
@@ -121,17 +129,55 @@ def check_path(repo: Path, path: str) -> Path:
     """Return the resolved target path inside repo, or raise ValueError.
 
     Blocks absolute paths (pathlib discards the base when joined with an
-    absolute right-hand side), dotdot traversal, and symlink escapes.
+    absolute right-hand side), dotdot traversal, symlink escapes, and anything
+    inside `.git/` — whose config can carry a remote's credentials and whose
+    hooks git executes on the commits these tools make.
     """
     p = Path(path)
     if p.is_absolute():
         raise ValueError("Absolute paths are not allowed.")
     if ".." in p.parts:
         raise ValueError("Path traversal is not allowed.")
+    root = repo.resolve()
     target = (repo / path).resolve()
-    if not target.is_relative_to(repo.resolve()):
+    if not target.is_relative_to(root):
         raise ValueError("Path must be within the repository.")
+    # Checked on the resolved path, so a symlink into .git/ is caught too.
+    if any(part.lower() == ".git" for part in target.relative_to(root).parts):
+        raise ValueError("Paths inside .git/ are not allowed.")
     return target
+
+
+def check_attr_path(path: str) -> None:
+    """Raise ValueError unless `path` can be written into .gitattributes as a
+    literal git-crypt pattern. Call after `check_path`, for write paths only."""
+    if _UNSAFE_ATTR_CHARS.search(path):
+        raise ValueError(
+            f"Path {path!r} contains whitespace, a line break, a glob, or a quote "
+            "character, so .gitattributes would not read it as one literal path."
+        )
+    if Path(path).name == ".gitattributes":
+        raise ValueError("A .gitattributes file must never be encrypted.")
+
+
+def gitattributes_entry(path: str) -> str:
+    return f"{path} filter=git-crypt diff=git-crypt"
+
+
+def has_gitattributes_entry(content: str, path: str) -> bool:
+    """Exact-line match. A substring test treats `app/.env` as covered by an
+    existing `nodes/pi/app/.env` line, and the new file is then staged in
+    plaintext."""
+    entry = gitattributes_entry(path)
+    return any(line.strip() == entry for line in content.splitlines())
+
+
+def check_dotenv_entry(key: str, value: str) -> None:
+    """Raise ValueError unless `key=value` serializes to exactly one .env line."""
+    if not _DOTENV_KEY_RE.fullmatch(key):
+        raise ValueError(f"Invalid .env key {key!r}: use letters, digits, and underscores.")
+    if "\n" in value or "\r" in value:
+        raise ValueError(f"The value for {key!r} contains a line break.")
 
 
 def parse_dotenv(content: str) -> dict[str, str]:
@@ -173,12 +219,12 @@ def detect_format(path: Path, content: str) -> dict[str, str] | str:
 async def ensure_gitattributes_entry(repo: Path, path: str) -> bool:
     """Add `path` to .gitattributes as a git-crypt-filtered file if not already
     present. Returns True if .gitattributes was modified."""
+    check_attr_path(path)
     gitattributes = repo / ".gitattributes"
     current = gitattributes.read_text() if gitattributes.exists() else ""
-    entry = f"{path} filter=git-crypt diff=git-crypt"
-    if entry in current:
+    if has_gitattributes_entry(current, path):
         return False
-    updated = current.rstrip("\n") + ("\n" if current else "") + entry + "\n"
+    updated = current.rstrip("\n") + ("\n" if current else "") + gitattributes_entry(path) + "\n"
     gitattributes.write_text(updated)
     return True
 
