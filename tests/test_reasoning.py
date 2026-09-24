@@ -369,3 +369,75 @@ def test_generate_service_compose_end_to_end_with_dummy_lm():
 
     assert result["confidence"] == 0.9
     assert "ghcr.io/o/app:1.2.3" in result["compose_yaml"]
+
+
+# --- lazy setup: thread-safe, never dspy.configure() ------------------------
+
+
+def _bound_lms(module):
+    return {id(predictor.lm) for _, predictor in module.named_predictors()}
+
+
+async def test_ensure_works_from_any_thread_without_dspy_configure():
+    """DSPy 3.x lets only the first thread that ever calls dspy.configure() call
+    it again. The server builds more than one Reasoner, and the Authentik
+    summary tool first reaches _ensure() from an asyncio.to_thread worker — so a
+    Reasoner set up later on the event-loop thread used to raise RuntimeError,
+    failing every discovery pass that needed identity resolution."""
+    import asyncio
+
+    settings = IsolatedSettings(dspy_enabled=True, dspy_api_key="sk-test")
+    worker_first = build_reasoner(settings)
+    loop_second = build_reasoner(settings)
+
+    await asyncio.to_thread(worker_first._ensure)
+    loop_second._ensure()  # must not raise
+
+    for reasoner in (worker_first, loop_second):
+        assert _bound_lms(reasoner._resolve) == {id(reasoner._resolve.predict.lm)}
+        assert reasoner._resolve.predict.lm is not reasoner._patch_lm
+        assert _bound_lms(reasoner._patch) == {id(reasoner._patch_lm)}
+        assert _bound_lms(reasoner._generate_compose) == {id(reasoner._patch_lm)}
+        assert reasoner._patch_lm.kwargs["max_tokens"] == settings.dspy_patch_max_tokens
+        assert reasoner._resolve.predict.lm.kwargs["max_tokens"] == settings.dspy_max_tokens
+
+
+def test_setup_failure_degrades_instead_of_raising():
+    """_ensure() used to sit outside each operation's try, so a setup error
+    escaped into callers like store.reconcile and failed the whole pass."""
+    reasoner = build_reasoner(IsolatedSettings(dspy_enabled=True))
+
+    def _boom():
+        raise RuntimeError("setup failed")
+
+    reasoner._ensure = _boom
+    assert reasoner.resolve_identity({"name": "x"}, [{"name": "y"}]) is None
+    assert reasoner.infer_metadata(router_rule="", middlewares=[], service_name="x") is None
+    summary = reasoner.summarize_access(slug="x", events=[], hours=1)
+    assert "setup failed" in summary["error"]
+    assert (
+        reasoner.generate_remediation_patch(
+            service={}, finding_type="x", current_file="", file_path="f", apply_mode="manual"
+        )
+        is None
+    )
+    assert (
+        reasoner.generate_service_compose(intake={}, homelab_conventions="", service_name="x")
+        is None
+    )
+
+
+def test_compiled_module_keeps_the_patch_lm(tmp_path):
+    """Predict.load_state() reassigns .lm; loading compiled state after set_lm()
+    silently dropped whole-file modules back to the small default budget."""
+    from registry_mcp.dspy.signatures import GenerateRemediationPatch
+
+    dspy.ChainOfThought(GenerateRemediationPatch).save(str(tmp_path / "remediation_patch.json"))
+    reasoner = build_reasoner(
+        IsolatedSettings(
+            dspy_enabled=True, dspy_api_key="sk-test", dspy_compiled_path=str(tmp_path)
+        )
+    )
+    reasoner._ensure()
+
+    assert _bound_lms(reasoner._patch) == {id(reasoner._patch_lm)}
