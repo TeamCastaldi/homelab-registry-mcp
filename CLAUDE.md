@@ -123,6 +123,7 @@ tests/                     # mirrors src/ layout; uses in-memory SQLite
 **Cross-source linking (Phase 7):**
 - Authentik proxy provider `external_host` matched against Traefik router rule hosts
 - Traefik `service_name` matched against Docker container labels
+- `service_link_authentik` sets the slug by hand and pins it (`authentik_link_manual`); Authentik discovery never replaces a pinned slug
 - `service_get_full_context(id)` returns service + router + auth app + recent events in one call
 
 **Hardware node registry (Phase 9a-9b, `hardware/`):** curated inventory of physical and virtual

@@ -8,6 +8,7 @@ from conftest import IsolatedSettings, tool_payload
 from registry_mcp.discovery.base import DiscoveredService
 from registry_mcp.discovery.engine import DiscoveryEngine
 from registry_mcp.models import AuthMode, SourceType
+from registry_mcp.registry import RegistryStore
 from registry_mcp.server import build_server
 
 TRAEFIK_BASE = "http://traefik.test"
@@ -101,6 +102,34 @@ async def test_service_link_authentik(tmp_path):
         {"service_id": added["id"], "app_slug": "vaultwarden"},
     )
     assert linked["authentik_app_slug"] == "vaultwarden"
+    assert linked["authentik_link_manual"] is True
+
+
+async def test_manual_authentik_link_survives_discovery(tmp_path):
+    db = str(tmp_path / "r.db")
+    server = build_server(IsolatedSettings(registry_db_path=db))
+    added = await call(server, "registry_add_service", {"name": "vault", "display_name": "Vault"})
+    link = {"service_id": added["id"], "app_slug": "vault-prod"}
+    await call(server, "service_link_authentik", link)
+
+    # Authentik reports an app that matches the service by name, under another slug.
+    store = RegistryStore(db)
+    authentik_item = DiscoveredService(
+        source=SourceType.authentik,
+        external_id="vault",
+        name="vault",
+        authentik_app_slug="vault-legacy",
+        auth_mode=AuthMode.forward_auth,
+    )
+    engine = DiscoveryEngine(
+        store, {SourceType.authentik: FakeSource(SourceType.authentik, [authentik_item])}
+    )
+    await engine.run_source(SourceType.authentik)
+
+    service = store.get_service(added["id"])
+    assert service.authentik_app_slug == "vault-prod"
+    # The rest of the pass still lands.
+    assert service.authentik_auth_mode == AuthMode.forward_auth
 
 
 async def test_service_link_authentik_missing_service(tmp_path):

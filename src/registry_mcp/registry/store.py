@@ -43,6 +43,7 @@ _MUTABLE_FIELDS = {
     "urls",
     "traefik_router",
     "authentik_app_slug",
+    "authentik_link_manual",
     "auth_mode",
     "traefik_auth_mode",
     "authentik_auth_mode",
@@ -96,6 +97,7 @@ class RegistryStore:
             for col_name, col_def in (
                 ("hardware_node_id", "VARCHAR DEFAULT NULL"),
                 ("manual_link", "BOOLEAN NOT NULL DEFAULT 0"),
+                ("authentik_link_manual", "BOOLEAN NOT NULL DEFAULT 0"),
             ):
                 if col_name not in existing:
                     conn.execute(text(f"ALTER TABLE service ADD COLUMN {col_name} {col_def}"))

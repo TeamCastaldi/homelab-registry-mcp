@@ -52,7 +52,9 @@ def provenance_updates(service: Service, discovered: DiscoveredService) -> dict[
     if discovered.traefik_router and discovered.traefik_router != service.traefik_router:
         updates["traefik_router"] = discovered.traefik_router
     slug = discovered.authentik_app_slug
-    if slug and slug != service.authentik_app_slug:
+    # A slug linked by hand (service_link_authentik) is the operator's call, not
+    # a discovery observation to be replaced on the next pass.
+    if slug and slug != service.authentik_app_slug and not service.authentik_link_manual:
         updates["authentik_app_slug"] = slug
     if (
         discovered.auth_mode

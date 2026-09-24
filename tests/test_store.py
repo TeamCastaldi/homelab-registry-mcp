@@ -58,3 +58,22 @@ def test_delete(store):
     assert store.delete_service(created.id) is True
     assert store.get_service(created.id) is None
     assert store.delete_service(created.id) is False
+
+
+def test_existing_db_gains_the_authentik_link_manual_column(tmp_path):
+    """A registry.db from before the column keeps working without a fresh DB."""
+    import sqlite3
+
+    from registry_mcp.registry import RegistryStore
+
+    db = str(tmp_path / "r.db")
+    RegistryStore(db)
+    with sqlite3.connect(db) as conn:
+        conn.execute("ALTER TABLE service DROP COLUMN authentik_link_manual")
+
+    store = RegistryStore(db)
+    with sqlite3.connect(db) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(service)")}
+    assert "authentik_link_manual" in columns
+    created = store.create_service(_make())
+    assert created.authentik_link_manual is False
