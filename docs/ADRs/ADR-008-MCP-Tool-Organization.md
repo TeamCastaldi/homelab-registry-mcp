@@ -128,6 +128,14 @@ N session managers plus the existing scheduler/comment-poll startup in one
 combined lifespan, and serving that composed app directly via
 `uvicorn.Config`/`uvicorn.Server`.
 
+> **Update (2026-09-24):** `_streamable_with_scheduler` and its monkey-patch
+> are gone. `server.py`'s `http_app()` now wraps the app's own lifespan
+> (`app.router.lifespan_context`) so the scheduler runs alongside the session
+> manager, and `serve()` runs it via `uvicorn.Config`/`uvicorn.Server` — the
+> same shape this section proposes for the mount split, and it covers SSE
+> and stdio too. The FastMCP `lifespan=` hook still can't host a
+> process-wide scheduler: the SDK enters it once per MCP session.
+
 Conclusion: the mount split is technically unblocked. Not yet implemented
 — see §6.
 

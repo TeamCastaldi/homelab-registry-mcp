@@ -368,6 +368,20 @@ async def test_after_discovery_auto_creates_for_each_conflict(store):
     assert len(git.opened) == 2
 
 
+async def test_after_discovery_never_auto_creates_in_read_only_mode(store):
+    """proposal_create and the webhook already refuse in read-only mode; the
+    scheduled auto-create path used to open PRs anyway."""
+    _conflicted(store)
+    git = FakeGit()
+    engine, proposals = _engine(store, settings=_settings(proposal_auto_create=True), git=git)
+    engine._read_only = True
+
+    await engine.after_discovery()
+
+    assert git.opened == []
+    assert proposals.list_all() == []
+
+
 async def test_after_discovery_disabled_when_not_configured(store):
     _conflicted(store)
     engine, proposals = _engine(store, settings=_settings(proposal_auto_create=True), git=None)

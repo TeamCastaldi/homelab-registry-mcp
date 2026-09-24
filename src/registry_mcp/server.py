@@ -4,13 +4,17 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+import anyio
+import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
+from starlette.applications import Starlette
 
 from registry_mcp import __version__
 from registry_mcp.adoption import AdoptionDraftStore
@@ -69,8 +73,20 @@ def build_transport_security(settings: Settings) -> TransportSecuritySettings:
     )
 
 
+@dataclass(frozen=True)
+class Runtime:
+    """The one object graph a process runs: the MCP tools, the webhook, and the
+    scheduler all share these engines (and so one Reasoner and one DB engine)."""
+
+    settings: Settings
+    read_only: bool
+    discovery: DiscoveryEngine
+    proposals: ProposalEngine
+    normalization: NormalizationEngine
+
+
 def build_proposal_engine(
-    settings: Settings, store: RegistryStore, reasoner: Reasoner
+    settings: Settings, store: RegistryStore, reasoner: Reasoner, *, read_only: bool = False
 ) -> tuple[ProposalEngine, ProposalStore, GitProvider | None]:
     """Assemble the proposal engine and its store from configuration."""
     proposals = ProposalStore(store.engine)
@@ -88,6 +104,7 @@ def build_proposal_engine(
         ),
         notifier=build_notification_provider(settings),
         git=git,
+        read_only=read_only,
     )
     return engine, proposals, git
 
@@ -113,6 +130,15 @@ def build_normalization_engine(
 
 def build_server(settings: Settings | None = None) -> FastMCP:
     """Construct the FastMCP server and register its tools."""
+    return build_app(settings)[0]
+
+
+def build_app(settings: Settings | None = None) -> tuple[FastMCP, Runtime]:
+    """Construct the FastMCP server and the runtime its scheduler drives.
+
+    The single composition root: `main()` schedules jobs against the same
+    engines the tools use, rather than building a second, parallel set.
+    """
     settings = settings or get_settings()
 
     store = RegistryStore(settings.registry_db_path)
@@ -126,7 +152,9 @@ def build_server(settings: Settings | None = None) -> FastMCP:
             failed_checks=[c.name for c in health.checks if not c.ok],
         )
     reasoner = build_reasoner(settings)
-    proposal_engine, proposal_store, git_provider = build_proposal_engine(settings, store, reasoner)
+    proposal_engine, proposal_store, git_provider = build_proposal_engine(
+        settings, store, reasoner, read_only=read_only
+    )
     normalization_engine = build_normalization_engine(settings, store, reasoner, git_provider)
     adoption_store = AdoptionDraftStore(store.engine)
     # Pending drafts hold captured live secret values in the (non-git-crypt)
@@ -148,24 +176,10 @@ def build_server(settings: Settings | None = None) -> FastMCP:
         on_pass_complete=(proposal_engine.after_discovery if proposal_engine.configured else None),
     )
 
-    @asynccontextmanager
-    async def lifespan(_server: FastMCP) -> AsyncIterator[dict]:
-        # WORKAROUND (confirmed still present in mcp==1.29.0, the pinned
-        # version): streamable_http_app() hardcodes its Starlette lifespan to
-        # session_manager.run(), so this block is never called on the
-        # streamable-http transport. Scheduler startup lives in main()
-        # instead (see _streamable_with_scheduler).
-        #
-        # TO REVERT when fixed upstream: remove _streamable_with_scheduler from
-        # main(), restore the scheduler start/stop logic here, and delete this
-        # comment. Track: https://github.com/modelcontextprotocol/python-sdk
-        yield {}
-
     mcp = FastMCP(
         name="homelab-registry-mcp",
         host=settings.mcp_host,
         port=settings.mcp_port,
-        lifespan=lifespan,
         transport_security=build_transport_security(settings),
     )
     install_tool_call_logging(mcp)
@@ -247,7 +261,126 @@ def build_server(settings: Settings | None = None) -> FastMCP:
             **current.to_dict(),
         }
 
-    return mcp
+    return mcp, Runtime(
+        settings=settings,
+        read_only=read_only,
+        discovery=engine,
+        proposals=proposal_engine,
+        normalization=normalization_engine,
+    )
+
+
+def build_runtime_scheduler(runtime: Runtime) -> AsyncIOScheduler | None:
+    """Every scheduled job, built against the same engines the tools use.
+    Returns None when there is nothing to schedule."""
+    settings = runtime.settings
+    scheduler = build_scheduler(runtime.discovery, settings) if runtime.discovery.sources else None
+
+    # Comment polling (Phase 3): never scheduled when the write path isn't
+    # configured, or when the startup health check failed (read-only mode).
+    if (
+        settings.proposal_comment_poll_enabled
+        and runtime.proposals.configured
+        and not runtime.read_only
+    ):
+        scheduler = scheduler or AsyncIOScheduler()
+        scheduler.add_job(
+            runtime.proposals.poll_pr_comments,
+            "interval",
+            seconds=settings.proposal_comment_poll_interval_seconds,
+            id="proposal-comment-poll",
+            replace_existing=True,
+        )
+        get_logger("proposal.engine").info(
+            "comment_poll_scheduled",
+            interval_seconds=settings.proposal_comment_poll_interval_seconds,
+        )
+
+    # Normalization sweep: same three-part gate as comment polling — opt-in
+    # flag, write path configured, and never in read-only mode.
+    if (
+        settings.normalization_enabled
+        and runtime.normalization.configured
+        and not runtime.read_only
+    ):
+        scheduler = scheduler or AsyncIOScheduler()
+        scheduler.add_job(
+            runtime.normalization.run_sweep,
+            "interval",
+            seconds=schedule_seconds(settings.normalization_schedule),
+            id="normalization-sweep",
+            replace_existing=True,
+        )
+        get_logger("normalization.engine").info(
+            "normalization_sweep_scheduled", schedule=settings.normalization_schedule
+        )
+    return scheduler
+
+
+@asynccontextmanager
+async def _scheduled(runtime: Runtime, scheduler: AsyncIOScheduler | None) -> AsyncIterator[None]:
+    """Run the scheduler for the life of the block. AsyncIOScheduler binds to the
+    running loop in start(), so this must be entered inside the transport's own
+    event loop — never before it."""
+    if scheduler is not None:
+        scheduler.start()
+        get_logger("discovery.scheduler").info(
+            "scheduler_started", sources=[s.value for s in runtime.discovery.sources]
+        )
+    try:
+        yield
+    finally:
+        if scheduler is not None:
+            scheduler.shutdown(wait=False)
+
+
+def http_app(server: FastMCP, runtime: Runtime, scheduler: AsyncIOScheduler | None) -> Starlette:
+    """The streamable-http or SSE app, with the scheduler tied to its lifespan.
+
+    The FastMCP `lifespan=` hook can't host the scheduler: the SDK enters it
+    once per MCP session (inside the low-level server's run()), not once per
+    process. This wraps — never replaces — the app's own lifespan, which for
+    streamable-http runs the session manager.
+    """
+    if runtime.settings.mcp_transport == "streamable-http":
+        app = server.streamable_http_app()
+    else:
+        app = server.sse_app()
+    inner = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def lifespan(asgi_app: Any) -> AsyncIterator[None]:
+        async with _scheduled(runtime, scheduler), inner(asgi_app):
+            yield
+
+    app.router.lifespan_context = lifespan
+    return app
+
+
+async def _run_stdio(server: FastMCP, runtime: Runtime, scheduler: AsyncIOScheduler | None) -> None:
+    async with _scheduled(runtime, scheduler):
+        await server.run_stdio_async()
+
+
+async def _run_http(server: FastMCP, app: Starlette) -> None:
+    # Mirrors FastMCP.run_streamable_http_async/run_sse_async, minus building the app.
+    config = uvicorn.Config(
+        app,
+        host=server.settings.host,
+        port=server.settings.port,
+        log_level=server.settings.log_level.lower(),
+    )
+    await uvicorn.Server(config).serve()
+
+
+def serve(server: FastMCP, runtime: Runtime) -> None:
+    """Run `server` on the configured transport with its scheduler — on every
+    transport, not just streamable-http."""
+    scheduler = build_runtime_scheduler(runtime)
+    if runtime.settings.mcp_transport == "stdio":
+        anyio.run(_run_stdio, server, runtime, scheduler)
+        return
+    anyio.run(_run_http, server, http_app(server, runtime, scheduler))
 
 
 def main() -> None:
@@ -255,90 +388,8 @@ def main() -> None:
     settings = get_settings()
     configure_logging(settings)
     get_logger("registry.server").info("starting", transport=settings.mcp_transport)
-    server = build_server(settings)
-
-    # WORKAROUND (confirmed still present in mcp==1.29.0, the pinned version):
-    # streamable_http_app() hardcodes its Starlette lifespan to
-    # `lambda app: self.session_manager.run()`, silently ignoring any custom
-    # lifespan passed to FastMCP(). The custom lifespan only fires on the
-    # stdio transport. Work around this by monkey-patching
-    # run_streamable_http_async so the scheduler starts inside the correct
-    # asyncio event loop.
-    #
-    # TO REVERT when fixed upstream: delete _streamable_with_scheduler and the
-    # monkey-patch line, restore scheduler start/stop in the lifespan block in
-    # build_server(), and delete this comment.
-    _orig_streamable = server.run_streamable_http_async
-
-    async def _streamable_with_scheduler() -> None:
-        _store = RegistryStore(settings.registry_db_path)
-        _reasoner = build_reasoner(settings)
-        _proposal_engine, _, _git_provider = build_proposal_engine(settings, _store, _reasoner)
-        _normalization_engine = build_normalization_engine(
-            settings, _store, _reasoner, _git_provider
-        )
-        _engine = DiscoveryEngine(
-            _store,
-            build_sources(settings),
-            stale_threshold=settings.discovery_stale_after_misses,
-            reasoner=_reasoner,
-            on_pass_complete=(
-                _proposal_engine.after_discovery if _proposal_engine.configured else None
-            ),
-        )
-        scheduler = build_scheduler(_engine, settings) if _engine.sources else None
-
-        # Comment polling (Phase 3): never scheduled when the write path isn't
-        # configured, or when the startup health check failed (read-only mode).
-        _read_only = not check_health(settings).healthy
-        if (
-            settings.proposal_comment_poll_enabled
-            and _proposal_engine.configured
-            and not _read_only
-        ):
-            if scheduler is None:
-                scheduler = AsyncIOScheduler()
-            scheduler.add_job(
-                _proposal_engine.poll_pr_comments,
-                "interval",
-                seconds=settings.proposal_comment_poll_interval_seconds,
-                id="proposal-comment-poll",
-                replace_existing=True,
-            )
-            get_logger("proposal.engine").info(
-                "comment_poll_scheduled",
-                interval_seconds=settings.proposal_comment_poll_interval_seconds,
-            )
-
-        # Normalization sweep: same three-part gate as comment polling —
-        # opt-in flag, write path configured, and never in read-only mode.
-        if settings.normalization_enabled and _normalization_engine.configured and not _read_only:
-            if scheduler is None:
-                scheduler = AsyncIOScheduler()
-            scheduler.add_job(
-                _normalization_engine.run_sweep,
-                "interval",
-                seconds=schedule_seconds(settings.normalization_schedule),
-                id="normalization-sweep",
-                replace_existing=True,
-            )
-            get_logger("normalization.engine").info(
-                "normalization_sweep_scheduled", schedule=settings.normalization_schedule
-            )
-
-        if scheduler is not None:
-            scheduler.start()
-            get_logger("discovery.scheduler").info(
-                "scheduler_started", sources=[s.value for s in _engine.sources]
-            )
-        try:
-            await _orig_streamable()
-        finally:
-            if scheduler is not None:
-                scheduler.shutdown(wait=False)
-
-    server.run_streamable_http_async = _streamable_with_scheduler  # type: ignore[method-assign]
-    server.run(transport=settings.mcp_transport)
+    server, runtime = build_app(settings)
+    serve(server, runtime)
 
 
 if __name__ == "__main__":

@@ -54,6 +54,7 @@ class ProposalEngine:
         generator: PatchGenerator,
         notifier: NotificationProvider,
         git: GitProvider | None,
+        read_only: bool = False,
     ) -> None:
         self._settings = settings
         self._store = store
@@ -61,6 +62,7 @@ class ProposalEngine:
         self._generator = generator
         self._notifier = notifier
         self._git = git
+        self._read_only = read_only
 
     @property
     def configured(self) -> bool:
@@ -398,7 +400,8 @@ class ProposalEngine:
         try:
             await self.sync_pr_states()
             await self.sweep_verifications()
-            if self._settings.proposal_auto_create:
+            # Same read-only gate proposal_create and the webhook already honor.
+            if self._settings.proposal_auto_create and not self._read_only:
                 await self._auto_create()
         except Exception as exc:  # never let proposals break discovery
             _log.warning("after_discovery_failed", error=str(exc))
