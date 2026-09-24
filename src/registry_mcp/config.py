@@ -50,6 +50,16 @@ class Settings(BaseSettings):
     mcp_transport: Transport = Field(default="streamable-http")
     mcp_host: str = Field(default="0.0.0.0")
     mcp_port: int = Field(default=8765)
+    # DNS-rebinding protection for /mcp (the MCP spec requires servers to
+    # validate Origin). Comma-separated; "name:*" matches any explicit port,
+    # while a bare "name" matches a default-port request (clients omit :80/:443
+    # from Host). The Host list must name every way clients reach this server
+    # (Traefik hostname, LAN ip:port) or they get HTTP 421. CLI/desktop MCP
+    # clients send no Origin, so the Origin list only constrains browsers.
+    mcp_allowed_hosts: str = Field(
+        default="127.0.0.1,127.0.0.1:*,localhost,localhost:*,[::1],[::1]:*"
+    )
+    mcp_allowed_origins: str = Field(default="")
 
     # Event log retention
     event_retention_days: int = Field(default=90)

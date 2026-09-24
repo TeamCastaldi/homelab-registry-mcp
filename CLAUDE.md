@@ -434,6 +434,8 @@ closes that gap without ever exposing a value. Off by default (`INFISICAL_ENABLE
 | `REGISTRY_LOG_PATH` | `/data/events.log` | JSON event log |
 | `MCP_TRANSPORT` | `streamable-http` | `stdio`, `sse`, or `streamable-http` |
 | `MCP_HOST` / `MCP_PORT` | `0.0.0.0` / `8765` | |
+| `MCP_ALLOWED_HOSTS` | loopback names, bare and `:*` | DNS-rebinding protection for `/mcp` (MCP spec: servers must validate `Origin`). Comma-separated `Host` values: `name:*` matches any explicit port, a bare `name` matches default-port (80/443) requests. Must list every way clients reach the server (Traefik hostname, LAN `ip:port`) or they get HTTP 421 |
+| `MCP_ALLOWED_ORIGINS` | unset | Browser `Origin` values accepted on `/mcp`; clients that send no `Origin` (CLI/desktop MCP clients) are unaffected. A foreign `Origin` gets HTTP 403 |
 | `DISCOVERY_TRAEFIK_INTERVAL_SECONDS` | `300` | |
 | `DISCOVERY_DOCKER_INTERVAL_SECONDS` | `300` | |
 | `DISCOVERY_AUTHENTIK_INTERVAL_SECONDS` | `900` | |

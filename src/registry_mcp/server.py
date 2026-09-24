@@ -9,6 +9,7 @@ from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 
 from registry_mcp import __version__
@@ -47,6 +48,25 @@ from registry_mcp.tools import (
     register_service_deploy_tools,
 )
 from registry_mcp.webhooks import register_webhook_routes
+
+
+def _csv(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def build_transport_security(settings: Settings) -> TransportSecuritySettings:
+    """DNS-rebinding protection for /mcp, on for every bind address.
+
+    FastMCP only enables it on its own for a 127.0.0.1/localhost bind, so the
+    default 0.0.0.0 bind otherwise accepts any Host and Origin — letting a
+    browser page on the LAN drive every tool via DNS rebinding. Custom routes
+    (the Dockhand webhook) sit outside this check and keep their own auth.
+    """
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=_csv(settings.mcp_allowed_hosts),
+        allowed_origins=_csv(settings.mcp_allowed_origins),
+    )
 
 
 def build_proposal_engine(
@@ -146,6 +166,7 @@ def build_server(settings: Settings | None = None) -> FastMCP:
         host=settings.mcp_host,
         port=settings.mcp_port,
         lifespan=lifespan,
+        transport_security=build_transport_security(settings),
     )
     install_tool_call_logging(mcp)
 
