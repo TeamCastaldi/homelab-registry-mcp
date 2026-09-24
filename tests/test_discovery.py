@@ -427,3 +427,97 @@ def test_build_scheduler_adds_one_job_per_source(store):
     job_ids = {job.id for job in scheduler.get_jobs()}
     assert "discovery-traefik" in job_ids
     assert "discovery-docker" not in job_ids
+
+
+# --- reconcile churn: no-op events and stale flapping ------------------------
+
+
+def _traefik(name="app", auth_mode=AuthMode.none):
+    return DiscoveredService(
+        source=SourceType.traefik,
+        external_id=f"{name}@docker",
+        name=name,
+        urls=[f"https://{name}.lan"],
+        traefik_router=f"{name}@docker",
+        auth_mode=auth_mode,
+    )
+
+
+def _docker(name="app"):
+    return DiscoveredService(
+        source=SourceType.docker, external_id="abc123", name=name, urls=[f"https://{name}.lan"]
+    )
+
+
+def test_identical_pass_records_no_changes(store):
+    """Every Traefik pass used to log a `traefik_auth_mode` none→none event per
+    service and count it as changed, burying real history."""
+    store.reconcile(SourceType.traefik, [_traefik()], stale_threshold=3)
+    counts = store.reconcile(SourceType.traefik, [_traefik()], stale_threshold=3)
+
+    assert counts["items_changed"] == 0
+    service = store.get_service("app")
+    fields = [e.field for e in store.list_change_events(service_id=service.id)]
+    assert "traefik_auth_mode" not in fields
+
+
+def test_a_real_auth_mode_change_is_still_recorded(store):
+    store.reconcile(SourceType.traefik, [_traefik()], stale_threshold=3)
+    counts = store.reconcile(
+        SourceType.traefik, [_traefik(auth_mode=AuthMode.forward_auth)], stale_threshold=3
+    )
+
+    assert counts["items_changed"] == 1
+    assert store.get_service("app").traefik_auth_mode == AuthMode.forward_auth
+
+
+def test_unreported_authentik_auth_mode_keeps_the_stored_value(store):
+    app = DiscoveredService(
+        source=SourceType.authentik,
+        external_id="app",
+        name="app",
+        authentik_app_slug="app",
+        auth_mode=AuthMode.forward_auth,
+    )
+    store.reconcile(SourceType.authentik, [app], stale_threshold=3)
+    unreported = app.model_copy(update={"auth_mode": None})
+    store.reconcile(SourceType.authentik, [unreported], stale_threshold=3)
+
+    assert store.get_service("app").authentik_auth_mode == AuthMode.forward_auth
+
+
+def test_one_source_losing_a_service_another_still_sees_never_flaps(store):
+    store.reconcile(SourceType.traefik, [_traefik()], stale_threshold=2)
+    store.reconcile(SourceType.docker, [_docker()], stale_threshold=2)
+    for _ in range(5):  # the container is gone from local Docker; Traefik still routes it
+        store.reconcile(SourceType.docker, [], stale_threshold=2)
+        assert store.get_service("app").stale is False
+        store.reconcile(SourceType.traefik, [_traefik()], stale_threshold=2)
+
+    service = store.get_service("app")
+    assert "stale" not in [e.field for e in store.list_change_events(service_id=service.id)]
+
+
+def test_goes_stale_once_every_reporting_source_has_lost_it(store):
+    store.reconcile(SourceType.traefik, [_traefik()], stale_threshold=2)
+    store.reconcile(SourceType.docker, [_docker()], stale_threshold=2)
+    for _ in range(2):
+        store.reconcile(SourceType.docker, [], stale_threshold=2)
+    assert store.get_service("app").stale is False
+
+    for _ in range(2):
+        store.reconcile(SourceType.traefik, [], stale_threshold=2)
+    assert store.get_service("app").stale is True
+
+
+def test_manual_service_with_a_lost_discovery_source_goes_stale(store):
+    """The manual provenance row never misses a pass, so it must not hold a
+    service fresh once its only discovery source has lost it."""
+    from registry_mcp.models import Service
+
+    store.create_service(Service(name="app", display_name="App"))
+    store.reconcile(SourceType.traefik, [_traefik()], stale_threshold=2)
+    for _ in range(2):
+        store.reconcile(SourceType.traefik, [], stale_threshold=2)
+
+    assert store.get_service("app").stale is True

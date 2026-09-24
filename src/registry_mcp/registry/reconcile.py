@@ -76,11 +76,20 @@ def provenance_updates(service: Service, discovered: DiscoveredService) -> dict[
         if set(merged) != set(service.urls):
             updates["urls"] = merged
 
-    # Record per-source auth_mode
-    if discovered.source == SourceType.traefik and discovered.auth_mode != AuthMode.unknown:
-        updates["traefik_auth_mode"] = discovered.auth_mode
-    elif discovered.source == SourceType.authentik and discovered.auth_mode != AuthMode.unknown:
-        updates["authentik_auth_mode"] = discovered.auth_mode
+    # Record per-source auth_mode — only on a real change, or every pass writes a
+    # no-op ChangeEvent and counts the service as changed. A None auth_mode is
+    # "not reported", never a value to store over a known one.
+    if discovered.auth_mode not in (None, AuthMode.unknown):
+        if (
+            discovered.source == SourceType.traefik
+            and discovered.auth_mode != service.traefik_auth_mode
+        ):
+            updates["traefik_auth_mode"] = discovered.auth_mode
+        elif (
+            discovered.source == SourceType.authentik
+            and discovered.auth_mode != service.authentik_auth_mode
+        ):
+            updates["authentik_auth_mode"] = discovered.auth_mode
 
     # Compute conflict using per-source values after this update
     effective_traefik = updates.get("traefik_auth_mode") or service.traefik_auth_mode

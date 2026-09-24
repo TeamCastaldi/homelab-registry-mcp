@@ -464,19 +464,32 @@ class RegistryStore:
             items_missing += 1
             row.missed_passes += 1
             session.add(row)
-            if row.missed_passes >= stale_threshold:
-                service = session.get(Service, row.service_id)
-                if service is not None and not service.stale:
-                    service.stale = True
-                    self._record_change(
-                        session,
-                        service_id=service.id,
-                        field="stale",
-                        old="False",
-                        new="True",
-                        actor=actor,
-                    )
-                    session.add(service)
+            if row.missed_passes < stale_threshold:
+                continue
+            service = session.get(Service, row.service_id)
+            if service is None or service.stale:
+                continue
+            # Stale only once every discovery source that reported the service
+            # has lost it. One source dropping a service another still sees used
+            # to flip `stale` back and forth on every pass, forever.
+            reporting = session.exec(
+                select(ServiceSource).where(
+                    ServiceSource.service_id == row.service_id,
+                    ServiceSource.source != SourceType.manual,
+                )
+            ).all()
+            if any(r.missed_passes < stale_threshold for r in reporting):
+                continue
+            service.stale = True
+            self._record_change(
+                session,
+                service_id=service.id,
+                field="stale",
+                old="False",
+                new="True",
+                actor=actor,
+            )
+            session.add(service)
         return items_missing
 
     def purge_old_events(self, retention_days: int) -> dict[str, int]:
