@@ -81,23 +81,57 @@ def test_purge_old_events(store):
     assert store.list_change_events(service_id=created.id) == []
 
 
-def test_logging_redacts_secrets(tmp_path):
+@pytest.fixture
+def logged(tmp_path):
+    """Log one `probe` event with the given fields; return the JSON record written."""
     log_file = tmp_path / "events.log"
-    try:
-        configure_logging(Settings(registry_log_path=str(log_file)))
-        get_logger("test").info("probe", authentik_token="super-secret", host="auth.lan")
+    configure_logging(Settings(registry_log_path=str(log_file)))
 
-        line = log_file.read_text().strip().splitlines()[-1]
-        record = json.loads(line)
-        assert record["authentik_token"] == "***redacted***"
-        assert record["host"] == "auth.lan"
-        assert record["event"] == "probe"
-    finally:
-        root = logging.getLogger()
-        for handler in list(root.handlers):
-            root.removeHandler(handler)
-            handler.close()
-        structlog.reset_defaults()
+    def _log(**fields):
+        get_logger("test").info("probe", **fields)
+        return json.loads(log_file.read_text().strip().splitlines()[-1])
+
+    yield _log
+    root = logging.getLogger()
+    for handler in list(root.handlers):
+        root.removeHandler(handler)
+        handler.close()
+    structlog.reset_defaults()
+
+
+def test_logging_redacts_secrets(logged):
+    record = logged(authentik_token="super-secret", host="auth.lan")
+    assert record["authentik_token"] == "***redacted***"
+    assert record["host"] == "auth.lan"
+    assert record["event"] == "probe"
+
+
+def test_logging_redacts_key_named_fields_but_not_key_lists_or_paths(logged):
+    record = logged(
+        key="k-value",
+        access_key="ak-value",
+        keys=["DB_PASSWORD", "API_TOKEN"],
+        key_path="/etc/git-crypt.key",
+    )
+    assert record["key"] == "***redacted***"
+    assert record["access_key"] == "***redacted***"
+    # Names of secrets and a path to one are diagnostics, not the secret itself.
+    assert record["keys"] == ["DB_PASSWORD", "API_TOKEN"]
+    assert record["key_path"] == "/etc/git-crypt.key"
+
+
+def test_logging_redacts_secrets_nested_in_dicts_and_lists(logged):
+    payload = {
+        "source": {"git_token": "t-value", "host": "git.lan"},
+        "headers": [{"authorization": "Bearer b-value"}, {"accept": "json"}],
+    }
+    record = logged(payload=payload)
+    assert record["payload"] == {
+        "source": {"git_token": "***redacted***", "host": "git.lan"},
+        "headers": [{"authorization": "***redacted***"}, {"accept": "json"}],
+    }
+    # The caller's own dict is never edited.
+    assert payload["source"]["git_token"] == "t-value"
 
 
 _EVENT_TOOLS = {
