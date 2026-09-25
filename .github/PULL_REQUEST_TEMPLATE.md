@@ -25,7 +25,7 @@
 - [ ] Format check passes (`uv run ruff format --check .`)
 - [ ] No secrets committed
 - [ ] CLAUDE.md updated if architecture or constraints changed
-- [ ] Relevant docs updated (ARD, spec, SOP) if applicable
+- [ ] Relevant docs updated (ADR, spec, SOP) if applicable
 
 ## Related
 

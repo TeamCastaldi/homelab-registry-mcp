@@ -261,7 +261,11 @@ bundle a security remediation; they are always separate PRs with separate labels
   `NORMALIZATION_SCHEDULE` scheduler job — same three-part gate as comment polling (opt-in flag,
   write path configured, not read-only). The schedule is a crontab (default Wednesday and
   Saturday at 07:00 in the server's `TZ`) so a restart never pushes the next run back; a plain
-  seconds value is still accepted but restarts with the server.
+  seconds value is still accepted but restarts with the server. One sweep runs at a time: a call
+  made while one is running gets an error at once, since two sweeps could both open a PR for the
+  same node. Files are formatted in worker threads, so the formatter keeps one ruamel `YAML`
+  object per thread (`formatter._yaml()`): ruamel keeps its parser and emitter state on that
+  object, and sharing one across threads failed nearly every file.
 
 **Brownfield adoption (`docs/plans/updated-phases.md` Phase 7, `adoption/` + `proposal/adoption.py`
 + `tools/adoption.py`):** brings a live, pre-existing Docker service (discovered but never
