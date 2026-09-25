@@ -26,6 +26,7 @@ or the value stage fails its own checks.
 from __future__ import annotations
 
 import io
+import threading
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -50,10 +51,27 @@ from registry_mcp.normalization.rules import (
 
 _log = get_logger("normalization.formatter")
 
-_yaml = YAML()
-_yaml.indent(mapping=2, sequence=4, offset=2)
-_yaml.preserve_quotes = True
-_yaml.width = 4096  # never line-wrap a long value (e.g. a Traefik rule label)
+_thread_state = threading.local()
+
+
+def _yaml() -> YAML:
+    """This thread's round-trip ``YAML`` instance.
+
+    ruamel keeps its parser and emitter state on the ``YAML`` object itself, so
+    one instance shared across threads corrupts both: sweeps running at once
+    (each file is formatted in a worker thread) failed with errors like
+    "expected NodeEvent, but got DocumentStartEvent" and escalated every file
+    to DSPy. Each thread gets its own.
+    """
+    yaml_ = getattr(_thread_state, "yaml", None)
+    if yaml_ is None:
+        yaml_ = YAML()
+        yaml_.indent(mapping=2, sequence=4, offset=2)
+        yaml_.preserve_quotes = True
+        yaml_.width = 4096  # never line-wrap a long value (e.g. a Traefik rule label)
+        _thread_state.yaml = yaml_
+    return yaml_
+
 
 # document-start disabled to match N-013 (no `---` marker); line-length and
 # truthy left permissive since neither is a rule this spec defines.
@@ -223,7 +241,7 @@ def _apply_values(doc: CommentedMap) -> list[str]:
 
 def _dump(doc: CommentedMap) -> str:
     stream = StringIO()
-    _yaml.dump(doc, stream)
+    _yaml().dump(doc, stream)
     # N-003: exactly one trailing newline, no leading blank lines. (N-002,
     # tabs, can't survive parsing in the first place; N-013, no `---`
     # marker, is simply never emitted by this dumper.)
@@ -268,7 +286,7 @@ def reorder_mapping(text: str, path: tuple[Any, ...], sort_key: Callable[[Any], 
     set), and ``None`` when the mapping can't be laid out as blocks (flow
     style, or keys that don't each start their own line).
     """
-    mapping = _mapping_at(_yaml.load(text), path)
+    mapping = _mapping_at(_yaml().load(text), path)
     if mapping is None or len(mapping) < 2 or getattr(mapping, "merge", None):
         return text
     keys = list(mapping.keys())
@@ -334,7 +352,7 @@ def reorder_mapping(text: str, path: tuple[Any, ...], sort_key: Callable[[Any], 
 
 
 def _reorder_steps(text: str) -> list[tuple[tuple[Any, ...], Callable[[Any], Any], str]]:
-    doc = _yaml.load(text)
+    doc = _yaml().load(text)
     steps: list[tuple[tuple[Any, ...], Callable[[Any], Any], str]] = [
         ((), top_level_sort_key, "N-005")
     ]
@@ -375,7 +393,7 @@ def normalize(text: str) -> NormalizedFile | None:
     dropped.
     """
     try:
-        doc = _yaml.load(text)
+        doc = _yaml().load(text)
     except Exception as exc:  # ruamel raises its own error hierarchy
         _log.warning("formatter_parse_failed", error=str(exc))
         return None
@@ -394,7 +412,11 @@ def normalize(text: str) -> NormalizedFile | None:
         _log.warning("formatter_equivalence_failed")
         return None
 
-    normalized_text, order_skipped = _apply_order(reshaped)
+    try:
+        normalized_text, order_skipped = _apply_order(reshaped)
+    except Exception as exc:  # never let a formatting bug break the sweep
+        _log.warning("formatter_apply_failed", error=str(exc))
+        return None
     skipped += order_skipped
 
     errors = [
