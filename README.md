@@ -43,9 +43,11 @@ query and act on.
   fix, notifies you, and confirms the fix on the next discovery pass. The server
   writes to Git only — it never merges, deploys, or edits files directly, and a
   human reviews every change.
-- Manages encrypted secrets in the homelab Git repo via `git-crypt`: read, add,
-  rotate, and list keys in `.env` files without the operator touching the command
-  line.
+- Manages encrypted secrets in the homelab Git repo via `git-crypt`: add secrets
+  and list key names in `.env` files without the operator touching the command
+  line. Returning a plaintext value (`secrets_decrypt`) is off unless
+  `SECRETS_ALLOW_DECRYPT=true`. Rotating the git-crypt key itself stays a manual
+  procedure: `secrets_rotate` returns the steps rather than running them.
 - Adopts a live, hand-run Docker service into GitOps management: SSHes into its
   host, sanitizes hardcoded secrets out of the original compose file, and pauses
   for you to choose whether to keep or rotate them before a PR is opened —
@@ -94,6 +96,8 @@ curl -fsSL "https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/
 curl -fsSL "https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/${VERSION}/.env.example" -o .env.example
 cp .env.example .env
 # Set at least TRAEFIK_API_URL, AUTHENTIK_API_URL, AUTHENTIK_TOKEN, DOCKER_BASE_URL.
+# Also set MCP_ALLOWED_HOSTS to every Host clients use to reach /mcp, e.g.
+# registry-mcp.<your-domain>,<LAN_IP>:8765 — any other Host gets HTTP 421.
 # If you run Dockhand, also set DOCKHAND_API_URL/DOCKHAND_TOKEN to enable its
 # read-only tools and discovery source.
 # To pin the container image to the same release, add REGISTRY_MCP_VERSION=<same tag> to .env.
@@ -113,7 +117,11 @@ docker compose logs -f homelab-registry-mcp   # expect a scheduler_started line
 ### Connect a client
 
 The server is reachable at `https://registry-mcp.<your-domain>/mcp` over the
-streamable-http transport.
+streamable-http transport. That hostname must be listed in `MCP_ALLOWED_HOSTS`:
+the server validates `Host` and `Origin` against DNS rebinding, as the MCP spec
+requires, and answers HTTP 421 for a host it doesn't know. CLI and desktop
+clients send no `Origin`; a browser-based client also needs its origin in
+`MCP_ALLOWED_ORIGINS`.
 
 In VS Code, add it to `.vscode/mcp.json`:
 
