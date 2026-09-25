@@ -63,7 +63,9 @@ class Service(SQLModel, table=True):
     notes: str = Field(default="")
     auth_mode_conflict: bool = Field(default=False)
     hardware_node_id: str | None = Field(default=None, nullable=True)
-    manual_link: bool = Field(default=False)
+    manual_link: bool = Field(default=False)  # hardware_node_id was set by hand
+    # authentik_app_slug was set by service_link_authentik; discovery leaves it alone.
+    authentik_link_manual: bool = Field(default=False)
     manual: bool = Field(default=True)
     stale: bool = Field(default=False, index=True)
     created_at: datetime = Field(default_factory=utcnow)

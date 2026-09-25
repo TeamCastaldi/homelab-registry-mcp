@@ -20,11 +20,35 @@ _REDACT_SUBSTRINGS = ("token", "password", "secret", "authorization", "api_key",
 _REDACTED = "***redacted***"
 
 
+def _secret_named(name: str) -> bool:
+    """A secret-shaped field name: contains one of the substrings, or is
+    `key` / ends in `_key`. `key` is matched as a whole word, not a substring:
+    `keys` (a list of env var names) and `key_path` (a file path) are
+    diagnostics worth keeping."""
+    lowered = name.lower()
+    if lowered == "key" or lowered.endswith("_key"):
+        return True
+    return any(token in lowered for token in _REDACT_SUBSTRINGS)
+
+
+def _scrub(value: Any) -> Any:
+    """Redact secret-named entries at any depth of nested dicts and lists.
+
+    Builds copies rather than editing in place: the containers belong to the
+    caller, which may still be using them after the log call returns.
+    """
+    if isinstance(value, dict):
+        return {k: _REDACTED if _secret_named(str(k)) else _scrub(v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [_scrub(item) for item in value]
+    return value
+
+
 def _redact(_: Any, __: str, event_dict: dict[str, Any]) -> dict[str, Any]:
-    """Mask values whose key name looks secret-shaped before they are written."""
-    for key in event_dict:
-        if any(token in key.lower() for token in _REDACT_SUBSTRINGS):
-            event_dict[key] = _REDACTED
+    """Mask values whose field name looks secret-shaped, at any depth, before
+    they are written."""
+    for key, value in event_dict.items():
+        event_dict[key] = _REDACTED if _secret_named(key) else _scrub(value)
     return event_dict
 
 

@@ -99,3 +99,75 @@ def test_real_client_session_populates_and_correlates_session_id(server):
     assert all(session_ids)
     assert session_ids[0] == session_ids[1]
     assert session_ids[2] != session_ids[0]
+
+
+# --- a reported error is an MCP tool error (isError: true) ------------------
+
+
+async def test_reported_error_becomes_an_mcp_tool_error(server):
+    """Tools report failure as {"error": ...}. That used to go out as a
+    successful result (isError: false) and be logged success=True."""
+    from mcp.types import CallToolResult
+
+    with structlog.testing.capture_logs() as logs:
+        result = await server.call_tool("registry_get_service", {"id_or_name": "nope"})
+
+    assert isinstance(result, CallToolResult)
+    assert result.isError is True
+    assert "no service found" in result.structuredContent["error"]
+    assert "no service found" in result.content[0].text  # same payload, as text
+    tool_calls = [entry for entry in logs if entry["event"] == "tool_call"]
+    assert tool_calls[0]["success"] is False
+
+
+async def test_context_alongside_an_error_is_kept(server):
+    from mcp.types import CallToolResult
+
+    result = await server.call_tool("hardware-discover-now", {})
+    assert isinstance(result, CallToolResult)
+    assert result.isError is True
+    assert result.structuredContent["status"] == "error"
+
+
+@pytest.mark.parametrize(
+    ("result", "is_error"),
+    [
+        ({"error": "no service found"}, True),
+        ({"ok": False, "error": "unreachable"}, True),
+        # A successful discovery pass: a DiscoveryEvent record with error=None.
+        ({"id": "e1", "status": "ok", "items_seen": 3, "error": None}, False),
+        ({"error": ""}, False),
+        ({"traefik_router": {"error": "nested, not top-level"}}, False),
+        ([{"error": "a list item"}], False),
+    ],
+)
+def test_only_a_non_empty_top_level_error_is_a_failure(result, is_error):
+    from registry_mcp.errors import reports_error
+
+    assert reports_error(result) is is_error
+
+
+def test_real_client_sees_is_error_on_a_reported_error(server):
+    import json
+
+    app = server.streamable_http_app()
+    with TestClient(app) as client:
+        session = _initialize(client)
+        response = client.post(
+            "/mcp/",
+            json={
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "registry_get_service", "arguments": {"id_or_name": "nope"}},
+            },
+            headers={**_HEADERS, "mcp-session-id": session},
+        )
+
+    data = next(
+        json.loads(line[len("data: ") :])
+        for line in response.text.splitlines()
+        if line.startswith("data: ")
+    )
+    assert data["result"]["isError"] is True
+    assert "no service found" in data["result"]["structuredContent"]["error"]

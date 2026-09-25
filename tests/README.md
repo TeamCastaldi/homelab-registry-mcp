@@ -11,6 +11,7 @@ per module or feature, rather than `unit/` / `integration/` / `e2e/` folders:
 ```
 tests/
     conftest.py             Shared fixtures (IsolatedSettings, settings, store, server)
+                            and helpers (tool_payload, BlockingCall)
     test_discovery.py       Discovery engine + sources
     test_reconcile_*.py     Reconciliation (deterministic + reasoning)
     test_linking.py         Cross-source linking
@@ -27,10 +28,22 @@ tests/
   explicit marker.
 - Tests are **hermetic**: `conftest.py` provides `IsolatedSettings`, which ignores
   `.env`, environment variables, and secrets files, so no test touches real
-  Traefik, Authentik, Docker, or network state.
+  Traefik, Authentik, Docker, or network state. Build settings with
+  `IsolatedSettings(...)`, never `Settings.model_construct()`: that skips
+  validation, so credential fields stay plain strings instead of the `SecretStr`
+  the server always sees.
 - Each test gets a throwaway SQLite database via the `settings` fixture
   (`tmp_path`), plus `store` (`RegistryStore`) and `server` (`build_server`)
   fixtures built on top of it.
+- Read a tool's result with `conftest.tool_payload()`. A tool that reports
+  `{"error": ...}` comes back as an MCP error result (`isError: true`), not a
+  plain dict; `tool_payload()` reads either shape.
+- An async path that reaches the reasoning layer must keep the blocking LLM call
+  off the event loop. `conftest.BlockingCall` holds a stand-in call open and
+  asserts the loop keeps running meanwhile.
+- A fake should be no more forgiving than the real service where it matters. The
+  proposal and normalization `FakeGit` refuse a branch that already exists, as
+  Gitea and GitHub do; a fake that accepted duplicates once hid a real bug.
 - Files are named `test_<module>.py`; test functions `test_<what_it_does>`.
 - Each test should verify one thing.
 

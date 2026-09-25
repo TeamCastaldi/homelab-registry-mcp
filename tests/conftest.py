@@ -1,6 +1,10 @@
 """Shared test fixtures."""
 
+import asyncio
+import threading
+
 import pytest
+from mcp.types import CallToolResult
 from pydantic_settings import SettingsConfigDict
 
 from registry_mcp.config import Settings
@@ -32,6 +36,48 @@ class IsolatedSettings(Settings):
     ):
         # Honor only constructor kwargs; ignore env vars, .env, and secrets files.
         return (init_settings,)
+
+
+def tool_payload(result):
+    """The structured payload of a `FastMCP.call_tool()` result: a success is a
+    `(content, structured)` tuple, a reported error a `CallToolResult` with
+    `isError` set and the tool's `{"error": ...}` dict as structured content."""
+    if isinstance(result, CallToolResult):
+        assert result.isError, "a CallToolResult here is always a reported error"
+        return result.structuredContent
+    return result[1]
+
+
+class BlockingCall:
+    """A stand-in for a blocking LLM round-trip: blocks its (worker) thread until
+    released, so a test can observe the event loop while the call is in flight.
+    Assign it in place of a reasoner method."""
+
+    def __init__(self, result=None):
+        self.result = result
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def __call__(self, *args, **kwargs):
+        self.entered.set()
+        self.release.wait(5)
+        return self.result
+
+    async def wait_entered(self, task: asyncio.Task) -> None:
+        """Yield to the loop until the call is in flight; fail if `task` finished
+        first — which is what a call made on the event loop itself looks like."""
+        for _ in range(500):
+            if self.entered.is_set():
+                break
+            await asyncio.sleep(0.01)
+        assert self.entered.is_set(), "the blocking call was never made"
+        assert not task.done(), "the blocking call ran on the event loop"
+
+    async def assert_off_loop(self, coro):
+        task = asyncio.create_task(coro)
+        await self.wait_entered(task)
+        self.release.set()
+        return await task
 
 
 @pytest.fixture

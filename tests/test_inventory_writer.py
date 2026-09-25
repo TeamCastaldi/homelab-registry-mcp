@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import textwrap
 
+import pytest
 from ruamel.yaml import YAML
 
 from registry_mcp.inventory.writer import upsert_host
@@ -101,3 +102,70 @@ class TestUpsertHost:
         upsert_host(inv, "heimdall", "10.0.0.9", ["nas"])
         data = _read(inv)
         assert list(data["all"]["children"]["nas"]["hosts"].keys()) == ["heimdall"]
+
+
+class TestNullEntriesAndAtomicWrite:
+    """Ansible's YAML inventories routinely write a bare `host:` or `group:` —
+    ruamel loads those as None, which `setdefault()` handed straight back."""
+
+    def test_fills_a_null_host_entry_and_keeps_everything_else(self, tmp_path):
+        inv = tmp_path / "inventory.yml"
+        inv.write_text(
+            textwrap.dedent(
+                """\
+                # managed by hand
+                all:
+                  hosts:
+                    heimdall:
+                    waldorf:
+                      ansible_host: 10.0.0.2  # pinned
+                  children:
+                    docker:
+                """
+            )
+        )
+        upsert_host(inv, "heimdall", "10.0.0.1", ["docker"])
+
+        text = inv.read_text()
+        assert "# managed by hand" in text
+        assert "ansible_host: 10.0.0.2  # pinned" in text
+        data = _read(inv)
+        assert data["all"]["hosts"]["heimdall"]["ansible_host"] == "10.0.0.1"
+        assert "heimdall" in data["all"]["children"]["docker"]["hosts"]
+
+    def test_fills_a_null_all_section(self, tmp_path):
+        inv = tmp_path / "inventory.yml"
+        inv.write_text("all:\n")
+        upsert_host(inv, "heimdall", "10.0.0.1", [])
+        assert _read(inv)["all"]["hosts"]["heimdall"]["ansible_host"] == "10.0.0.1"
+
+    def test_refuses_a_non_mapping_inventory_without_touching_it(self, tmp_path):
+        inv = tmp_path / "inventory.yml"
+        inv.write_text("- not\n- an\n- inventory\n")
+        with pytest.raises(ValueError, match="expected a mapping"):
+            upsert_host(inv, "heimdall", "10.0.0.1", [])
+        assert inv.read_text() == "- not\n- an\n- inventory\n"
+
+    def test_a_failed_dump_leaves_the_live_file_intact(self, tmp_path, monkeypatch):
+        import registry_mcp.inventory.writer as writer
+
+        inv = tmp_path / "inventory.yml"
+        original = "all:\n  hosts:\n    waldorf:\n      ansible_host: 10.0.0.2\n"
+        inv.write_text(original)
+
+        def _boom(*args, **kwargs):
+            raise RuntimeError("disk full")
+
+        monkeypatch.setattr(writer._yaml, "dump", _boom)
+        with pytest.raises(RuntimeError, match="disk full"):
+            upsert_host(inv, "heimdall", "10.0.0.1", [])
+
+        assert inv.read_text() == original
+        assert [p.name for p in tmp_path.iterdir()] == ["inventory.yml"]  # no temp left
+
+    def test_keeps_the_file_mode(self, tmp_path):
+        inv = tmp_path / "inventory.yml"
+        inv.write_text("all:\n  hosts: {}\n")
+        inv.chmod(0o640)
+        upsert_host(inv, "heimdall", "10.0.0.1", [])
+        assert inv.stat().st_mode & 0o777 == 0o640

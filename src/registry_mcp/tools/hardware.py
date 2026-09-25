@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.exceptions import ResourceError
 from mcp.types import ToolAnnotations
 
 from registry_mcp.config import Settings
@@ -304,15 +305,15 @@ def register_hardware_tools(
         recent confirmation/sighting."""
         return summarize_discovery_status(hardware_store.list_nodes())
 
-    @mcp.resource("hardware://all")
+    @mcp.resource("hardware://all", mime_type="application/json")
     def hardware_all_resource() -> list[dict[str, Any]]:
         """Summary index of all hardware nodes."""
         return [n.model_dump(mode="json") for n in hardware_store.list_nodes()]
 
-    @mcp.resource("hardware://{node_id}")
+    @mcp.resource("hardware://{node_id}", mime_type="application/json")
     def hardware_node_resource(node_id: str) -> dict[str, Any]:
         """Full detail for a hardware node."""
         node = hardware_store.get_node(node_id)
         if node is None:
-            return {"error": f"no node found for {node_id!r}"}
+            raise ResourceError(f"no node found for {node_id!r}")
         return node.model_dump(mode="json")

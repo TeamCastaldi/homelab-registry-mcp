@@ -39,7 +39,7 @@ def register_linking_tools(
             return {"error": "AUTHENTIK_API_URL and AUTHENTIK_TOKEN must be configured"}
         client = AuthentikClient(
             settings.authentik_api_url,
-            settings.authentik_token,
+            settings.authentik_token.get_secret_value(),
             timeout=settings.authentik_timeout_seconds,
             retries=settings.authentik_retries,
         )
@@ -54,11 +54,13 @@ def register_linking_tools(
     def service_link_authentik(service_id: str, app_slug: str) -> dict[str, Any]:
         """Manually link a service to an Authentik application by slug.
 
-        Overrides discovery; sets the service's `authentik_app_slug`.
+        Sets the service's `authentik_app_slug` and pins it
+        (`authentik_link_manual`): Authentik discovery never replaces a
+        hand-set link. Call again to change it.
         """
         updated = store.update_service(
             service_id,
-            {"authentik_app_slug": app_slug},
+            {"authentik_app_slug": app_slug, "authentik_link_manual": True},
             actor="manual:service_link_authentik",
         )
         if updated is None:

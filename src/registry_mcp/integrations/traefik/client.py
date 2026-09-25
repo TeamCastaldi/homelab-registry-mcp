@@ -43,7 +43,10 @@ class TraefikClient:
                 ) as client:
                     response = await client.get(url)
                 response.raise_for_status()
-                return response.json()
+                try:
+                    return response.json()
+                except ValueError as exc:  # a non-JSON body: not the Traefik API
+                    raise TraefikError(f"Traefik API returned a non-JSON body for {path}") from exc
             except httpx.HTTPStatusError as exc:
                 # Client errors (4xx) are not transient; fail fast.
                 if exc.response.status_code < 500:

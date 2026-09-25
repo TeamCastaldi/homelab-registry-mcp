@@ -96,8 +96,11 @@ These are load-bearing — see [CLAUDE.md](CLAUDE.md) for the full list:
   stay deterministic; reasoning lives in `dspy/` and is wired in via injected
   callables.
 - **Register new MCP tools in `server.py`** — FastMCP does not auto-discover them.
-- **Naming**: kebab-case for MCP tool names, snake_case for Python, PascalCase
-  for classes.
+- **Naming**: snake_case for Python, PascalCase for classes. MCP tool names are
+  a public contract and are never renamed. Most are snake_case (FastMCP's
+  default); the `hardware-*`, `ansible-inventory-*`, and `service-*` families
+  are kebab-case. A new tool follows its family's style; a new family uses
+  snake_case. See CLAUDE.md's Key Conventions.
 
 ## What's out of scope
 

@@ -1,8 +1,10 @@
 """Tests exercising the registry CRUD tools and resources through the server."""
 
+from conftest import tool_payload
+
 
 async def call(server, name, args):
-    return (await server.call_tool(name, args))[1]
+    return tool_payload(await server.call_tool(name, args))
 
 
 async def test_add_get_list_update_delete_flow(server):

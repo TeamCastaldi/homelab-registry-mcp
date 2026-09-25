@@ -1,6 +1,11 @@
 """Tests for the patch generator's confidence and YAML-validity gates."""
 
+import pytest
+
 from registry_mcp.proposal.generator import PatchGenerator
+
+LEAKED = "abcdefghijklmnopqrstuvwxyz0123456789"
+QUOTED = f"drop the hardcoded AUTHENTIK_TOKEN={LEAKED}"
 
 VALID = {
     "patch": "services:\n  plex:\n    image: plex\n",
@@ -96,6 +101,16 @@ async def test_credentials_are_scrubbed_before_commit():
     assert "LOG_LEVEL: info" in result.patch
 
 
+@pytest.mark.parametrize("field", ["commit_message", "pr_title", "pr_body", "reasoning"])
+async def test_credentials_in_generated_text_are_scrubbed(field):
+    """These fields reach Git and the notification channel just as the patch does."""
+    result = await _call(_gen({**VALID, field: QUOTED}))
+    assert result.ok is True
+    value = getattr(result, field)
+    assert LEAKED not in value
+    assert "AUTHENTIK_TOKEN=<replace-with-credential>" in value
+
+
 # ---------------------------------------------------------------------------
 # revise() — same gates, applied to review-feedback revisions
 # ---------------------------------------------------------------------------
@@ -159,3 +174,38 @@ async def test_revise_credentials_are_scrubbed():
     assert result.ok is True
     assert "abcdefghijklmnopqrstuvwxyz0123456789" not in result.patch
     assert "AUTHENTIK_TOKEN: <replace-with-credential>" in result.patch
+
+
+@pytest.mark.parametrize("field", ["commit_message", "reasoning"])
+async def test_revise_credentials_in_generated_text_are_scrubbed(field):
+    result = await _call_revise(_revise_gen({**VALID_REVISION, field: QUOTED}))
+    assert result.ok is True
+    value = getattr(result, field)
+    assert LEAKED not in value
+    assert "AUTHENTIK_TOKEN=<replace-with-credential>" in value
+
+
+async def test_patch_generation_runs_off_the_event_loop():
+    from conftest import BlockingCall
+
+    reasoner = FakeReasoner(VALID)
+    reasoner.generate_remediation_patch = BlockingCall(VALID)
+    result = await reasoner.generate_remediation_patch.assert_off_loop(
+        _call(PatchGenerator(reasoner, threshold=0.8))
+    )
+    assert result.ok
+
+
+async def test_revision_runs_off_the_event_loop():
+    from conftest import BlockingCall
+
+    reasoner = FakeReasoner(None, VALID_REVISION)
+    reasoner.apply_review_feedback = BlockingCall(VALID_REVISION)
+    result = await reasoner.apply_review_feedback.assert_off_loop(
+        PatchGenerator(reasoner, threshold=0.8).revise(
+            file_path="nodes/workload-01/plex/compose.yaml",
+            current_file="services: {}\n",
+            feedback="add a restart policy",
+        )
+    )
+    assert result.ok

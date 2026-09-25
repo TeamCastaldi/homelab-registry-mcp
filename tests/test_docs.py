@@ -10,7 +10,7 @@ import pytest
 from mcp.types import CallToolResult, TextContent
 
 import registry_mcp.integrations.docs.tools as docs_tools
-from conftest import IsolatedSettings
+from conftest import IsolatedSettings, tool_payload
 from registry_mcp.integrations.docs import DocsMcpClient, DocsMcpError
 from registry_mcp.server import build_server
 
@@ -148,7 +148,7 @@ def docs_server(tmp_path, monkeypatch):
 
 
 async def call(server, name, args):
-    return (await server.call_tool(name, args))[1]
+    return tool_payload(await server.call_tool(name, args))
 
 
 async def test_tool_successful_relay(docs_server):

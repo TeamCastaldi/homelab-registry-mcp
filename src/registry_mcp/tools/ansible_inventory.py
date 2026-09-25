@@ -96,12 +96,15 @@ def register_ansible_inventory_tools(
         if not settings.ansible_inventory_path:
             return {"error": "ANSIBLE_INVENTORY_PATH is not configured"}
         ansible_host = node.ansible_host or node.ip_address
-        upsert_host(
-            Path(settings.ansible_inventory_path),
-            node.hostname,
-            ansible_host,
-            node.ansible_groups,
-        )
+        try:
+            upsert_host(
+                Path(settings.ansible_inventory_path),
+                node.hostname,
+                ansible_host,
+                node.ansible_groups,
+            )
+        except ValueError as exc:  # an inventory shape this writer won't guess at
+            return {"error": f"inventory not updated: {exc}"}
         return {
             "synced": True,
             "hostname": node.hostname,

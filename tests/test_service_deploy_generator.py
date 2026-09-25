@@ -200,3 +200,16 @@ async def test_conventions_fetch_failure_never_blocks_generation():
 
     assert draft.ok is True
     assert "Homelab compose spec" not in reasoner.calls[0]["homelab_conventions"]
+
+
+async def test_compose_generation_runs_off_the_event_loop():
+    from conftest import BlockingCall
+
+    reasoner = FakeReasoner(None)
+    reasoner.generate_service_compose = BlockingCall(_raw())
+    draft = await reasoner.generate_service_compose.assert_off_loop(
+        ComposeGenerator(reasoner, threshold=0.8).generate(
+            intake={"ports": ["8000/tcp"]}, service_name="app", target_node="heimdall"
+        )
+    )
+    assert draft.ok

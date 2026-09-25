@@ -46,6 +46,11 @@ _README_NAMES = ("README.md", "README.rst", "README.txt", "README", "readme.md")
 # capped well below the whole-repo limit. A README past this is padding.
 _MAX_FILE_BYTES = 256 * 1024
 
+# The only GIT_* variables a clone inherits. They choose which CAs to trust (a
+# self-hosted Gitea behind a private CA, a TLS-inspecting proxy) and can neither
+# change the URL nor add config.
+_GIT_TRUST_ANCHOR_VARS = frozenset({"GIT_SSL_CAINFO", "GIT_SSL_CAPATH"})
+
 
 class IntakeError(RuntimeError):
     """Raised when a repo cannot be fetched or is not safe to fetch."""
@@ -101,12 +106,24 @@ def check_repo_url(url: str) -> str:
 
 
 def _git_env() -> dict[str, str]:
-    env = dict(os.environ)
+    # No other inherited GIT_* variable reaches a clone of a stranger's repo:
+    # GIT_CONFIG_COUNT/GIT_CONFIG_PARAMETERS inject config, GIT_SSH_COMMAND,
+    # GIT_PROXY_COMMAND and GIT_SSL_NO_VERIFY redirect or weaken git outright,
+    # and the operator's own GIT_TOKEN has no business in the child's environment.
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith("GIT_") or k in _GIT_TRUST_ANCHOR_VARS
+    }
     # Never block on a credential prompt for a private repo, and never offer a
-    # stored credential (the operator's GIT_TOKEN among them) to a foreign host.
+    # stored credential to a foreign host.
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_ASKPASS"] = ""
+    # No system or global config either: a `url.*.insteadOf` there silently
+    # rewrites the URL check_repo_url approved (to file://, or to one carrying a
+    # token), and an unscoped `http.extraHeader` sends its header to this host.
     env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
     return env
 
 
@@ -115,8 +132,12 @@ async def _clone(url: str, dest: Path, *, timeout_seconds: int) -> None:
         "git",
         "-c",
         "credential.helper=",
+        # An allowlist, not just `ext` off: whatever the URL becomes on the
+        # way to the transport, git itself refuses anything but https.
         "-c",
-        "protocol.ext.allow=never",
+        "protocol.allow=never",
+        "-c",
+        "protocol.https.allow=always",
         "clone",
         "--depth",
         "1",

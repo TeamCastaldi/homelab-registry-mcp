@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.exceptions import ResourceError
 from mcp.types import ToolAnnotations
 
 from registry_mcp.config import Settings
@@ -164,15 +165,15 @@ def register_registry_tools(
             }
         return {"deleted": True, "id": challenge.entity_id, "name": challenge.entity_label}
 
-    @mcp.resource("service://{service_id}")
+    @mcp.resource("service://{service_id}", mime_type="application/json")
     def service_detail(service_id: str) -> dict[str, Any]:
         """Full detail for a single service by id or name."""
         service = store.get_service(service_id)
         if service is None:
-            return {"error": f"no service found for {service_id!r}"}
+            raise ResourceError(f"no service found for {service_id!r}")
         return _dump(service)
 
-    @mcp.resource("services://all")
+    @mcp.resource("services://all", mime_type="application/json")
     def services_index() -> list[dict[str, Any]]:
         """Catalog index: a summary row per registered service."""
         return [_summary(s) for s in store.list_services()]

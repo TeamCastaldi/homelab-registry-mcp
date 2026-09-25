@@ -7,7 +7,7 @@ reasoning layer is faked through the real PatchGenerator.
 from conftest import IsolatedSettings
 from registry_mcp.models import Proposal, ProposalStatus, Service
 from registry_mcp.proposal import PatchGenerator, ProposalEngine, ProposalStore
-from registry_mcp.providers.git import OpenedPR
+from registry_mcp.providers.git import GitError, OpenedPR
 
 VALID_PATCH = {
     "patch": "services:\n  plex:\n    image: plex\n",
@@ -47,6 +47,7 @@ class FakeGit:
         self.opened = []
         self.closed = []
         self.comments = comments or {}
+        self.pr_states = {}
 
     async def read_file(self, repo, path, ref):
         return self.files.get(path, "services: {}\n")
@@ -55,10 +56,15 @@ class FakeGit:
         return list(self.files.keys())
 
     async def create_branch(self, repo, branch, base):
+        # Gitea (409) and GitHub (422) both refuse a branch that already exists.
+        if branch in self.branches:
+            raise GitError(f"branch {branch!r} already exists")
         self.branches.append(branch)
 
     async def commit_file(self, repo, path, content, branch, message):
-        self.commits.append({"path": path, "content": content, "branch": branch})
+        self.commits.append(
+            {"path": path, "content": content, "branch": branch, "message": message}
+        )
         self.files[path] = content
 
     async def delete_file(self, repo, path, branch, message):
@@ -75,6 +81,9 @@ class FakeGit:
 
     async def close_pr(self, repo, number):
         self.closed.append(number)
+
+    async def get_pr_state(self, repo, number):
+        return self.pr_states.get(number, "open")
 
     async def list_pr_comments(self, repo, number):
         return self.comments.get(number, [])
@@ -151,6 +160,39 @@ async def test_create_opens_pr_and_records_proposal(store):
     assert len(proposals.list_open()) == 1
     assert notifier.sent[0]["url"] == result["pr_url"]
     assert notifier.sent[0]["diff"] == VALID_PATCH["patch"]
+
+
+async def test_credential_in_generated_text_never_reaches_git_or_notification(store):
+    leaked = "abcdefghijklmnopqrstuvwxyz0123456789"
+    quoted = f"drop the hardcoded AUTHENTIK_TOKEN={leaked}"
+    reasoner = FakeReasoner(
+        {
+            **VALID_PATCH,
+            "commit_message": quoted,
+            "pr_title": quoted,
+            "pr_body": quoted,
+            "reasoning": quoted,
+        },
+        revision_result={**VALID_REVISION, "commit_message": quoted, "reasoning": quoted},
+    )
+    service = _conflicted(store)
+    notifier = FakeNotifier()
+    git = FakeGit()
+    settings = _settings(proposal_comment_allowed_users="nathan")
+    engine, proposals = _engine(
+        store, settings=settings, git=git, notifier=notifier, reasoner=reasoner
+    )
+
+    created = await engine.create_for_service(service.id)
+    comment = {"id": 501, "user": {"login": "nathan"}, "body": "please add a restart policy"}
+    await engine.apply_review_feedback(proposals.get(created["id"]), comment)
+
+    assert len(git.commits) == 2  # the PR's commit and the revision
+    outbound = [c["message"] for c in git.commits]
+    outbound += [f"{pr['title']}\n{pr['body']}" for pr in git.opened]
+    outbound += [f"{sent['title']}\n{sent['body']}" for sent in notifier.sent]
+    assert all(leaked not in text for text in outbound)
+    assert "AUTHENTIK_TOKEN=<replace-with-credential>" in git.commits[-1]["message"]
 
 
 async def test_create_dry_run_opens_no_pr(store):
@@ -233,6 +275,186 @@ async def test_sweep_marks_verified_when_conflict_clears(store):
     assert any("secured" in s["title"] for s in notifier.sent)
 
 
+async def test_sweep_leaves_non_auth_proposals_open(store):
+    """An image-update PR has no discovery-visible resolution signal; the sweep
+    used to mark it `verified` on the next pass because the service simply had
+    no auth conflict, which also dropped its dedupe guard."""
+    service = store.create_service(Service(name="app", display_name="App", host="workload-01"))
+    notifier = FakeNotifier()
+    engine, proposals = _engine(store, notifier=notifier)
+    await engine.create_for_image_update(
+        service.id, image="ghcr.io/x/app", current_tag="1.0", new_tag="1.1"
+    )
+
+    await engine.after_discovery()
+
+    assert [p.status for p in proposals.list_all()] == [ProposalStatus.open]
+    assert not any("secured" in s["title"] for s in notifier.sent)
+
+
+async def test_after_discovery_retires_merged_and_closed_prs(store):
+    service = store.create_service(Service(name="app", display_name="App", host="workload-01"))
+    other = store.create_service(Service(name="db", display_name="DB", host="workload-01"))
+    git = FakeGit()
+    engine, proposals = _engine(store, git=git)
+    merged = await engine.create_for_image_update(
+        service.id, image="ghcr.io/x/app", current_tag="1.0", new_tag="1.1"
+    )
+    closed = await engine.create_for_image_update(
+        other.id, image="ghcr.io/x/db", current_tag="15", new_tag="16"
+    )
+    git.pr_states = {merged["pr_number"]: "merged", closed["pr_number"]: "closed"}
+
+    await engine.after_discovery()
+
+    assert proposals.get(merged["id"]).status == ProposalStatus.merged
+    assert proposals.get(closed["id"]).status == ProposalStatus.cancelled
+    assert proposals.list_open() == []
+
+
+async def test_merged_auth_conflict_pr_waits_for_verification(store):
+    """A merged auth fix is only done once discovery sees the conflict clear."""
+    service = _conflicted(store)
+    git = FakeGit()
+    engine, proposals = _engine(store, git=git)
+    created = await engine.create_for_service(service.id)
+    git.pr_states[created["pr_number"]] = "merged"
+
+    await engine.after_discovery()
+    assert proposals.get(created["id"]).status == ProposalStatus.open
+
+    store.update_service(service.id, {"auth_mode_conflict": False}, actor="discovery:traefik")
+    await engine.after_discovery()
+    assert proposals.get(created["id"]).status == ProposalStatus.verified
+
+
+async def test_auto_create_does_not_reopen_a_pr_a_human_closed(store):
+    service = _conflicted(store)
+    git = FakeGit()
+    engine, proposals = _engine(store, settings=_settings(proposal_auto_create=True), git=git)
+    await engine.after_discovery()
+    assert len(git.opened) == 1
+
+    git.pr_states[proposals.list_all()[0].pr_number] = "closed"
+    await engine.after_discovery()
+    await engine.after_discovery()
+
+    assert len(git.opened) == 1
+    assert [p.status for p in proposals.list_all()] == [ProposalStatus.cancelled]
+
+    # An explicit request still reopens it.
+    reopened = await engine.create_for_service(service.id)
+    assert "pr_number" in reopened
+    assert len(git.opened) == 2
+
+
+class CountingReasoner(FakeReasoner):
+    """Always too unsure to patch, counting how often it's asked."""
+
+    def __init__(self):
+        super().__init__(result={**VALID_PATCH, "confidence": 0.2})
+        self.calls = 0
+
+    def generate_remediation_patch(self, **kwargs):
+        self.calls += 1
+        return super().generate_remediation_patch(**kwargs)
+
+
+def _rejecting_engine(store):
+    reasoner, notifier = CountingReasoner(), FakeNotifier()
+    engine, proposals = _engine(
+        store,
+        settings=_settings(proposal_auto_create=True),
+        reasoner=reasoner,
+        notifier=notifier,
+    )
+    return engine, proposals, reasoner, notifier
+
+
+async def test_auto_create_does_not_retry_a_rejected_finding_every_pass(store):
+    service = _conflicted(store)
+    engine, proposals, reasoner, notifier = _rejecting_engine(store)
+
+    for _ in range(3):
+        await engine.after_discovery()
+
+    assert reasoner.calls == 1
+    assert len(notifier.sent) == 1  # one "manual review", not one per pass
+    assert [p.status for p in proposals.list_all()] == [ProposalStatus.rejected]
+
+    # An explicit request still asks again.
+    await engine.create_for_service(service.id)
+    assert reasoner.calls == 2
+
+
+async def test_auto_create_retries_a_rejected_finding_once_the_service_changes(store):
+    service = _conflicted(store)
+    engine, _, reasoner, _ = _rejecting_engine(store)
+    await engine.after_discovery()
+
+    store.update_service(service.id, {"traefik_router": "plex-v2@docker"})
+    await engine.after_discovery()
+    await engine.after_discovery()
+
+    assert reasoner.calls == 2  # once more for the change, then settled again
+
+
+async def test_auto_create_retries_a_rejected_finding_after_a_day(store):
+    from datetime import timedelta
+
+    from sqlmodel import Session
+
+    from registry_mcp.models.service import utcnow
+
+    _conflicted(store)
+    engine, proposals, reasoner, _ = _rejecting_engine(store)
+    await engine.after_discovery()
+
+    rejected = proposals.list_all()[0]
+    with Session(store.engine) as session:
+        row = session.get(Proposal, rejected.id)
+        row.created_at = utcnow() - timedelta(days=1, minutes=1)
+        session.add(row)
+        session.commit()
+    await engine.after_discovery()
+
+    assert reasoner.calls == 2
+
+
+async def test_image_update_after_merged_pr_opens_a_new_proposal(store):
+    service = store.create_service(Service(name="app", display_name="App", host="workload-01"))
+    git = FakeGit()
+    engine, proposals = _engine(store, git=git)
+    first = await engine.create_for_image_update(
+        service.id, image="ghcr.io/x/app", current_tag="1.0", new_tag="1.1"
+    )
+    git.pr_states[first["pr_number"]] = "merged"
+
+    second = await engine.create_for_image_update(
+        service.id, image="ghcr.io/x/app", current_tag="1.1", new_tag="1.2"
+    )
+
+    assert "skipped" not in second
+    assert second["pr_number"] != first["pr_number"]
+    assert proposals.get(first["id"]).status == ProposalStatus.merged
+
+
+async def test_image_update_still_dedupes_against_an_open_pr(store):
+    service = store.create_service(Service(name="app", display_name="App", host="workload-01"))
+    git = FakeGit()
+    engine, _ = _engine(store, git=git)
+    await engine.create_for_image_update(
+        service.id, image="ghcr.io/x/app", current_tag="1.0", new_tag="1.1"
+    )
+
+    second = await engine.create_for_image_update(
+        service.id, image="ghcr.io/x/app", current_tag="1.0", new_tag="1.2"
+    )
+
+    assert second["skipped"] == "open proposal already exists"
+    assert len(git.opened) == 1
+
+
 async def test_cancel_closes_pr_and_marks_cancelled(store):
     service = _conflicted(store)
     git = FakeGit()
@@ -245,6 +467,25 @@ async def test_cancel_closes_pr_and_marks_cancelled(store):
     assert git.closed == [created["pr_number"]]
 
 
+async def test_same_day_proposals_get_distinct_dated_branches(store):
+    """A retired PR frees its finding the same day; the next proposal must not
+    reuse the finished PR's branch, which the Git host refuses to recreate."""
+    import re
+
+    service = _conflicted(store)
+    git = FakeGit()
+    engine, _ = _engine(store, git=git)
+    first = await engine.create_for_service(service.id)
+    await engine.cancel(first["id"])
+
+    second = await engine.create_for_service(service.id)
+
+    assert "pr_number" in second
+    assert len(set(git.branches)) == 2
+    dated = re.compile(r"^patch/auth_mode_conflict-plex-\d{4}-\d{2}-\d{2}-[0-9a-f]{6}$")
+    assert all(dated.match(branch) for branch in git.branches)
+
+
 async def test_after_discovery_auto_creates_for_each_conflict(store):
     _conflicted(store, name="plex")
     _conflicted(store, name="sonarr")
@@ -255,6 +496,20 @@ async def test_after_discovery_auto_creates_for_each_conflict(store):
 
     assert len(proposals.list_open()) == 2
     assert len(git.opened) == 2
+
+
+async def test_after_discovery_never_auto_creates_in_read_only_mode(store):
+    """proposal_create and the webhook already refuse in read-only mode; the
+    scheduled auto-create path used to open PRs anyway."""
+    _conflicted(store)
+    git = FakeGit()
+    engine, proposals = _engine(store, settings=_settings(proposal_auto_create=True), git=git)
+    engine._read_only = True
+
+    await engine.after_discovery()
+
+    assert git.opened == []
+    assert proposals.list_all() == []
 
 
 async def test_after_discovery_disabled_when_not_configured(store):

@@ -1,11 +1,13 @@
 """Tests for discovery sources, the reconciler/engine, scheduler, and tools."""
 
+import asyncio
+
 import httpx
 import pytest
 from mcp.server.fastmcp import FastMCP
 
 import registry_mcp.tools.discovery as discovery_tools
-from conftest import IsolatedSettings
+from conftest import IsolatedSettings, tool_payload
 from registry_mcp.discovery.authentik import AuthentikDiscoverySource
 from registry_mcp.discovery.base import DiscoveredService
 from registry_mcp.discovery.docker import DockerDiscoverySource
@@ -255,6 +257,84 @@ async def test_failed_source_records_failed_event(store):
     assert event.error is not None and "traefik down" in event.error
 
 
+# --- on_pass_complete (the proposal sweep/auto-create hook) ----------------
+
+
+class RecordingHook:
+    """Counts hook runs and the most that were ever in flight at once. With
+    `gate` set, each run waits on it, so a test can hold a run open."""
+
+    def __init__(self, gate: asyncio.Event | None = None) -> None:
+        self.gate = gate
+        self.runs = 0
+        self.in_flight = 0
+        self.max_in_flight = 0
+        self.entered = asyncio.Event()
+
+    async def __call__(self) -> None:
+        self.runs += 1
+        self.in_flight += 1
+        self.max_in_flight = max(self.max_in_flight, self.in_flight)
+        self.entered.set()
+        try:
+            if self.gate is not None:
+                await self.gate.wait()
+        finally:
+            self.in_flight -= 1
+
+
+def _three_sources():
+    return {
+        source: FakeSource(source, [])
+        for source in (SourceType.traefik, SourceType.docker, SourceType.dockhand)
+    }
+
+
+async def test_run_all_runs_the_hook_once(store):
+    hook = RecordingHook()
+    engine = DiscoveryEngine(store, _three_sources(), on_pass_complete=hook)
+
+    events = await engine.run_all()
+
+    assert len(events) == 3
+    assert hook.runs == 1
+
+
+async def test_passes_finishing_together_share_one_follow_up_hook_run(store):
+    """Scheduled sources fire together. Passes that finish while a hook run is
+    in progress get one more run between them, never overlapping ones."""
+    gate = asyncio.Event()
+    hook = RecordingHook(gate)
+    engine = DiscoveryEngine(store, _three_sources(), on_pass_complete=hook)
+
+    first = asyncio.create_task(engine.run_source(SourceType.traefik))
+    await hook.entered.wait()
+    # Both finish while the first hook run is still going, and neither waits on it.
+    await asyncio.wait_for(engine.run_source(SourceType.docker), timeout=5)
+    await asyncio.wait_for(engine.run_source(SourceType.dockhand), timeout=5)
+    gate.set()
+    await first
+
+    assert hook.runs == 2  # the first run, plus one for both later passes
+    assert hook.max_in_flight == 1
+
+
+async def test_a_failing_hook_never_breaks_discovery_or_later_runs(store):
+    calls = 0
+
+    async def flaky() -> None:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("git provider down")
+
+    engine = DiscoveryEngine(store, _three_sources(), on_pass_complete=flaky)
+    event = await engine.run_source(SourceType.traefik)
+    await engine.run_source(SourceType.traefik)
+
+    assert event.status == "ok"
+    assert calls == 2  # the lock was released after the failure
+
+
 # --- tools ----------------------------------------------------------------
 
 
@@ -268,7 +348,7 @@ def discovery_server(store):
 
 
 async def call(server, name, args):
-    return (await server.call_tool(name, args))[1]
+    return tool_payload(await server.call_tool(name, args))
 
 
 async def test_tool_run_now_and_status(discovery_server):
@@ -427,3 +507,192 @@ def test_build_scheduler_adds_one_job_per_source(store):
     job_ids = {job.id for job in scheduler.get_jobs()}
     assert "discovery-traefik" in job_ids
     assert "discovery-docker" not in job_ids
+
+
+# --- reconcile churn: no-op events and stale flapping ------------------------
+
+
+def _traefik(name="app", auth_mode=AuthMode.none):
+    return DiscoveredService(
+        source=SourceType.traefik,
+        external_id=f"{name}@docker",
+        name=name,
+        urls=[f"https://{name}.lan"],
+        traefik_router=f"{name}@docker",
+        auth_mode=auth_mode,
+    )
+
+
+def _docker(name="app"):
+    return DiscoveredService(
+        source=SourceType.docker, external_id="abc123", name=name, urls=[f"https://{name}.lan"]
+    )
+
+
+def test_identical_pass_records_no_changes(store):
+    """Every Traefik pass used to log a `traefik_auth_mode` none→none event per
+    service and count it as changed, burying real history."""
+    store.reconcile(SourceType.traefik, [_traefik()], stale_threshold=3)
+    counts = store.reconcile(SourceType.traefik, [_traefik()], stale_threshold=3)
+
+    assert counts["items_changed"] == 0
+    service = store.get_service("app")
+    fields = [e.field for e in store.list_change_events(service_id=service.id)]
+    assert "traefik_auth_mode" not in fields
+
+
+def test_a_real_auth_mode_change_is_still_recorded(store):
+    store.reconcile(SourceType.traefik, [_traefik()], stale_threshold=3)
+    counts = store.reconcile(
+        SourceType.traefik, [_traefik(auth_mode=AuthMode.forward_auth)], stale_threshold=3
+    )
+
+    assert counts["items_changed"] == 1
+    assert store.get_service("app").traefik_auth_mode == AuthMode.forward_auth
+
+
+def test_unreported_authentik_auth_mode_keeps_the_stored_value(store):
+    app = DiscoveredService(
+        source=SourceType.authentik,
+        external_id="app",
+        name="app",
+        authentik_app_slug="app",
+        auth_mode=AuthMode.forward_auth,
+    )
+    store.reconcile(SourceType.authentik, [app], stale_threshold=3)
+    unreported = app.model_copy(update={"auth_mode": None})
+    store.reconcile(SourceType.authentik, [unreported], stale_threshold=3)
+
+    assert store.get_service("app").authentik_auth_mode == AuthMode.forward_auth
+
+
+def test_one_source_losing_a_service_another_still_sees_never_flaps(store):
+    store.reconcile(SourceType.traefik, [_traefik()], stale_threshold=2)
+    store.reconcile(SourceType.docker, [_docker()], stale_threshold=2)
+    for _ in range(5):  # the container is gone from local Docker; Traefik still routes it
+        store.reconcile(SourceType.docker, [], stale_threshold=2)
+        assert store.get_service("app").stale is False
+        store.reconcile(SourceType.traefik, [_traefik()], stale_threshold=2)
+
+    service = store.get_service("app")
+    assert "stale" not in [e.field for e in store.list_change_events(service_id=service.id)]
+
+
+def test_goes_stale_once_every_reporting_source_has_lost_it(store):
+    store.reconcile(SourceType.traefik, [_traefik()], stale_threshold=2)
+    store.reconcile(SourceType.docker, [_docker()], stale_threshold=2)
+    for _ in range(2):
+        store.reconcile(SourceType.docker, [], stale_threshold=2)
+    assert store.get_service("app").stale is False
+
+    for _ in range(2):
+        store.reconcile(SourceType.traefik, [], stale_threshold=2)
+    assert store.get_service("app").stale is True
+
+
+def test_manual_service_with_a_lost_discovery_source_goes_stale(store):
+    """The manual provenance row never misses a pass, so it must not hold a
+    service fresh once its only discovery source has lost it."""
+    from registry_mcp.models import Service
+
+    store.create_service(Service(name="app", display_name="App"))
+    store.reconcile(SourceType.traefik, [_traefik()], stale_threshold=2)
+    for _ in range(2):
+        store.reconcile(SourceType.traefik, [], stale_threshold=2)
+
+    assert store.get_service("app").stale is True
+
+
+# --- connect tools: base-URL allowlist and trimmed overview (SSRF) -----------
+
+
+def _connect_with(store, monkeypatch, response: httpx.Response):
+    """A connect server whose Traefik/Authentik clients answer `response` and
+    record every URL actually requested."""
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        return response
+
+    real_traefik = discovery_tools.TraefikClient
+    real_authentik = discovery_tools.AuthentikClient
+
+    def traefik_factory(base_url, **kwargs):
+        return real_traefik(base_url, transport=httpx.MockTransport(handler), backoff=0, retries=1)
+
+    def authentik_factory(base_url, token, **kwargs):
+        return real_authentik(
+            base_url, token, transport=httpx.MockTransport(handler), backoff=0, retries=1
+        )
+
+    monkeypatch.setattr(discovery_tools, "TraefikClient", traefik_factory)
+    monkeypatch.setattr(discovery_tools, "AuthentikClient", authentik_factory)
+    mcp = FastMCP(name="test")
+    register_discovery_tools(mcp, DiscoveryEngine(store, {}, stale_threshold=1))
+    return mcp, seen
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://10.0.0.9:2375/containers/json?",  # `?` would swallow /api/overview
+        "http://t/#",
+        "file:///etc/passwd",
+        "ftp://t",
+        "t:8080",
+    ],
+)
+async def test_connect_traefik_rejects_non_base_urls_without_a_request(store, monkeypatch, url):
+    server, seen = _connect_with(store, monkeypatch, httpx.Response(200, json={"http": {}}))
+    result = await call(server, "discovery_connect_traefik", {"url": url})
+    assert result["ok"] is False
+    assert seen == []
+
+
+async def test_connect_authentik_rejects_a_query_url_without_a_request(store, monkeypatch):
+    server, seen = _connect_with(store, monkeypatch, httpx.Response(200, json={"results": []}))
+    result = await call(
+        server, "discovery_connect_authentik", {"url": "https://a/api/v3?x=", "token": "t"}
+    )
+    assert result["ok"] is False
+    assert seen == []
+
+
+async def test_connect_traefik_never_echoes_a_non_traefik_body(store, monkeypatch):
+    body = {"Id": "abc", "Env": ["DB_PASSWORD=hunter2"]}
+    server, seen = _connect_with(store, monkeypatch, httpx.Response(200, json=body))
+    result = await call(server, "discovery_connect_traefik", {"url": "http://10.0.0.9:2375"})
+    assert result["ok"] is False
+    assert "not like the Traefik API" in result["error"]
+    assert "hunter2" not in str(result)
+    assert seen == ["http://10.0.0.9:2375/api/overview"]
+
+
+async def test_connect_traefik_returns_only_overview_counts(store, monkeypatch):
+    body = {
+        "http": {
+            "routers": {"total": 3, "warnings": 0, "errors": 1, "detail": {"x": "y"}},
+            "services": {"total": 2},
+            "extra": {"secret": "s"},
+        },
+        "tcp": {"routers": {"total": 0}},
+        "features": {"tracing": "otel"},
+        "providers": ["docker"],
+    }
+    server, _ = _connect_with(store, monkeypatch, httpx.Response(200, json=body))
+    result = await call(server, "discovery_connect_traefik", {"url": "http://t"})
+    assert result["overview"] == {
+        "http": {
+            "routers": {"total": 3, "warnings": 0, "errors": 1},
+            "services": {"total": 2},
+        },
+        "tcp": {"routers": {"total": 0}},
+    }
+
+
+async def test_connect_traefik_reports_a_non_json_body(store, monkeypatch):
+    server, _ = _connect_with(store, monkeypatch, httpx.Response(200, text="<html>hi</html>"))
+    result = await call(server, "discovery_connect_traefik", {"url": "http://t"})
+    assert result["ok"] is False
+    assert "non-JSON" in result["error"]

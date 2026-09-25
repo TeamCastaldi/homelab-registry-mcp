@@ -35,27 +35,33 @@ _READ_ONLY = ToolAnnotations(readOnlyHint=True)
 _log = get_logger("integrations.infisical")
 
 
+def _build_client(settings: Settings) -> InfisicalClient | None:
+    """The configured client, or None when the integration is off or incomplete."""
+    if not settings.infisical_enabled:
+        return None
+    if not (
+        settings.infisical_base_url
+        and settings.infisical_client_id
+        and settings.infisical_client_secret
+        and settings.infisical_project_id
+        and settings.infisical_environment
+    ):
+        return None
+    return InfisicalClient(
+        settings.infisical_base_url,
+        settings.infisical_client_id,
+        settings.infisical_client_secret.get_secret_value(),
+    )
+
+
 def register_infisical_tools(
     mcp: FastMCP, settings: Settings, notifier: NotificationProvider
 ) -> None:
     """Register the read-only `infisical_status` tool."""
-
-    def _client() -> InfisicalClient | None:
-        if not settings.infisical_enabled:
-            return None
-        if not (
-            settings.infisical_base_url
-            and settings.infisical_client_id
-            and settings.infisical_client_secret
-            and settings.infisical_project_id
-            and settings.infisical_environment
-        ):
-            return None
-        return InfisicalClient(
-            settings.infisical_base_url,
-            settings.infisical_client_id,
-            settings.infisical_client_secret,
-        )
+    # One client for the server's life. It caches its Universal Auth token
+    # until just before expiry; a client per call threw the token away and
+    # logged in again on every call.
+    client = _build_client(settings)
 
     @mcp.tool(annotations=_READ_ONLY)
     async def infisical_status() -> dict[str, Any]:
@@ -68,7 +74,6 @@ def register_infisical_tools(
         INFISICAL_SECRET_PATH instead, returning `secrets_by_path` (key
         names grouped by the folder each lives in) and, if any folders
         couldn't be read, `inaccessible_paths` -- still never a value."""
-        client = _client()
         if client is None:
             return {
                 "error": "Infisical integration is not enabled or fully configured "

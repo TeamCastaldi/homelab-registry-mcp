@@ -41,6 +41,8 @@ curl -fsSL "https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/
 curl -fsSL "https://raw.githubusercontent.com/TeamCastaldi/homelab-registry-mcp/${VERSION}/.env.example" -o .env.example
 cp .env.example .env
 # Set at least TRAEFIK_API_URL, AUTHENTIK_API_URL, AUTHENTIK_TOKEN, DOCKER_BASE_URL.
+# Also set MCP_ALLOWED_HOSTS to every Host clients use to reach /mcp, e.g.
+# registry-mcp.<your-domain>,<LAN_IP>:8765 — any other Host gets HTTP 421.
 # To pin the container image to the same release, add REGISTRY_MCP_VERSION=<same tag> to .env.
 ```
 
@@ -73,6 +75,20 @@ The server is reachable at `https://registry-mcp.<your-domain>/mcp` over the
 streamable-http transport (or `http://<host>:8765/mcp` if you haven't put it
 behind Traefik).
 
+Whichever address clients use has to be listed in `MCP_ALLOWED_HOSTS`. The
+server checks every request's `Host` and `Origin` against DNS rebinding, as the
+MCP spec requires, and the default allows only loopback names:
+
+- The Traefik hostname goes in bare: `registry-mcp.<your-domain>`. A bare name
+  matches requests on the default ports (80/443).
+- A direct address needs its port: `<LAN_IP>:8765`, or `<LAN_IP>:*` for any
+  port.
+- Anything unlisted gets **HTTP 421**.
+
+CLI and desktop clients (VS Code, Claude Desktop) send no `Origin` and are
+unaffected by the origin check. A browser-based client also needs its origin
+listed in `MCP_ALLOWED_ORIGINS`, or it gets **HTTP 403**.
+
 In VS Code, add it to `.vscode/mcp.json`:
 
 ```json
@@ -86,7 +102,9 @@ In Claude Desktop, add an MCP server with the same URL under Settings.
 Don't guess at the values yourself — ask your MCP client to run
 `discovery_connect_traefik` / `discovery_connect_authentik` (see
 `src/registry_mcp/tools/discovery.py`). Each one live-tests the URL and
-credentials and hands back the validated `.env` lines to add. `AUTHENTIK_TOKEN`
+credentials and hands back the validated `.env` lines to add. Give each a plain
+base URL, such as `http://traefik.lan:8080`; a URL with a query string or
+fragment, or one that isn't http(s), is refused. `AUTHENTIK_TOKEN`
 is the one exception: the tool never echoes it back (only a placeholder), so
 you'll add that line with the token value yourself. Add the returned lines to
 `.env` and restart — the tool never writes the file for you (the container has
@@ -123,6 +141,17 @@ SSH_KEY_PATH=/root/.ssh/id_ed25519
 `system_health_check` looks for to leave read-only mode. Recreate the container
 after editing (`docker compose up -d --force-recreate`) — a plain restart won't
 reread `.env`.
+
+The `secrets_*` tools can add secrets and list key names without further setup.
+A few need more:
+
+- **`secrets_decrypt`**, the only tool that returns a plaintext value to an MCP
+  client, stays off until you add `SECRETS_ALLOW_DECRYPT=true`. Leave it off
+  unless you need it; `secrets_list_keys` shows key names without it.
+- **Re-locking:** both `secrets_decrypt` and `secrets_list_keys` lock the repo
+  again after reading, if they were the ones to unlock it.
+- **`secrets_rotate`** doesn't rotate the git-crypt key: git-crypt has no
+  rotation command. It returns the manual steps instead.
 
 > Back up your git-crypt key somewhere safe (Bitwarden, 1Password, …) before
 > encrypting anything with it. If you lose it, every `.env` file it encrypts
@@ -189,7 +218,7 @@ Apprise engine, so it can't deliver the header this secret needs. Reaching
 it requires a small `caronc/apprise-api` sidecar in between, where the
 header-carrying URL is actually honored, with Dockhand pointed at that
 sidecar instead. SOP-002 walks through deploying and wiring it up; see
-[ADR-010](ARDs/ADR-010-Dockhand-Update-Webhook.md) for why.
+[ADR-010](ADRs/ADR-010-Dockhand-Update-Webhook.md) for why.
 
 ## Troubleshooting
 
@@ -205,15 +234,24 @@ sidecar instead. SOP-002 walks through deploying and wiring it up; see
   GitOps write tools stay disabled until all three resolve.
 - **A `.env` change had no effect** — a plain `docker compose restart` doesn't
   reread `.env`. Use `docker compose up -d --force-recreate`.
+- **An MCP client gets HTTP 421** — the `Host` it connects with isn't in
+  `MCP_ALLOWED_HOSTS`. Add it (see
+  [Connecting an MCP client](#connecting-an-mcp-client)) and recreate the
+  container.
+- **A browser-based client gets HTTP 403** — its `Origin` isn't in
+  `MCP_ALLOWED_ORIGINS`.
+- **`secrets_decrypt` says it's disabled** — set `SECRETS_ALLOW_DECRYPT=true`
+  and recreate the container, or use `secrets_list_keys` if key names are
+  enough.
 
 ## Related docs
 
 - [CLAUDE.md](../CLAUDE.md) — architecture, full environment variable
   reference, and current project status
 - [ansible/README.md](../ansible/README.md) — the deploy role's variable contract
-- [docs/ARDs/ADR-001-Homelab-Control-Plane.md](ARDs/ADR-001-Homelab-Control-Plane.md) —
+- [docs/ADRs/ADR-001-Homelab-Control-Plane.md](ADRs/ADR-001-Homelab-Control-Plane.md) —
   design rationale for the control-plane architecture
-- [docs/ARDs/ADR-010-Dockhand-Update-Webhook.md](ARDs/ADR-010-Dockhand-Update-Webhook.md) —
+- [docs/ADRs/ADR-010-Dockhand-Update-Webhook.md](ADRs/ADR-010-Dockhand-Update-Webhook.md) —
   design rationale for the Dockhand update webhook
 - [docs/SOPs/SOP-002-Connect-Dockhand-Webhook.md](SOPs/SOP-002-Connect-Dockhand-Webhook.md) —
   step-by-step runbook for wiring Dockhand up

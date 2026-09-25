@@ -2,11 +2,15 @@
 
 Nothing here clones over the network: `check_repo_url` and `collect_from_dir`
 are exercised directly, and `fetch_repo`'s orchestration is tested with the
-clone faked at its module boundary.
+clone faked at its module boundary. The git-isolation tests run the real `git`
+binary against a local repo standing in for a file on this node's disk.
 """
 
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -185,6 +189,86 @@ class TestFetchRepo:
             await fetch_repo("https://example.com/o/p", timeout_seconds=5, max_repo_mb=1)
 
         assert created and not created[0].exists()
+
+
+_APPROVED_URL = "https://intake.invalid/app"
+_PROXY_VARS = ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy")
+
+
+@pytest.fixture
+def host_repo(tmp_path):
+    """A local git repo standing in for something on this node's disk."""
+    repo = tmp_path / "host-repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("HOST FILE\n")
+    env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+    ident = ["-c", "user.name=t", "-c", "user.email=t@t"]
+    for args in (["init", "-q"], ["add", "."], ["commit", "-qm", "x"]):
+        subprocess.run(["git", *ident, *args], cwd=repo, env=env, check=True)
+    return repo
+
+
+@pytest.fixture
+def isolated_home(tmp_path, monkeypatch):
+    """An empty HOME, with no proxy, so an https attempt fails fast on DNS."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    for var in _PROXY_VARS:
+        monkeypatch.delenv(var, raising=False)
+    return home
+
+
+def _rewrite_via_global_config(home: Path, monkeypatch, target: str) -> None:
+    (home / ".gitconfig").write_text(f'[url "{target}"]\n\tinsteadOf = {_APPROVED_URL}\n')
+
+
+def _rewrite_via_env(home: Path, monkeypatch, target: str) -> None:
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", f"url.{target}.insteadOf")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", _APPROVED_URL)
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs the git binary")
+class TestCloneIsolation:
+    """check_repo_url approves a URL; nothing outside the call may change it."""
+
+    @pytest.mark.parametrize("rewrite", [_rewrite_via_global_config, _rewrite_via_env])
+    async def test_inherited_config_cannot_redirect_an_approved_url(
+        self, host_repo, isolated_home, monkeypatch, rewrite
+    ):
+        rewrite(isolated_home, monkeypatch, f"file://{host_repo}")
+        with pytest.raises(IntakeError):
+            await fetch_repo(_APPROVED_URL, timeout_seconds=30, max_repo_mb=10)
+
+    @pytest.mark.parametrize("rewrite", [_rewrite_via_global_config, _rewrite_via_env])
+    def test_git_sees_no_inherited_config(self, isolated_home, monkeypatch, tmp_path, rewrite):
+        rewrite(isolated_home, monkeypatch, "https://elsewhere.invalid/")
+        seen = subprocess.run(
+            ["git", "config", "--list"],
+            cwd=tmp_path,
+            env=fetch_mod._git_env(),
+            capture_output=True,
+            text=True,
+        )
+        assert "insteadof" not in seen.stdout.lower()
+
+    def test_inherited_git_variables_are_dropped(self, monkeypatch):
+        monkeypatch.setenv("GIT_TOKEN", "operator-token")
+        monkeypatch.setenv("GIT_SSL_NO_VERIFY", "1")
+        monkeypatch.setenv("GIT_SSH_COMMAND", "evil")
+        monkeypatch.setenv("GIT_SSL_CAINFO", "/etc/ssl/private-ca.pem")
+        env = fetch_mod._git_env()
+        assert not {"GIT_TOKEN", "GIT_SSL_NO_VERIFY", "GIT_SSH_COMMAND"} & env.keys()
+        assert env["GIT_CONFIG_GLOBAL"] == os.devnull
+        # A trust anchor still reaches git: a homelab Gitea behind a private CA.
+        assert env["GIT_SSL_CAINFO"] == "/etc/ssl/private-ca.pem"
+
+    async def test_git_refuses_every_transport_but_https(self, host_repo, tmp_path):
+        # Below check_repo_url: if a URL is rewritten anyway, git itself says no.
+        with pytest.raises(IntakeError, match="not allowed"):
+            await fetch_mod._clone(f"file://{host_repo}", tmp_path / "dest", timeout_seconds=30)
 
 
 class TestParseDockerfile:
@@ -541,3 +625,19 @@ class TestServiceIntakeRepoTool:
         assert "reasoning call failed" in result["inference_rejection_reason"]
         # Deterministic facts must still be present despite the failure.
         assert result["requirements"]["base_image"] == "alpine"
+
+
+async def test_requirement_inference_runs_off_the_event_loop(monkeypatch):
+    from conftest import BlockingCall
+
+    reasoner = FakeReasoner(enabled=True)
+    reasoner.infer_service_requirements = BlockingCall(None)
+    tool, _ = _register(
+        monkeypatch,
+        RepoSnapshot(repo_url="https://example.com/o/p", dockerfile="FROM python:3.12\n"),
+        reasoner=reasoner,
+    )
+    result = await reasoner.infer_service_requirements.assert_off_loop(
+        tool(repo_url="https://example.com/o/p")
+    )
+    assert result["inference"] is None

@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
+from conftest import tool_payload
 from registry_mcp.deletion import DeletionGateError, DeletionGateStore
 from registry_mcp.models import DeletionEntityType, PendingDeletionStatus
 
@@ -103,7 +104,7 @@ class TestDeletionGateStore:
 
 
 async def call(server, name, args):
-    return (await server.call_tool(name, args))[1]
+    return tool_payload(await server.call_tool(name, args))
 
 
 def _answer(challenge_text: str) -> int:

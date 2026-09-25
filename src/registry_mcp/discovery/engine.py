@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -19,6 +20,7 @@ from registry_mcp.logging import get_logger
 from registry_mcp.models import DiscoveryEvent, DiscoveryStatus, Service, SourceType
 from registry_mcp.models.service import utcnow
 from registry_mcp.registry import RegistryStore
+from registry_mcp.registry.reconcile import match_service
 
 _log = get_logger("discovery.engine")
 
@@ -73,7 +75,7 @@ def build_sources(settings: Settings) -> dict[SourceType, DiscoverySource]:
         sources[SourceType.authentik] = AuthentikDiscoverySource(
             AuthentikClient(
                 settings.authentik_api_url,
-                settings.authentik_token,
+                settings.authentik_token.get_secret_value(),
                 timeout=settings.authentik_timeout_seconds,
                 retries=settings.authentik_retries,
             )
@@ -84,7 +86,7 @@ def build_sources(settings: Settings) -> dict[SourceType, DiscoverySource]:
         sources[SourceType.dockhand] = DockhandDiscoverySource(
             DockhandClient(
                 settings.dockhand_api_url,
-                settings.dockhand_token,
+                settings.dockhand_token.get_secret_value(),
                 timeout=settings.dockhand_timeout_seconds,
                 retries=settings.dockhand_retries,
             )
@@ -109,6 +111,8 @@ class DiscoveryEngine:
         self._stale_threshold = stale_threshold
         self._reasoner = reasoner
         self._on_pass_complete = on_pass_complete
+        self._hook_lock = asyncio.Lock()
+        self._hook_pending = False
 
     @property
     def sources(self) -> list[SourceType]:
@@ -145,7 +149,78 @@ class DiscoveryEngine:
 
         return {"identity_resolver": identity_resolver, "metadata_enricher": metadata_enricher}
 
+    async def _reasoning_for(self, discovered: list[DiscoveredService]) -> dict[str, Any]:
+        """Run the reasoning calls in a worker thread *before* reconcile opens its
+        write session, and hand reconcile pure lookups of the answers.
+
+        The calls are blocking LLM round-trips: made inside reconcile they froze
+        the event loop (every MCP session, the webhook, the scheduler) and held
+        SQLite's write lock for their whole duration. Only candidates with no
+        deterministic match are sent — reconcile tries `match_service` first and
+        consults the resolver only when it fails, so the answers line up.
+        """
+        extra = self._reconcile_extra()
+        if not extra:
+            return {}
+        resolve, enrich = extra["identity_resolver"], extra["metadata_enricher"]
+        services = self._store.list_services()
+        matched: dict[str, str | None] = {}
+        enriched: dict[str, dict[str, Any] | None] = {}
+
+        def work() -> None:
+            for item in discovered:
+                if match_service(services, item) is not None:
+                    continue
+                hit = resolve(item, services)
+                matched[item.external_id] = hit.name if hit else None
+                if hit is None:
+                    enriched[item.external_id] = enrich(item)
+
+        await asyncio.to_thread(work)
+
+        def identity_resolver(item: DiscoveredService, current: list[Service]) -> Service | None:
+            name = matched.get(item.external_id)
+            return next((s for s in current if s.name == name), None) if name else None
+
+        def metadata_enricher(item: DiscoveredService) -> dict[str, Any] | None:
+            return enriched.get(item.external_id)
+
+        return {"identity_resolver": identity_resolver, "metadata_enricher": metadata_enricher}
+
+    async def _pass_complete(self) -> None:
+        """Run the pass-complete hook once at a time, coalescing requests.
+
+        Sources run on their own intervals and usually fire together, so passes
+        finish seconds apart. One hook run reads everything they have written,
+        so a pass that finishes while a run is in progress only asks for one
+        more run after it, rather than a run of its own. Serializing also keeps
+        two runs from auto-creating a proposal for the same finding at once.
+        """
+        if self._on_pass_complete is None:
+            return
+        self._hook_pending = True
+        if self._hook_lock.locked():
+            return  # the run in progress loops once more for this request
+        async with self._hook_lock:
+            while self._hook_pending:
+                self._hook_pending = False
+                # The proposal sweep/auto-create hook; never let it break discovery.
+                try:
+                    await self._on_pass_complete()
+                except Exception as exc:
+                    _log.warning("on_pass_complete_failed", error=str(exc))
+
     async def run_source(self, source: SourceType) -> DiscoveryEvent:
+        event = await self._discover(source)
+        await self._pass_complete()
+        return event
+
+    async def run_all(self) -> list[DiscoveryEvent]:
+        events = [await self._discover(source) for source in self._sources]
+        await self._pass_complete()
+        return events
+
+    async def _discover(self, source: SourceType) -> DiscoveryEvent:
         started = utcnow()
         src = self._sources.get(source)
         if src is None:
@@ -158,11 +233,12 @@ class DiscoveryEngine:
             )
         try:
             discovered = await src.discover()
+            reasoning = await self._reasoning_for(discovered)
             counts = self._store.reconcile(
                 source,
                 discovered,
                 stale_threshold=self._stale_threshold,
-                **self._reconcile_extra(),
+                **reasoning,
             )
             status = DiscoveryStatus.ok
             error = None
@@ -171,7 +247,7 @@ class DiscoveryEngine:
             counts = {}
             status = DiscoveryStatus.failed
             error = str(exc)
-        event = self._store.record_discovery_event(
+        return self._store.record_discovery_event(
             source,
             started_at=started,
             finished_at=utcnow(),
@@ -179,16 +255,6 @@ class DiscoveryEngine:
             counts=counts,
             error=error,
         )
-        if self._on_pass_complete is not None:
-            # The proposal sweep/auto-create hook; never let it break discovery.
-            try:
-                await self._on_pass_complete()
-            except Exception as exc:
-                _log.warning("on_pass_complete_failed", source=str(source), error=str(exc))
-        return event
-
-    async def run_all(self) -> list[DiscoveryEvent]:
-        return [await self.run_source(source) for source in self._sources]
 
     def status(self) -> dict[str, dict | None]:
         result: dict[str, dict | None] = {}

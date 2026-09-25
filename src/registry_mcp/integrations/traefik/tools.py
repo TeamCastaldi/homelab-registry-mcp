@@ -8,6 +8,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from registry_mcp.config import Settings
+from registry_mcp.errors import resource_or_raise
 from registry_mcp.integrations.traefik.client import Protocol, TraefikClient, TraefikError
 
 _READ_ONLY = ToolAnnotations(readOnlyHint=True)
@@ -82,10 +83,10 @@ def register_traefik_tools(mcp: FastMCP, settings: Settings) -> None:
             return data
         return {"tls": data.get("tls", {}) if isinstance(data, dict) else {}}
 
-    @mcp.resource("traefik://routers/{name}")
+    @mcp.resource("traefik://routers/{name}", mime_type="application/json")
     async def traefik_router_resource(name: str) -> dict[str, Any]:
         """Full detail for a single HTTP router by name."""
-        return await _call("get_router", name, "http")
+        return resource_or_raise(await _call("get_router", name, "http"))
 
     @mcp.prompt()
     def diagnose_router(name: str) -> str:

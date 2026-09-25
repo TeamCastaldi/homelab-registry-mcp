@@ -167,6 +167,14 @@ class GiteaGitProvider:
         )
         self._raise_for(response, "close_pr")
 
+    async def get_pr_state(self, repo: str, number: int) -> str:
+        response = await self._request("GET", f"repos/{repo}/pulls/{number}")
+        self._raise_for(response, "get_pr")
+        data = response.json()
+        if data.get("merged"):
+            return "merged"
+        return "open" if data.get("state") == "open" else "closed"
+
     async def list_pr_comments(self, repo: str, number: int) -> list[dict]:
         """List all comments on a PR, paginating until exhausted. PRs are issues
         in the Gitea API, so this reads the issue comments endpoint — it does

@@ -118,6 +118,29 @@ async def test_gather_facts_never_passes_raw_ssh_common_args():
     assert "ansible_ssh_timeout=15" in cmd
 
 
+@pytest.mark.parametrize("pattern", ["--version", "-mshell", "-i/tmp/evil.ini"])
+async def test_gather_facts_refuses_an_option_shaped_pattern(pattern):
+    # `--version` exits 0 with no host lines: it would read as an empty, successful pass.
+    run = AsyncMock(return_value=(0, "ansible [core 2.21.1]", ""))
+    with (
+        patch.object(ansible_facts, "_run", new=run),
+        pytest.raises(ansible_facts.AnsibleFactsError, match="may not start with '-'"),
+    ):
+        await ansible_facts.gather_facts(
+            pattern=pattern, ansible_cfg_path="/etc/ansible.cfg", ssh_key_path="/key"
+        )
+    run.assert_not_awaited()
+
+
+async def test_gather_facts_passes_the_pattern_after_end_of_options():
+    with patch.object(ansible_facts, "_run", new=AsyncMock(return_value=(0, "", ""))) as mock_run:
+        await ansible_facts.gather_facts(
+            pattern="heimdall", ansible_cfg_path="/etc/ansible.cfg", ssh_key_path="/key"
+        )
+    cmd = mock_run.call_args.args[0]
+    assert cmd[-2:] == ["--", "heimdall"]
+
+
 async def test_gather_facts_raises_on_missing_ansible_binary():
     with (
         patch.object(ansible_facts, "_run", new=AsyncMock(side_effect=FileNotFoundError())),

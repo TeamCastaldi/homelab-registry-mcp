@@ -23,6 +23,41 @@ if TYPE_CHECKING:
 
 _log = get_logger("proposal.adoption")
 
+# Live env values at least this long are masked in the compose text before it
+# reaches the LLM provider. Shorter ones ("80", "true", "info") are rarely
+# secrets and too common to replace as substrings without wrecking the file.
+_MIN_MASKED_LENGTH = 8
+_PLACEHOLDER_PREFIX = "<value-of:"
+
+
+def _placeholder(key: str) -> str:
+    return f"{_PLACEHOLDER_PREFIX}{key}>"
+
+
+def _mask_live_values(compose: str, env: dict) -> tuple[str, dict[str, str]]:
+    """Replace each live env value (of `_MIN_MASKED_LENGTH`+ chars) found in the
+    compose text with a `<value-of:KEY>` placeholder, so the provider sees key
+    names and structure but never the values. Returns the masked text and
+    {placeholder: original value} for `_restore_live_values`. Longest values
+    first, so a value that contains another is masked whole."""
+    masked = compose
+    placeholders: dict[str, str] = {}
+    for key, value in sorted(env.items(), key=lambda kv: len(str(kv[1])), reverse=True):
+        value = str(value)
+        if len(value) < _MIN_MASKED_LENGTH or value not in masked:
+            continue
+        placeholder = _placeholder(key)
+        masked = masked.replace(value, placeholder)
+        placeholders[placeholder] = value
+    return masked, placeholders
+
+
+def _restore_live_values(text: str, placeholders: dict[str, str]) -> str:
+    """Put back every placeholder the model kept (a value it judged not secret)."""
+    for placeholder, value in placeholders.items():
+        text = text.replace(placeholder, value)
+    return text
+
 
 @dataclass
 class AdoptionResult:
@@ -48,9 +83,13 @@ class AdoptionGenerator:
     def generate(
         self, *, compose_content: str, container_env: dict, container_labels: dict
     ) -> AdoptionResult:
+        # Live secret values never go to the LLM provider: the compose text has
+        # them masked as <value-of:KEY> placeholders, and the env is sent as
+        # names only. The model decides secrecy from names and context.
+        masked_compose, placeholders = _mask_live_values(compose_content, container_env)
         raw = self._reasoner.detect_hardcoded_secrets(
-            compose_content=compose_content,
-            container_env=container_env,
+            compose_content=masked_compose,
+            container_env={key: _placeholder(key) for key in container_env},
             container_labels=container_labels,
         )
         if raw is None:
@@ -59,10 +98,18 @@ class AdoptionGenerator:
                 rejection_reason="reasoning layer unavailable (DSPY_ENABLED=false or call errored)",
             )
 
-        # Deterministic secret scrub, before any gate runs: any credential-shaped
-        # value the model echoed despite the signature's instruction is replaced
-        # with a placeholder so it can never reach a commit.
-        sanitized = raw.get("sanitized_compose", "") or ""
+        # Placeholders the model kept were judged not secret: restore their
+        # values. One it altered or invented can't be restored faithfully.
+        sanitized = _restore_live_values(raw.get("sanitized_compose", "") or "", placeholders)
+        if _PLACEHOLDER_PREFIX in sanitized:
+            reason = "sanitized compose contains a value placeholder the model altered or invented"
+            _log.warning("adoption_rejected", reason=reason)
+            return AdoptionResult(ok=False, rejection_reason=reason)
+
+        # Deterministic secret scrub, before any gate runs — and after the
+        # restore, so a real secret the model wrongly kept as a placeholder is
+        # still caught: any credential-shaped value is replaced with a
+        # placeholder so it can never reach a commit.
         sanitized, scrubbed = _scrub_credentials(sanitized)
         if scrubbed:
             _log.warning("adoption_scrubbed_residual_credentials")

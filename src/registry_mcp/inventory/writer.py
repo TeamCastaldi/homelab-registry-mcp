@@ -26,6 +26,8 @@ overwritten.
 
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
 
 from ruamel.yaml import YAML
@@ -42,13 +44,44 @@ def _load(path: Path) -> CommentedMap:
         return CommentedMap({"all": CommentedMap({"hosts": CommentedMap()})})
     with path.open("r", encoding="utf-8") as fh:
         loaded = _yaml.load(fh)
-    return loaded if loaded is not None else CommentedMap()
+    if loaded is None:
+        return CommentedMap()
+    if not isinstance(loaded, dict):
+        raise ValueError(f"inventory {path} is a {type(loaded).__name__}, expected a mapping")
+    return loaded
+
+
+def _child_map(parent: CommentedMap, key: str) -> CommentedMap:
+    """`parent[key]` as a mapping, creating it or replacing an explicit null.
+
+    Ansible's YAML inventories routinely write a bare `heimdall:` (a host with
+    no vars) or `docker:` (an empty group). ruamel loads those as None, which
+    `setdefault()` hands straight back.
+    """
+    value = parent.get(key)
+    if value is None:
+        value = CommentedMap()
+        parent[key] = value
+    if not isinstance(value, dict):
+        raise ValueError(f"inventory key {key!r} is a {type(value).__name__}, expected a mapping")
+    return value
 
 
 def _dump(data: CommentedMap, path: Path) -> None:
+    """Write atomically: this is the live inventory the deploy workflow reads,
+    so a failure partway through must never leave it truncated."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as fh:
-        _yaml.dump(data, fh)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            _yaml.dump(data, fh)
+        if path.exists():
+            # mkstemp creates 0600; keep the operator's existing mode.
+            os.chmod(tmp, path.stat().st_mode & 0o7777)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 def upsert_host(
@@ -62,17 +95,15 @@ def upsert_host(
     needed. Every other entry in the file is preserved as-is."""
     data = _load(path)
 
-    root = data.setdefault("all", CommentedMap())
-    hosts = root.setdefault("hosts", CommentedMap())
-    host_block = hosts.setdefault(hostname, CommentedMap())
+    root = _child_map(data, "all")
+    host_block = _child_map(_child_map(root, "hosts"), hostname)
     if ansible_host:
         host_block["ansible_host"] = ansible_host
 
     if groups:
-        children = root.setdefault("children", CommentedMap())
+        children = _child_map(root, "children")
         for group in groups:
-            group_block = children.setdefault(group, CommentedMap())
-            group_hosts = group_block.setdefault("hosts", CommentedMap())
+            group_hosts = _child_map(_child_map(children, group), "hosts")
             if hostname not in group_hosts:
                 group_hosts[hostname] = CommentedMap()
 

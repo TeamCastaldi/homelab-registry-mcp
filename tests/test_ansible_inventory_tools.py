@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from ruamel.yaml import YAML
 
-from conftest import IsolatedSettings
+from conftest import IsolatedSettings, tool_payload
 from registry_mcp.server import build_server
 
 _yaml = YAML()
 
 
 async def call(server, name, args):
-    return (await server.call_tool(name, args))[1]
+    return tool_payload(await server.call_tool(name, args))
 
 
 def _answer(challenge_text: str) -> int:
@@ -112,3 +112,18 @@ async def test_sync_confirm_read_only_blocks_write(tmp_path):
     )
     assert result["status"] == "error"
     assert "read-only" in result["error"]
+
+
+async def test_sync_confirm_reports_an_unusable_inventory_shape(tmp_path):
+    inv = tmp_path / "inventory.yml"
+    inv.write_text("- not an inventory\n")
+    server = _healthy_server(tmp_path, inventory_path=inv)
+    added = await call(server, "hardware-add-node", {"hostname": "heimdall", "display_name": "H"})
+    requested = await call(server, "ansible-inventory-sync-node", {"id_or_hostname": added["id"]})
+    confirmed = await call(
+        server,
+        "ansible-inventory-sync-node-confirm",
+        {"request_id": requested["request_id"], "answer": _answer(requested["challenge"])},
+    )
+    assert "inventory not updated" in confirmed["error"]
+    assert inv.read_text() == "- not an inventory\n"

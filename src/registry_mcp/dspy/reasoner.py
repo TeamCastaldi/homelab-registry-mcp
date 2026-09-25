@@ -18,8 +18,10 @@ writing a low-confidence guess.
 
 from __future__ import annotations
 
+import threading
 from typing import TYPE_CHECKING, Any
 
+from registry_mcp.config import reveal
 from registry_mcp.logging import get_logger
 from registry_mcp.models import AuthMode, Category
 
@@ -82,6 +84,9 @@ class Reasoner:
         self._settings = settings
         self.enabled = bool(settings.dspy_enabled)
         self._configured = False
+        # _ensure() is reached from the event loop and from asyncio.to_thread
+        # workers alike; setup must run exactly once.
+        self._lock = threading.Lock()
         self._resolve: Any = None
         self._infer: Any = None
         self._summarize: Any = None
@@ -95,57 +100,65 @@ class Reasoner:
 
     # -- lazy setup --------------------------------------------------------
     def _ensure(self) -> None:
-        if self._configured:
-            return
-        import dspy
+        with self._lock:
+            if self._configured:
+                return
+            import dspy
 
-        from registry_mcp.dspy.signatures import (
-            ApplyReviewFeedback,
-            DetectHardcodedSecrets,
-            GenerateRemediationPatch,
-            GenerateServiceCompose,
-            InferServiceMetadata,
-            InferServiceRequirements,
-            NormalizeConfigFile,
-            ResolveServiceIdentity,
-            SummarizeAccessAudit,
-        )
+            from registry_mcp.dspy.signatures import (
+                ApplyReviewFeedback,
+                DetectHardcodedSecrets,
+                GenerateRemediationPatch,
+                GenerateServiceCompose,
+                InferServiceMetadata,
+                InferServiceRequirements,
+                NormalizeConfigFile,
+                ResolveServiceIdentity,
+                SummarizeAccessAudit,
+            )
 
-        lm = dspy.LM(
-            self._settings.dspy_model,
-            api_key=self._settings.dspy_api_key,
-            max_tokens=self._settings.dspy_max_tokens,
-        )
-        dspy.configure(lm=lm)
-        self._resolve = dspy.ChainOfThought(ResolveServiceIdentity)
-        self._infer = dspy.ChainOfThought(InferServiceMetadata)
-        self._summarize = dspy.ChainOfThought(SummarizeAccessAudit)
-        self._patch = dspy.ChainOfThought(GenerateRemediationPatch)
-        # Patch generation emits a whole file plus several fields, so it gets its
-        # own LM with a larger token budget; the others keep the default budget.
-        self._patch_lm = dspy.LM(
-            self._settings.dspy_model,
-            api_key=self._settings.dspy_api_key,
-            max_tokens=self._settings.dspy_patch_max_tokens,
-        )
-        self._patch.set_lm(self._patch_lm)
-        self._revise = dspy.ChainOfThought(ApplyReviewFeedback)
-        # Also emits a whole file; reuse the patch LM's larger token budget.
-        self._revise.set_lm(self._patch_lm)
-        self._detect_secrets = dspy.ChainOfThought(DetectHardcodedSecrets)
-        # Also emits a whole file; reuse the patch LM's larger token budget.
-        self._detect_secrets.set_lm(self._patch_lm)
-        self._normalize = dspy.ChainOfThought(NormalizeConfigFile)
-        # Also emits a whole file; reuse the patch LM's larger token budget.
-        self._normalize.set_lm(self._patch_lm)
-        # Emits only short fields, so the default token budget is enough.
-        self._infer_requirements = dspy.ChainOfThought(InferServiceRequirements)
-        self._generate_compose = dspy.ChainOfThought(GenerateServiceCompose)
-        # Also emits a whole file; reuse the patch LM's larger token budget.
-        self._generate_compose.set_lm(self._patch_lm)
-        self._load_compiled()
-        self._configured = True
-        _log.info("reasoning_configured", model=self._settings.dspy_model)
+            # Every module is bound to an explicit LM; dspy.configure() is never
+            # called. DSPy 3.x lets only the first thread that ever calls
+            # configure() call it again, and this is first reached from whichever
+            # thread asks first — the event loop or an asyncio.to_thread worker.
+            settings = self._settings
+            lm = dspy.LM(
+                settings.dspy_model,
+                api_key=reveal(settings.dspy_api_key),
+                max_tokens=settings.dspy_max_tokens,
+            )
+            # Whole-file emitters get their own LM with a larger token budget; too
+            # small a limit truncates the response and fails field parsing.
+            self._patch_lm = dspy.LM(
+                settings.dspy_model,
+                api_key=reveal(settings.dspy_api_key),
+                max_tokens=settings.dspy_patch_max_tokens,
+            )
+            self._resolve = dspy.ChainOfThought(ResolveServiceIdentity)
+            self._infer = dspy.ChainOfThought(InferServiceMetadata)
+            self._summarize = dspy.ChainOfThought(SummarizeAccessAudit)
+            self._infer_requirements = dspy.ChainOfThought(InferServiceRequirements)
+            self._patch = dspy.ChainOfThought(GenerateRemediationPatch)
+            self._revise = dspy.ChainOfThought(ApplyReviewFeedback)
+            self._detect_secrets = dspy.ChainOfThought(DetectHardcodedSecrets)
+            self._normalize = dspy.ChainOfThought(NormalizeConfigFile)
+            self._generate_compose = dspy.ChainOfThought(GenerateServiceCompose)
+            # Before set_lm(): Predict.load_state() reassigns .lm, which would
+            # otherwise drop the patch LM from any module a compiled file loads into.
+            self._load_compiled()
+            # Short-field outputs: the default token budget is enough.
+            for module in (self._resolve, self._infer, self._summarize, self._infer_requirements):
+                module.set_lm(lm)
+            for module in (
+                self._patch,
+                self._revise,
+                self._detect_secrets,
+                self._normalize,
+                self._generate_compose,
+            ):
+                module.set_lm(self._patch_lm)
+            self._configured = True
+            _log.info("reasoning_configured", model=settings.dspy_model)
 
     def _load_compiled(self) -> None:
         """Best-effort load of optimized modules saved by a Phase 9 pass."""
@@ -185,8 +198,8 @@ class Reasoner:
         created)."""
         if not self.enabled or not existing:
             return None
-        self._ensure()
         try:
+            self._ensure()
             pred = self._resolve(candidate=candidate, existing_services=existing)
         except Exception as exc:
             _log.warning("reasoning_failed", op="resolve_identity", error=str(exc))
@@ -213,8 +226,8 @@ class Reasoner:
         new service, or None when confidence is below threshold."""
         if not self.enabled:
             return None
-        self._ensure()
         try:
+            self._ensure()
             pred = self._infer(
                 router_rule=router_rule,
                 middlewares=list(middlewares or []),
@@ -253,9 +266,9 @@ class Reasoner:
         report, or a structured error when the layer is disabled or fails."""
         if not self.enabled:
             return {"error": "reasoning layer disabled; set DSPY_ENABLED=true to enable summaries"}
-        self._ensure()
         events = list(events or [])
         try:
+            self._ensure()
             pred = self._summarize(application_slug=slug, events=events, time_window_hours=hours)
         except Exception as exc:
             _log.warning("reasoning_failed", op="summarize_access", error=str(exc))
@@ -293,8 +306,8 @@ class Reasoner:
         """
         if not self.enabled:
             return None
-        self._ensure()
         try:
+            self._ensure()
             pred = self._patch(
                 service=service,
                 finding_type=finding_type,
@@ -336,8 +349,8 @@ class Reasoner:
         """
         if not self.enabled:
             return None
-        self._ensure()
         try:
+            self._ensure()
             pred = self._revise(file_path=file_path, current_file=current_file, feedback=feedback)
         except Exception as exc:
             _log.warning(
@@ -367,8 +380,8 @@ class Reasoner:
         """
         if not self.enabled:
             return None
-        self._ensure()
         try:
+            self._ensure()
             pred = self._detect_secrets(
                 compose_content=compose_content,
                 container_env=container_env,
@@ -405,8 +418,8 @@ class Reasoner:
         """
         if not self.enabled:
             return None
-        self._ensure()
         try:
+            self._ensure()
             pred = self._normalize(
                 current_file=current_file,
                 file_path=file_path,
@@ -443,8 +456,8 @@ class Reasoner:
         """
         if not self.enabled:
             return None
-        self._ensure()
         try:
+            self._ensure()
             pred = self._infer_requirements(repo_url=repo_url, readme=readme, detected=detected)
         except Exception as exc:
             _log.warning("reasoning_failed", op="infer_service_requirements", error=str(exc))
@@ -476,8 +489,8 @@ class Reasoner:
         """
         if not self.enabled:
             return None
-        self._ensure()
         try:
+            self._ensure()
             pred = self._generate_compose(
                 intake=intake,
                 homelab_conventions=homelab_conventions,

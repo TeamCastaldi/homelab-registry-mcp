@@ -2,6 +2,7 @@
 
 import pytest
 
+from conftest import tool_payload
 from registry_mcp.hardware import DuplicateNodeError, HardwareStore
 from registry_mcp.models.hardware import (
     HardwareNode,
@@ -353,23 +354,23 @@ async def test_hardware_update_node_tool_rejects_invalid_role(server):
     reject an invalid role through the actual MCP tool path (not just the
     store layer) and leave the node's prior valid role readable afterward —
     the invalid write must never land in the database."""
-    added = (
+    added = tool_payload(
         await server.call_tool(
             "hardware-add-node",
             {"hostname": "waldorf", "display_name": "Waldorf", "role": "docker_host"},
         )
-    )[1]
+    )
     node_id = added["id"]
 
-    updated = (
+    updated = tool_payload(
         await server.call_tool(
             "hardware-update-node",
             {"id": node_id, "updates": {"role": "media_host"}},
         )
-    )[1]
+    )
     assert "error" in updated
 
-    fetched = (await server.call_tool("hardware-get-node", {"id": node_id}))[1]
+    fetched = tool_payload(await server.call_tool("hardware-get-node", {"id": node_id}))
     assert "error" not in fetched
     assert fetched["role"] == "docker_host"
 

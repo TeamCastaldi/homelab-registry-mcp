@@ -11,8 +11,8 @@ rather than raising past the caller.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
-from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from registry_mcp.logging import get_logger
@@ -20,6 +20,7 @@ from registry_mcp.models import FindingType, Proposal, ProposalStatus
 from registry_mcp.normalization.formatter import normalize as format_file
 from registry_mcp.normalization.rules import Finding
 from registry_mcp.normalization.scanner import FileReport, scan
+from registry_mcp.proposal.lifecycle import branch_suffix, retire_if_finished
 from registry_mcp.providers.git import GitError
 
 if TYPE_CHECKING:
@@ -83,8 +84,7 @@ class NormalizationEngine:
 
     # -- helpers -------------------------------------------------------
     def _branch_name(self, node: str) -> str:
-        today = datetime.now().strftime("%Y-%m-%d")
-        return f"normalize/{node}-{today}"
+        return f"normalize/{node}-{branch_suffix()}"
 
     @staticmethod
     def _assert_feature_branch(branch: str, base: str) -> None:
@@ -177,7 +177,11 @@ class NormalizationEngine:
         proposal_key = f"nodes/{node}"
 
         existing = self._proposals.find_open_by_path(proposal_key, finding_type)
-        if existing is not None:
+        # A node whose last normalization PR merged or closed is due another pass.
+        finished = existing is not None and await retire_if_finished(
+            existing, proposals=self._proposals, git=self._git, repo=self._settings.git_repo
+        )
+        if existing is not None and not finished:
             return {
                 "node": node,
                 "skipped": "open normalization proposal already exists for this node",
@@ -200,7 +204,8 @@ class NormalizationEngine:
 
         changes: list[_FileChange] = []
         for report in reports:
-            change = self._process_file(report)
+            # May escalate to a blocking DSPy call; keep it off the event loop.
+            change = await asyncio.to_thread(self._process_file, report)
             if change is not None:
                 changes.append(change)
 

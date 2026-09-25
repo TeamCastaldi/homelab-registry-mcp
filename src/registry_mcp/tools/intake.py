@@ -10,6 +10,7 @@ write.
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
 from mcp.server.fastmcp import FastMCP
@@ -64,7 +65,9 @@ async def run_intake(settings: Settings, reasoner: Reasoner, repo_url: str) -> d
         return result
 
     try:
-        inferred = reasoner.infer_service_requirements(
+        # A blocking LLM round-trip: off the event loop, or every MCP session stalls.
+        inferred = await asyncio.to_thread(
+            reasoner.infer_service_requirements,
             repo_url=snapshot.repo_url,
             readme=snapshot.readme or "",
             detected=requirements.as_dict(),

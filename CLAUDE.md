@@ -6,7 +6,7 @@ Python MCP server that is the authoritative service catalog for a homelab. It di
 
 ```bash
 uv sync                                 # install/sync deps (always run after pulling)
-uv run registry-mcp                     # start server (stdio by default)
+uv run registry-mcp                     # start server (streamable-http on MCP_HOST:MCP_PORT; MCP_TRANSPORT=stdio for stdio)
 uv run registry-mcp-seed <file.yaml>    # idempotent YAML bootstrap
 
 uv run pytest                           # run all tests
@@ -34,14 +34,17 @@ CI runs `ruff check`, `ruff format --check`, `pytest -q`, and `ansible-lint` (ag
 src/registry_mcp/
 ├── server.py              # FastMCP wiring — register all tools here
 ├── config.py              # pydantic Settings (env vars → typed config)
+├── errors.py              # the {"error": ...} convention: reports_error / resource_or_raise
 ├── gitcrypt.py            # shared git-crypt primitives (secrets tools + adoption's .env write)
+├── health.py              # startup checks (repo, ansible.cfg, SSH key); any failure → read-only mode
 ├── models/
 │   ├── service.py         # Service, ServiceSource (SQLModel tables)
 │   ├── event.py           # ChangeEvent, DiscoveryEvent (audit log)
 │   ├── hardware.py        # HardwareNode, HardwareChangeEvent, NodeRole, NodeStatus
 │   ├── proposal.py        # Proposal, FindingType, ProposalStatus (Phase 8)
 │   ├── adoption.py        # AdoptionDraft, DetectedSecret (Phase 7 brownfield adoption)
-│   └── deletion.py        # PendingDeletion, DeletionEntityType — the math-gate challenge record
+│   ├── deletion.py        # PendingDeletion, DeletionEntityType — the math-gate challenge record
+│   └── inventory.py       # PendingInventoryWrite — the math gate in front of the inventory write (ADR-015)
 ├── registry/
 │   ├── store.py           # SQLite CRUD + event recording
 │   └── reconcile.py       # Match discovered candidates → registry entries
@@ -50,15 +53,21 @@ src/registry_mcp/
 │   ├── engine.py          # Orchestrates discovery passes
 │   ├── scheduler.py       # APScheduler wiring
 │   ├── traefik.py / docker.py / authentik.py / dockhand.py  # source implementations
+│   └── outpost.py         # deterministic Authentik outpost-sidecar detection, shared by the sources
 ├── dspy/                  # reasoning layer (Phase 7) — DSPy enrichment, confidence-gated
 │   ├── signatures.py      # ResolveServiceIdentity, InferServiceMetadata, SummarizeAccessAudit, GenerateRemediationPatch, DetectHardcodedSecrets
 │   └── reasoner.py        # Reasoner: lazy LM config, gates, graceful degradation
 ├── hardware/              # hardware node registry (Phase 9a)
-│   └── store.py           # HardwareStore: node CRUD, service linking, capacity summary
+│   ├── store.py           # HardwareStore: node CRUD, service linking, capacity summary
+│   └── ansible_facts.py   # `ansible <host> -m setup` fact-gather + parsing (Phase 9b)
+├── inventory/             # Ansible inventory write (ADR-015), math-gated
+│   ├── store.py           # InventoryGateStore: request/confirm challenge for one host's entry
+│   └── writer.py          # comment-safe ruamel.yaml upsert of one host into the YAML inventory
 ├── proposal/              # proposal layer (Phase 8) — opens PRs, never merges/writes FS
 │   ├── generator.py       # calls DSPy GenerateRemediationPatch + confidence/YAML gates
 │   ├── adoption.py        # AdoptionGenerator: calls DSPy DetectHardcodedSecrets + same gates
 │   ├── engine.py          # create per finding, verification sweep, after_discovery hook
+│   ├── lifecycle.py       # retire_if_finished: merged/closed PR → merged/cancelled (shared with normalization)
 │   └── store.py           # Proposal CRUD (shares the registry SQLite engine)
 ├── normalization/         # normalization engine — see docs/specs/spec-compose-normal-form.md
 │   ├── rules.py           # rule IDs, canonical key orders, equivalence-guarantee projection
@@ -83,7 +92,8 @@ src/registry_mcp/
 │   ├── traefik/           # httpx client + 7 MCP tools + resource + prompt
 │   ├── authentik/         # httpx client + 10 MCP tools + resource + prompt
 │   ├── dockhand/          # httpx client + 7 MCP tools + resource + prompt (ADR-013, read-only)
-│   └── infisical/         # Universal Auth httpx client + 1 MCP tool (ADR-016, read-only, off by default)
+│   ├── infisical/         # Universal Auth httpx client + 1 MCP tool (ADR-016, read-only, off by default)
+│   └── docs/              # MCP client for documentation-mcp + get_service_documentation passthrough
 ├── tools/
 │   ├── registry.py        # CRUD: add/get/list/update/delete (math-gated, see deletion/) service
 │   ├── events.py          # query change + discovery logs
@@ -94,11 +104,14 @@ src/registry_mcp/
 │   ├── proposal.py        # proposal_create/list_open/get/cancel/verify/normalize (Phase 8)
 │   ├── adoption.py        # proposal_adopt_service[_finalize/_cancel/_get] (Phase 7 brownfield)
 │   ├── intake.py          # service-intake-repo + shared run_intake() (conversational deploy Phase 1, ADR-018)
-│   └── service_deploy.py  # service-deploy-generate-compose (conversational deploy Phase 2, ADR-019)
+│   ├── service_deploy.py  # service-deploy-generate-compose (conversational deploy Phase 2, ADR-019)
+│   └── ansible_inventory.py  # ansible-inventory-sync-node[-confirm] (ADR-015)
 ├── webhooks/              # inbound HTTP receivers (ADR-010) — alerts → staged proposals
 │   ├── schemas.py         # Pydantic Dockhand payload models + pure parsing helpers
 │   └── dockhand.py        # POST /webhooks/dockhand — update/CVE alert → proposal
-├── logging/events.py      # structlog config with secret redaction
+├── logging/
+│   ├── events.py          # structlog config with secret redaction
+│   └── tool_calls.py      # per-call log + turns a reported {"error": ...} into isError: true
 └── seed.py                # YAML bootstrap logic
 tests/                     # mirrors src/ layout; uses in-memory SQLite
 ```
@@ -121,6 +134,7 @@ tests/                     # mirrors src/ layout; uses in-memory SQLite
 **Cross-source linking (Phase 7):**
 - Authentik proxy provider `external_host` matched against Traefik router rule hosts
 - Traefik `service_name` matched against Docker container labels
+- `service_link_authentik` sets the slug by hand and pins it (`authentik_link_manual`); Authentik discovery never replaces a pinned slug
 - `service_get_full_context(id)` returns service + router + auth app + recent events in one call
 
 **Hardware node registry (Phase 9a-9b, `hardware/`):** curated inventory of physical and virtual
@@ -152,8 +166,10 @@ nodes, stored in the same SQLite database as services.
 **Reasoning layer (Phase 7, `dspy/`):** DSPy enrichment modules, off by default
 (`DSPY_ENABLED=false`). They *reason and return typed results — they never write*.
 The detection layer (`reconcile.py`) and discovery engine stay LLM-free: the engine
-injects the reasoner's callables into `store.reconcile`, so `reconcile.py` never imports
-dspy. Three modules, each confidence-gated (DSPy 3.x removed `dspy.Assert`, so gates are
+runs the reasoner in a worker thread *before* reconcile opens its write session
+(`DiscoveryEngine._reasoning_for`) and injects pure lookups of the answers into
+`store.reconcile`, so `reconcile.py` never imports dspy and SQLite's write lock is never
+held across an LLM round-trip. Three modules, each confidence-gated (DSPy 3.x removed `dspy.Assert`, so gates are
 explicit threshold checks; below threshold → discard and fall back to deterministic):
 - `ResolveServiceIdentity` — fuzzy cross-source match *only when deterministic matching fails*
 - `InferServiceMetadata` — infer display_name/category/auth_mode/notes for new Traefik-only services
@@ -171,8 +187,22 @@ at all, and `PROPOSAL_AUTO_CREATE=true` for unattended creation.
   commit → open PR (labelled) → notify → persist `Proposal`. `PROPOSAL_DRY_RUN=true`
   stops before any Git write and returns the patch for review.
 - The engine consumes `GitProvider`/`NotificationProvider` protocols (Gitea/GitHub + Ntfy/Smtp/Null
-  shipped); the discovery engine's `on_pass_complete` hook runs the verification sweep
-  (and auto-create when enabled) after each pass — wrapped so it never breaks discovery.
+  shipped); the discovery engine's `on_pass_complete` hook runs the PR-state sync, the
+  verification sweep, and auto-create (when enabled) after discovery — wrapped so it never
+  breaks discovery. It runs once per `run_all`, never concurrently with itself. Passes that
+  finish while a run is in progress share one follow-up run instead of each getting its own,
+  since the per-source scheduler jobs usually fire together.
+- **Proposal lifecycle:** `proposal/lifecycle.py`'s `retire_if_finished` reads the PR's state
+  (`GitProvider.get_pr_state`) and moves a merged PR's proposal to `merged` and a closed one to
+  `cancelled` — both periodically (`sync_pr_states`) and at every dedupe point (`_open_proposal`,
+  the normalization per-node check), so a finished PR never blocks the next proposal. A merged
+  `auth_mode_conflict` PR stays `open` until discovery sees the conflict clear; the verification
+  sweep only ever marks `auth_mode_conflict` proposals `verified` — image-update, CVE, adoption,
+  and normalization proposals resolve on merge.
+- **Auto-create backs off**: it never reopens a PR a human closed. It retries a *rejected* finding
+  only once the service has a change event newer than the rejection, or a day has passed
+  (`_REJECTED_RETRY_AFTER`). Otherwise every pass would make another LLM call and send another
+  "manual review" notification. `proposal_create` always retries on request.
 - `NotificationProvider.send()` takes an optional `diff` — Smtp renders it into a templated
   HTML email (PR summary + truncated diff + Approve/Request Changes/View Diff buttons); Ntfy/Null
   ignore it (a full diff has no place in a mobile push).
@@ -241,6 +271,13 @@ GitOps-managed) under management without leaking its hardcoded secrets. Off by d
   remote Git provider, on that same branch.
 - `AdoptionDraft` rows hold the captured live secret values only long enough for the
   operator to answer (`ADOPTION_DRAFT_TTL_MINUTES`, default 60) before expiring.
+- **Live values never reach the LLM provider**: `AdoptionGenerator` masks every live env
+  value of 8+ characters in the compose text as a `<value-of:KEY>` placeholder and sends
+  `container_env` as names only. The model interpolates the secrets as `${KEY}` and copies
+  the other placeholders, which are then restored to their real values. An altered or
+  invented placeholder rejects the result. The credential scrub runs after the restore, so
+  a secret the model wrongly kept is still caught. Shorter values and secrets that aren't
+  whole env values (e.g. embedded in a URL) are not masked.
 
 **Repo intake (`docs/plans/conversational-deploy.md` Phase 1, ADR-018, `intake/` +
 `tools/intake.py`):** the first slice of the conversational deploy flow — turns a
@@ -260,6 +297,14 @@ committed.
   `ssh://`/scp-style (`git@host:path`, would spend the control-plane `SSH_KEY_PATH`
   on a foreign host) are all rejected — a private-range `https` host (a homelab's
   own Gitea) stays allowed, since the scheme is the boundary, not the address.
+- **Nothing outside the call can change the approved URL**: the clone runs with no
+  system or global git config (`GIT_CONFIG_GLOBAL=/dev/null`), no inherited `GIT_*`
+  variables except the trust anchors `GIT_SSL_CAINFO`/`GIT_SSL_CAPATH`, and
+  `protocol.allow=never` with only https allowed. A `url.*.insteadOf` in `~/.gitconfig`
+  or `GIT_CONFIG_*` could otherwise rewrite the approved URL (to `file://`, or to one
+  carrying the operator's token), and an unscoped `http.extraHeader` would go to a
+  foreign host. So a git proxy must come from `HTTPS_PROXY`, and a private CA from
+  `GIT_SSL_CAINFO` or the system trust store. `~/.gitconfig` is never read.
 - **Cloned content is untrusted too**: a repo carrying `README.md -> /etc/passwd`
   would otherwise hand host files back to an MCP client, so every file read refuses
   symlinks outright and re-verifies containment after resolving — the same
@@ -429,11 +474,15 @@ closes that gap without ever exposing a value. Off by default (`INFISICAL_ENABLE
 | `DOCKHAND_TOKEN` | unset | Dockhand API token (`dh_...`); scope to a read-only role if available |
 | `DOCKHAND_TIMEOUT_SECONDS` | `10` | |
 | `DOCKHAND_RETRIES` | `3` | |
+| `DOCS_MCP_URL` / `DOCS_MCP_TOKEN` | unset | Both enable the read-only `get_service_documentation` tool, a passthrough to a documentation-mcp server (streamable-http, bearer token) for official, version-specific docs |
+| `DOCS_MCP_TIMEOUT_SECONDS` | `30` | |
 | `DOCKER_BASE_URL` | unset | Enables Docker discovery; e.g. `unix:///var/run/docker.sock` |
 | `REGISTRY_DB_PATH` | `/data/registry.db` | SQLite location |
 | `REGISTRY_LOG_PATH` | `/data/events.log` | JSON event log |
 | `MCP_TRANSPORT` | `streamable-http` | `stdio`, `sse`, or `streamable-http` |
 | `MCP_HOST` / `MCP_PORT` | `0.0.0.0` / `8765` | |
+| `MCP_ALLOWED_HOSTS` | loopback names, bare and `:*` | DNS-rebinding protection for `/mcp` (MCP spec: servers must validate `Origin`). Comma-separated `Host` values: `name:*` matches any explicit port, a bare `name` matches default-port (80/443) requests. Must list every way clients reach the server (Traefik hostname, LAN `ip:port`) or they get HTTP 421 |
+| `MCP_ALLOWED_ORIGINS` | unset | Browser `Origin` values accepted on `/mcp`; clients that send no `Origin` (CLI/desktop MCP clients) are unaffected. A foreign `Origin` gets HTTP 403 |
 | `DISCOVERY_TRAEFIK_INTERVAL_SECONDS` | `300` | |
 | `DISCOVERY_DOCKER_INTERVAL_SECONDS` | `300` | |
 | `DISCOVERY_AUTHENTIK_INTERVAL_SECONDS` | `900` | |
@@ -473,6 +522,7 @@ closes that gap without ever exposing a value. Off by default (`INFISICAL_ENABLE
 | `SECRETS_REPO_PATH` | unset | Absolute path to the cloned private homelab repo on this node. `pydantic-settings` reads `.env` as literal strings — `$HOME`/`~` are not expanded, so use a concrete absolute path (e.g. `/opt/homelab` on the Pi, `/Users/you/homelab` on macOS) |
 | `SECRETS_KEY_PATH` | unset | Absolute path to the exported git-crypt key file (priority over env var); same no-expansion caveat as `SECRETS_REPO_PATH` |
 | `SECRETS_GIT_CRYPT_KEY` | unset | Base64-encoded git-crypt key bytes (fallback when no key file) |
+| `SECRETS_ALLOW_DECRYPT` | `false` | Enables `secrets_decrypt`, the only tool that returns a plaintext secret value to an MCP client. `secrets_list_keys` (names only) works regardless. Both re-lock the repo after reading if they had to unlock it |
 | `INFISICAL_ENABLED` | `false` | Enables the read-only `infisical_status` MCP tool (ADR-016) |
 | `INFISICAL_BASE_URL` | unset | e.g. `https://infisical.example.com` (self-hosted) |
 | `INFISICAL_CLIENT_ID` / `INFISICAL_CLIENT_SECRET` | unset | Universal Auth Machine Identity credential (see `docs/SOPs/SOP-005-Connect-Infisical-Machine-Identity.md`); how this reaches the running process is a deployment concern — it can't be sourced from Infisical itself without being circular |
@@ -518,12 +568,22 @@ Copy `.env.example` to `.env` and fill in the upstream URLs before running local
 - **A normalization rewrite must prove behavior equivalence before it's committed**: `normalization/rules.is_equivalent()` projects both the before and after YAML to a representation-independent form and compares them; a rewrite that changes anything Docker would see differently is never committed, regardless of whether the deterministic formatter or the DSPy escalation produced it. Security patches (`proposal/generator.py`) intentionally change behavior and have no equivalent gate.
 - **Normalization and security proposals are never bundled**: `normalization/` is its own engine, never merged into `proposal/`, and opens PRs under a separate label (`NORMALIZATION_LABEL`).
 - **New tools must be registered in `server.py`** — FastMCP doesn't auto-discover them.
+- **A tool reports failure by returning a dict with a non-empty top-level `error`** (context keys alongside are fine; the rule lives in `errors.py`). The tool-call wrapper (`logging/tool_calls.py`) sends that as an MCP tool error — `isError: true`, the same payload as JSON text plus `structuredContent` — and logs it `success=False`. Don't raise for an expected failure, and don't use a top-level `error` key on a success. Tests read either shape with `conftest.tool_payload()`. **Resources** have no `isError`, so a failed read raises instead (`ResourceError`, or `errors.resource_or_raise()` around an integration's `_call`), which clients receive as a JSON-RPC error; JSON resources declare `mime_type="application/json"`.
+- **Every tool declares `openWorldHint`**: `server._CLOSED_WORLD_TOOLS` lists the tools that only touch this server's own state (SQLite, the local homelab clone, the Ansible inventory file); everything else is open-world. Add a new local-only tool to that set — the spec's default for a missing hint is open-world.
 - **An inbound webhook never mutates, and never guesses**: `webhooks/` receivers parse, validate, and hand off to the proposal engine — they never write the registry or touch a container. An alert that doesn't carry enough to build a correct change (a digest where a tag is needed) is acknowledged with a reason, never turned into a speculative PR. Unactionable alerts answer 200 so the sender doesn't retry forever; only malformed input or failed auth earns a non-2xx.
 - **No LLM calls in the detection layer**: `reconcile.py` and discovery sources stay deterministic. Reasoning (DSPy) lives in `dspy/` and is wired in via injected callables; those layers never `import dspy`.
 - **DSPy/`dspy/` subpackage does not shadow the library**: Python 3 absolute imports resolve `import dspy` to the top-level package; the library is imported lazily so a disabled reasoning layer adds no startup cost.
-- **Naming**: kebab-case for MCP tool names, snake_case for Python, PascalCase for classes.
-- **Log secrets are redacted**: any field named `token`, `password`, `secret`, `key`, `authorization`, `api_key` is replaced with `***redacted***` before writing to logs.
-- **All repo-relative paths go through `gitcrypt.check_path`**: every user- or draft-supplied path (`secrets_*` tools, adoption's `.env` write) is validated by the shared helper in `gitcrypt.py` — reject absolute paths, reject `..` traversal, then `.resolve()` + `is_relative_to(repo)` as a final containment check (also catches symlink escapes). Never join a repo base with a caller-supplied path without it; `Path(base) / "/etc/passwd"` silently discards `base` and returns `/etc/passwd`.
+- **LLM calls never run on the event loop**: every `Reasoner` call is a blocking litellm round-trip, so async code reaches it through `asyncio.to_thread` — otherwise every MCP session, the webhook, and the scheduler freeze for the whole call. Tests pin this with `conftest.BlockingCall`.
+- **Never call `dspy.configure()`**: DSPy 3.x lets only the first thread that ever calls it call it again, and a `Reasoner` is reached from both the event loop and `asyncio.to_thread` workers. `Reasoner._ensure()` (lock-guarded) binds every module to its own LM with `set_lm()` instead — after `_load_compiled()`, since `Predict.load_state()` resets `.lm`.
+- **Naming**: snake_case for Python, PascalCase for classes. MCP tool names are mixed, and the
+  names are a public contract, so existing tools are never renamed. 60 are snake_case (the
+  function name FastMCP uses by default: `registry_*`, `events_*`, `secrets_*`, `proposal_*`,
+  and the integrations). 17 are kebab-case via an explicit `name=`: the `hardware-*`,
+  `ansible-inventory-*`, and `service-*` families. A new tool follows its family's style; a
+  new family uses snake_case, the default.
+- **Log secrets are redacted**: any field whose name contains `token`, `password`, `secret`, `authorization`, or `api_key`, or is `key` / ends in `_key`, is replaced with `***redacted***` before writing to logs, at any depth of nested dicts and lists (`logging/events.py`). `keys` and `key_path` stay visible, since names and paths aren't secrets. Redaction goes by field name only: a secret inside a string value (an error message, a raw payload) is not caught.
+- **Credential settings are `SecretStr`**: every token, password, key, and client secret in `config.py` is typed `SecretStr | None`, so printing, dumping, or logging `Settings` shows `**********`. Read the value only where it's handed to the client that needs it: `.get_secret_value()` after a check that it's set, or `config.reveal()` when it may be unset. A new credential setting gets the same type.
+- **All repo-relative paths go through `gitcrypt.check_path`**: every user- or draft-supplied path (`secrets_*` tools, adoption's `.env` write) is validated by the shared helper in `gitcrypt.py` — reject absolute paths, reject `..` traversal, then `.resolve()` + `is_relative_to(repo)` as a final containment check (also catches symlink escapes), and reject anything that resolves inside `.git/` (its config can hold a remote's credentials; its hooks run on the commits these tools make). Never join a repo base with a caller-supplied path without it; `Path(base) / "/etc/passwd"` silently discards `base` and returns `/etc/passwd`. A path that will be written into `.gitattributes` also passes `gitcrypt.check_attr_path` (no whitespace, line breaks, globs, or quotes — a newline could add a rule that turns encryption off), existing entries are matched by exact line (`has_gitattributes_entry`), and every `.env` key/value goes through `check_dotenv_entry` (one line per entry).
 - **A secret never reaches Git through `GitProvider.commit_file()`**: that call is a raw hosting-API content write and bypasses git-crypt's local clean filter entirely. Anything that must land encrypted (the `.env` files `secrets_*` and adoption write) goes through `gitcrypt.py`'s local-clone subprocess helpers instead — see the brownfield adoption entry above.
 - **Structured logs go to stderr + file** — keeps stdio JSON-RPC transport clean.
 - **No HTTP /health endpoint on `/mcp` itself**: Dockerfile still uses a TCP probe on `MCP_PORT` for container health. `FastMCP.custom_route` (available since the pinned `mcp` SDK, 1.29.0) does let the server expose arbitrary Starlette routes alongside `/mcp` — the Dockhand webhook (`webhooks/dockhand.py`, ADR-010) is the only thing that uses it — but no `/health` HTTP route has been added, and this line describes that gap, not a technical limitation.

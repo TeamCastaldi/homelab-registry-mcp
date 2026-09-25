@@ -37,7 +37,7 @@ from pydantic import ValidationError
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from registry_mcp.config import Settings
+from registry_mcp.config import Settings, reveal
 from registry_mcp.logging import get_logger
 from registry_mcp.proposal import ProposalEngine
 from registry_mcp.registry import RegistryStore
@@ -52,6 +52,22 @@ _log = get_logger("webhooks.dockhand")
 
 # Cap on a raw body echoed into the log by DOCKHAND_WEBHOOK_LOG_RAW_PAYLOAD.
 _RAW_PAYLOAD_LOG_CHARS = 2000
+
+
+async def _read_capped(request: Request, limit: int) -> bytes | None:
+    """The request body, or None as soon as it passes `limit` bytes.
+
+    Reads the stream chunk by chunk and stops at the cap, so a body with no
+    Content-Length (chunked) or a false one is never buffered in full first.
+    """
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > limit:
+            return None
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def _validation_detail(exc: ValidationError) -> list[dict[str, str]]:
@@ -114,7 +130,7 @@ def register_webhook_routes(
     # `.strip()` here too: a whitespace-only secret is an unset one, and must
     # take the fail-closed path rather than registering a route nothing can
     # authorize against.
-    secret = (settings.dockhand_webhook_secret or "").strip()
+    secret = (reveal(settings.dockhand_webhook_secret) or "").strip()
     if not secret:
         _log.error(
             "dockhand_webhook_disabled_no_secret",
@@ -176,10 +192,10 @@ def register_webhook_routes(
             if not _authorized(request):
                 return JSONResponse({"error": "unauthorized"}, status_code=403)
 
-            raw = await request.body()
-            # Re-checked against the real body: Content-Length is a claim, and a
-            # chunked request may not send one at all.
-            if len(raw) > max_body:
+            # Enforced against the real body as it streams in: Content-Length is
+            # a claim, and a chunked request may not send one at all.
+            raw = await _read_capped(request, max_body)
+            if raw is None:
                 return JSONResponse({"error": "payload too large"}, status_code=413)
 
             raw_content_type = request.headers.get("content-type", "")

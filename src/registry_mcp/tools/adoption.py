@@ -17,6 +17,7 @@ write goes through a local clone rather than the remote Git hosting API.
 
 from __future__ import annotations
 
+import asyncio
 import secrets as pysecrets
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -187,8 +188,12 @@ def register_adoption_tools(
         except remote.SSHError as exc:
             return {"error": f"could not read {compose_path!r} on {host}: {exc}"}
 
-        result = generator.generate(
-            compose_content=raw_compose, container_env=env, container_labels=labels
+        # A blocking LLM round-trip: off the event loop, or every MCP session stalls.
+        result = await asyncio.to_thread(
+            generator.generate,
+            compose_content=raw_compose,
+            container_env=env,
+            container_labels=labels,
         )
 
         if not result.ok:
@@ -317,6 +322,11 @@ def register_adoption_tools(
             env_path = str(Path(draft.target_file_path).parent / ".env")
             try:
                 gitcrypt.check_path(local_repo, env_path)
+                gitcrypt.check_attr_path(env_path)
+                # Captured live values are container data; one with a line
+                # break would write extra, unintended .env lines.
+                for env_key, env_value in env_data.items():
+                    gitcrypt.check_dotenv_entry(env_key, env_value)
             except ValueError as exc:
                 return {"error": str(exc)}
 

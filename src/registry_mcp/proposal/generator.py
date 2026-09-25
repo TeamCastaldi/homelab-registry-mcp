@@ -8,6 +8,7 @@ autonomous proposal generation responsible.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 from dataclasses import dataclass, field
@@ -39,13 +40,30 @@ _CREDENTIAL_RE = re.compile(
 )
 
 
-def _scrub_credentials(patch: str) -> tuple[str, bool]:
+def _scrub_credentials(text: str) -> tuple[str, bool]:
     """Replace credential-shaped values with a placeholder.
 
-    Returns the (possibly) scrubbed patch and whether any replacement happened.
+    Returns the (possibly) scrubbed text and whether any replacement happened.
     """
-    scrubbed, count = _CREDENTIAL_RE.subn(r"\1<replace-with-credential>", patch)
+    scrubbed, count = _CREDENTIAL_RE.subn(r"\1<replace-with-credential>", text)
     return scrubbed, count > 0
+
+
+def _scrub_text_fields(raw: dict, keys: tuple[str, ...]) -> tuple[dict[str, str], list[str]]:
+    """Scrub the model's prose fields the way the patch is scrubbed.
+
+    The commit message, PR title and body reach Git, and the title and
+    reasoning reach the notification channel, so a credential the model
+    quotes there leaks just as surely as one left in the file. Returns the
+    scrubbed values and the names of the fields that needed it.
+    """
+    cleaned: dict[str, str] = {}
+    hits: list[str] = []
+    for key in keys:
+        cleaned[key], scrubbed = _scrub_credentials(raw.get(key, "") or "")
+        if scrubbed:
+            hits.append(key)
+    return cleaned, hits
 
 
 @dataclass
@@ -108,7 +126,9 @@ class PatchGenerator:
         context: str = "",
     ) -> PatchResult:
         existing_middlewares = await self._fetch_existing_middlewares()
-        raw = self._reasoner.generate_remediation_patch(
+        # A blocking LLM round-trip: off the event loop, or every MCP session stalls.
+        raw = await asyncio.to_thread(
+            self._reasoner.generate_remediation_patch,
             service=service,
             finding_type=finding_type,
             current_file=current_file,
@@ -154,14 +174,21 @@ class PatchGenerator:
             _log.warning("patch_rejected", file_path=file_path, reason=reason)
             return PatchResult(ok=False, confidence=confidence, rejection_reason=reason)
 
+        text, scrubbed_fields = _scrub_text_fields(
+            raw, ("commit_message", "pr_title", "pr_body", "reasoning")
+        )
+        if scrubbed_fields:
+            _log.warning(
+                "patch_text_scrubbed_credentials", file_path=file_path, fields=scrubbed_fields
+            )
         return PatchResult(
             ok=True,
             confidence=confidence,
             patch=patch,
-            commit_message=raw.get("commit_message", "") or f"fix: remediate {finding_type}",
-            pr_title=raw.get("pr_title", "") or f"Remediate {finding_type}",
-            pr_body=raw.get("pr_body", "") or "",
-            reasoning=raw.get("reasoning", "") or "",
+            commit_message=text["commit_message"] or f"fix: remediate {finding_type}",
+            pr_title=text["pr_title"] or f"Remediate {finding_type}",
+            pr_body=text["pr_body"],
+            reasoning=text["reasoning"],
         )
 
     async def revise(self, *, file_path: str, current_file: str, feedback: str) -> PatchResult:
@@ -171,8 +198,11 @@ class PatchGenerator:
         YAML validity. No rule-based fallback — a failed gate is a rejection,
         never a hand-applied change.
         """
-        raw = self._reasoner.apply_review_feedback(
-            file_path=file_path, current_file=current_file, feedback=feedback
+        raw = await asyncio.to_thread(
+            self._reasoner.apply_review_feedback,
+            file_path=file_path,
+            current_file=current_file,
+            feedback=feedback,
         )
         if raw is None:
             return PatchResult(
@@ -205,10 +235,15 @@ class PatchGenerator:
             _log.warning("revision_rejected", file_path=file_path, reason=reason)
             return PatchResult(ok=False, confidence=confidence, rejection_reason=reason)
 
+        text, scrubbed_fields = _scrub_text_fields(raw, ("commit_message", "reasoning"))
+        if scrubbed_fields:
+            _log.warning(
+                "revision_text_scrubbed_credentials", file_path=file_path, fields=scrubbed_fields
+            )
         return PatchResult(
             ok=True,
             confidence=confidence,
             patch=patch,
-            commit_message=raw.get("commit_message", "") or "fix: apply review feedback",
-            reasoning=raw.get("reasoning", "") or "",
+            commit_message=text["commit_message"] or "fix: apply review feedback",
+            reasoning=text["reasoning"],
         )

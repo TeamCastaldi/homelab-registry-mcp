@@ -6,6 +6,8 @@ calling the handler function directly — the registration gating is the point, 
 only a real request through the app proves an unmounted route 404s.
 """
 
+import json
+
 import httpx
 import structlog.testing
 
@@ -165,6 +167,45 @@ async def test_oversized_body_returns_413(tmp_path):
         headers=_auth(),
     )
     assert resp.status_code == 413
+
+
+async def test_chunked_oversized_body_is_refused_without_reading_it_all(tmp_path):
+    """No Content-Length (a chunked upload) skips the header check, so the cap
+    must hold on the stream itself, not after buffering the whole body."""
+    settings = _healthy_settings(
+        tmp_path, str(tmp_path / "r.db"), dockhand_webhook_max_body_bytes=1024
+    )
+    sent = 0
+
+    async def body():
+        nonlocal sent
+        for _ in range(1000):  # 1 MB in 1 KiB chunks
+            sent += 1
+            yield b"x" * 1024
+
+    resp = await _post(
+        build_server(settings),
+        content=body(),
+        headers={**_auth(), "content-type": "application/json"},
+    )
+    assert resp.status_code == 413
+    assert sent < 10  # stopped just past the cap, not after the full megabyte
+
+
+async def test_chunked_body_within_the_cap_is_accepted(tmp_path):
+    settings = _healthy_settings(tmp_path, str(tmp_path / "r.db"))
+    encoded = json.dumps(_payload(container="ghost")).encode()
+
+    async def body():
+        for start in range(0, len(encoded), 16):
+            yield encoded[start : start + 16]
+
+    resp = await _post(
+        build_server(settings),
+        content=body(),
+        headers={**_auth(), "content-type": "application/json"},
+    )
+    assert resp.status_code == 200
 
 
 async def test_unrecognized_shape_returns_422_with_serializable_detail(tmp_path):

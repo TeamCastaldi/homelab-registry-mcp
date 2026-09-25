@@ -314,18 +314,26 @@ class ApplyReviewFeedback(dspy.Signature):
 
 
 class DetectHardcodedSecrets(dspy.Signature):
-    """Given the raw content of a legacy, hand-written `docker-compose.yml` and
-    the environment variables actually running inside its live container,
+    """Given the content of a legacy, hand-written `docker-compose.yml` and the
+    names of the environment variables running inside its live container,
     produce a sanitized version of the compose file safe to commit to a public
     or shared Git repo.
 
-    Replace every environment value that is a real credential (API token,
-    password, private key, session secret, etc.) with a `${VAR_NAME}`
-    interpolation reading from a sibling `.env` file, and list each one you
-    replaced. Preserve every other line, comment, formatting choice, and
-    non-secret value verbatim — this is adoption into GitOps management, not a
-    rewrite. Ordinary configuration (ports, image tags, volume paths, feature
-    flags) is not a secret and must not be touched.
+    Live values are never shown to you. Wherever a live environment value
+    appeared in the compose file it has been masked as a `<value-of:NAME>`
+    placeholder, and `container_env` maps each name to its placeholder. Decide
+    from the variable names and surrounding context which values are real
+    credentials (API token, password, private key, session secret, etc.).
+
+    Replace each credential — a placeholder or any literal credential still in
+    the file — with a `${VAR_NAME}` interpolation reading from a sibling `.env`
+    file, and list each one you replaced. Copy every other placeholder
+    character-for-character; it is restored to its real value afterwards, and
+    an altered placeholder rejects the whole result. Preserve every other
+    line, comment, formatting choice, and non-secret value verbatim — this is
+    adoption into GitOps management, not a rewrite. Ordinary configuration
+    (ports, image tags, volume paths, feature flags) is not a secret and must
+    not be touched.
 
     Output the COMPLETE sanitized file content, never a diff. If you are not
     confident you have correctly identified which values are secrets, say so
@@ -337,16 +345,20 @@ class DetectHardcodedSecrets(dspy.Signature):
     actual secret values (kept or freshly rotated) are supplied by the
     operator after this step, outside your context."""
 
-    compose_content: str = dspy.InputField(desc="Raw docker-compose.yml content, verbatim")
+    compose_content: str = dspy.InputField(
+        desc="docker-compose.yml content, verbatim except that live env values are "
+        "masked as <value-of:NAME> placeholders"
+    )
     container_env: dict = dspy.InputField(
-        desc="Environment variables actually running in the live container "
-        "(name -> value), from `docker inspect`"
+        desc="Names of the environment variables running in the live container, each "
+        "mapped to its <value-of:NAME> placeholder (values are never provided)"
     )
     container_labels: dict = dspy.InputField(desc="Docker labels on the live container")
 
     sanitized_compose: str = dspy.OutputField(
         desc="Complete compose file with secret values replaced by ${VAR_NAME} "
-        "interpolations; every other line preserved verbatim"
+        "interpolations; every other line, and every non-secret <value-of:NAME> "
+        "placeholder, preserved verbatim"
     )
     detected_secret_keys: list[str] = dspy.OutputField(
         desc="Names of the environment variables identified as real secrets "
