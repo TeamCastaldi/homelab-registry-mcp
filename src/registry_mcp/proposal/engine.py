@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 from registry_mcp.logging import get_logger
 from registry_mcp.models import FindingType, Proposal, ProposalStatus
 from registry_mcp.models.service import utcnow
-from registry_mcp.proposal.lifecycle import retire_if_finished
+from registry_mcp.proposal.lifecycle import branch_suffix, retire_if_finished
 from registry_mcp.providers.git import GitError
 
 if TYPE_CHECKING:
@@ -95,8 +95,7 @@ class ProposalEngine:
         )
 
     def _branch_name(self, finding: FindingType, service: Service) -> str:
-        today = datetime.now().strftime("%Y-%m-%d")
-        return f"patch/{finding.value}-{service.name}-{today}"
+        return f"patch/{finding.value}-{service.name}-{branch_suffix()}"
 
     def _apply_footer(self) -> str:
         return _APPLY_FOOTER.get(self._settings.apply_mode, _APPLY_FOOTER["manual"])

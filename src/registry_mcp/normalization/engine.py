@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from registry_mcp.logging import get_logger
@@ -21,7 +20,7 @@ from registry_mcp.models import FindingType, Proposal, ProposalStatus
 from registry_mcp.normalization.formatter import normalize as format_file
 from registry_mcp.normalization.rules import Finding
 from registry_mcp.normalization.scanner import FileReport, scan
-from registry_mcp.proposal.lifecycle import retire_if_finished
+from registry_mcp.proposal.lifecycle import branch_suffix, retire_if_finished
 from registry_mcp.providers.git import GitError
 
 if TYPE_CHECKING:
@@ -85,8 +84,7 @@ class NormalizationEngine:
 
     # -- helpers -------------------------------------------------------
     def _branch_name(self, node: str) -> str:
-        today = datetime.now().strftime("%Y-%m-%d")
-        return f"normalize/{node}-{today}"
+        return f"normalize/{node}-{branch_suffix()}"
 
     @staticmethod
     def _assert_feature_branch(branch: str, base: str) -> None:

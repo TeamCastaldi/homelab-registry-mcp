@@ -9,6 +9,8 @@ dedupe that way; it only records PR state and never opens, edits, or merges.
 
 from __future__ import annotations
 
+import secrets
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from registry_mcp.logging import get_logger
@@ -20,6 +22,17 @@ if TYPE_CHECKING:
     from registry_mcp.providers.git import GitProvider
 
 _log = get_logger("proposal.lifecycle")
+
+
+def branch_suffix() -> str:
+    """Today's date plus a short random tag, to end a proposal branch name.
+
+    The date keeps branches readable; the tag keeps them unique. Once a PR is
+    retired, the next proposal for the same finding or node can follow the
+    same day, and a date-only name collided with the finished PR's branch,
+    which Gitea (409) and GitHub (422) refuse to create again.
+    """
+    return f"{datetime.now().strftime('%Y-%m-%d')}-{secrets.token_hex(3)}"
 
 
 async def retire_if_finished(

@@ -354,6 +354,9 @@ class FakeGit:
         return self.files[path]
 
     async def create_branch(self, repo, branch, base):
+        # Gitea (409) and GitHub (422) both refuse a branch that already exists.
+        if branch in self.branches:
+            raise GitError(f"branch {branch!r} already exists")
         self.branches.append(branch)
 
     async def commit_file(self, repo, path, content, branch, message):

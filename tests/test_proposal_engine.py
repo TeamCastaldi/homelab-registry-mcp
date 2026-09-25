@@ -7,7 +7,7 @@ reasoning layer is faked through the real PatchGenerator.
 from conftest import IsolatedSettings
 from registry_mcp.models import Proposal, ProposalStatus, Service
 from registry_mcp.proposal import PatchGenerator, ProposalEngine, ProposalStore
-from registry_mcp.providers.git import OpenedPR
+from registry_mcp.providers.git import GitError, OpenedPR
 
 VALID_PATCH = {
     "patch": "services:\n  plex:\n    image: plex\n",
@@ -56,6 +56,9 @@ class FakeGit:
         return list(self.files.keys())
 
     async def create_branch(self, repo, branch, base):
+        # Gitea (409) and GitHub (422) both refuse a branch that already exists.
+        if branch in self.branches:
+            raise GitError(f"branch {branch!r} already exists")
         self.branches.append(branch)
 
     async def commit_file(self, repo, path, content, branch, message):
@@ -462,6 +465,25 @@ async def test_cancel_closes_pr_and_marks_cancelled(store):
 
     assert result["status"] == "cancelled"
     assert git.closed == [created["pr_number"]]
+
+
+async def test_same_day_proposals_get_distinct_dated_branches(store):
+    """A retired PR frees its finding the same day; the next proposal must not
+    reuse the finished PR's branch, which the Git host refuses to recreate."""
+    import re
+
+    service = _conflicted(store)
+    git = FakeGit()
+    engine, _ = _engine(store, git=git)
+    first = await engine.create_for_service(service.id)
+    await engine.cancel(first["id"])
+
+    second = await engine.create_for_service(service.id)
+
+    assert "pr_number" in second
+    assert len(set(git.branches)) == 2
+    dated = re.compile(r"^patch/auth_mode_conflict-plex-\d{4}-\d{2}-\d{2}-[0-9a-f]{6}$")
+    assert all(dated.match(branch) for branch in git.branches)
 
 
 async def test_after_discovery_auto_creates_for_each_conflict(store):
