@@ -227,10 +227,21 @@ sidecar instead. SOP-002 walks through deploying and wiring it up; see
   `docker exec homelab-registry-mcp registry-mcp-config-check`. It lists every
   feature that's on but missing a setting it needs, environment keys that look
   like a typo of a real setting (`MCP_ALLOWED_HOST`) or belong to a removed
-  feature (`KOMODO_*`), and settings set to their default anyway. It names
-  settings only, never values, and the command exits non-zero when anything
-  needs attention. Run it after every upgrade to find what still needs adding
-  to your `.env` or Infisical.
+  feature (`KOMODO_*`), and settings that do nothing where they are: set to
+  their default anyway, set only for a feature that's off (ntfy keys while
+  `NOTIFICATION_PROVIDER=smtp`), or set to an empty value. It names settings
+  only, never values, and the command exits non-zero when anything needs
+  attention. Run it after every upgrade to find what still needs adding to your
+  `.env` or Infisical.
+- **Keys removed from Infisical still show up as set?** If your compose file
+  lists a setting as `${VAR:-default}` under `environment:`, the container
+  gets that line whether Infisical has the key or not. Removing the key only
+  falls back to the compose default. A `${VAR}` line with no default and no
+  Infisical key arrives as an empty value. List only the settings you change
+  from their defaults, and a key in Infisical does nothing until a compose line
+  passes it through. Keep a default (`${DSPY_ENABLED:-false}`) on on/off, number,
+  and choice settings: an empty value for one of those stops the server at
+  startup.
 - **`docker compose ps` never shows the container running** — check
   `docker compose logs homelab-registry-mcp` for a startup error; a missing or
   malformed `.env` value is the most common cause.
