@@ -13,7 +13,7 @@ Get from the registry's actual current deployed state — no state-reset capabil
 any kind — to a confirmed, working write path: a linked service can be reset by
 solving a math challenge, over HTTP, from an iOS Shortcut that isn't on the LAN.
 
-See [ADR-014](../ARDs/ADR-014-Service-State-Reset-Action-Tool.md) for the full design
+See [ADR-014](../ADRs/ADR-014-Service-State-Reset-Action-Tool.md) for the full design
 and the alternatives it rules out. Unlike this folder's other SOPs, this one is not
 yet a runbook for an existing feature — §1 and §2 below are implementation work, §3
 onward is the operational checklist once that work lands. Read ADR-014 first; nothing

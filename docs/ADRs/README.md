@@ -1,4 +1,4 @@
-# Architecture Decision Records (ARDs)
+# Architecture Decision Records (ADRs)
 
 This folder contains Architecture Decision Records for the project. Each record
 documents a significant technical or structural decision — what was decided, why,
@@ -7,11 +7,6 @@ what was ruled out, and what the consequences are.
 Records are written when a decision is made and updated if circumstances change.
 They are not deleted — superseded decisions are marked as such and kept for
 historical context.
-
-> **Naming note:** the directory is called `ARDs/` for historical reasons, but every
-> record in it uses the `ADR-NNN-` convention below — filename, H1 and cross-references
-> alike. Use `ADR-` for new records; the directory itself is not renamed, because every
-> link in the repo points at this path.
 
 ## What belongs here
 
