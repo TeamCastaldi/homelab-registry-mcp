@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.10.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.9.0...v1.10.0) (2026-09-25)
+
+
+### Features
+
+* **normalization:** reorder with comments, run on a fixed schedule, match real compose files ([6de4f61](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/6de4f61d93be728e7150bebc73917b4eab44a980))
+* **normalization:** reorder with comments, run on a fixed schedule, match real compose files ([31235f8](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/31235f8467814e34cf3b37d01889f8c8e59a60e3))
+
+
+### Documentation
+
+* point every ARDs/ path at ADRs/ ([c2c3042](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/c2c3042ae7aea666ed7b92bc8118f8256e38fb20))
+
 ## [1.9.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.8.0...v1.9.0) (2026-09-25)
 
 
