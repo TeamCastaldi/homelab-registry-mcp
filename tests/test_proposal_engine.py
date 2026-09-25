@@ -345,6 +345,79 @@ async def test_auto_create_does_not_reopen_a_pr_a_human_closed(store):
     assert len(git.opened) == 2
 
 
+class CountingReasoner(FakeReasoner):
+    """Always too unsure to patch, counting how often it's asked."""
+
+    def __init__(self):
+        super().__init__(result={**VALID_PATCH, "confidence": 0.2})
+        self.calls = 0
+
+    def generate_remediation_patch(self, **kwargs):
+        self.calls += 1
+        return super().generate_remediation_patch(**kwargs)
+
+
+def _rejecting_engine(store):
+    reasoner, notifier = CountingReasoner(), FakeNotifier()
+    engine, proposals = _engine(
+        store,
+        settings=_settings(proposal_auto_create=True),
+        reasoner=reasoner,
+        notifier=notifier,
+    )
+    return engine, proposals, reasoner, notifier
+
+
+async def test_auto_create_does_not_retry_a_rejected_finding_every_pass(store):
+    service = _conflicted(store)
+    engine, proposals, reasoner, notifier = _rejecting_engine(store)
+
+    for _ in range(3):
+        await engine.after_discovery()
+
+    assert reasoner.calls == 1
+    assert len(notifier.sent) == 1  # one "manual review", not one per pass
+    assert [p.status for p in proposals.list_all()] == [ProposalStatus.rejected]
+
+    # An explicit request still asks again.
+    await engine.create_for_service(service.id)
+    assert reasoner.calls == 2
+
+
+async def test_auto_create_retries_a_rejected_finding_once_the_service_changes(store):
+    service = _conflicted(store)
+    engine, _, reasoner, _ = _rejecting_engine(store)
+    await engine.after_discovery()
+
+    store.update_service(service.id, {"traefik_router": "plex-v2@docker"})
+    await engine.after_discovery()
+    await engine.after_discovery()
+
+    assert reasoner.calls == 2  # once more for the change, then settled again
+
+
+async def test_auto_create_retries_a_rejected_finding_after_a_day(store):
+    from datetime import timedelta
+
+    from sqlmodel import Session
+
+    from registry_mcp.models.service import utcnow
+
+    _conflicted(store)
+    engine, proposals, reasoner, _ = _rejecting_engine(store)
+    await engine.after_discovery()
+
+    rejected = proposals.list_all()[0]
+    with Session(store.engine) as session:
+        row = session.get(Proposal, rejected.id)
+        row.created_at = utcnow() - timedelta(days=1, minutes=1)
+        session.add(row)
+        session.commit()
+    await engine.after_discovery()
+
+    assert reasoner.calls == 2
+
+
 async def test_image_update_after_merged_pr_opens_a_new_proposal(store):
     service = store.create_service(Service(name="app", display_name="App", host="workload-01"))
     git = FakeGit()

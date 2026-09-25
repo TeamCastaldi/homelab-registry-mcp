@@ -188,6 +188,10 @@ at all, and `PROPOSAL_AUTO_CREATE=true` for unattended creation.
   `auth_mode_conflict` PR stays `open` until discovery sees the conflict clear; the verification
   sweep only ever marks `auth_mode_conflict` proposals `verified` — image-update, CVE, adoption,
   and normalization proposals resolve on merge.
+- **Auto-create backs off**: it never reopens a PR a human closed. It retries a *rejected* finding
+  only once the service has a change event newer than the rejection, or a day has passed
+  (`_REJECTED_RETRY_AFTER`). Otherwise every pass would make another LLM call and send another
+  "manual review" notification. `proposal_create` always retries on request.
 - `NotificationProvider.send()` takes an optional `diff` — Smtp renders it into a templated
   HTML email (PR summary + truncated diff + Approve/Request Changes/View Diff buttons); Ntfy/Null
   ignore it (a full diff has no place in a mobile push).

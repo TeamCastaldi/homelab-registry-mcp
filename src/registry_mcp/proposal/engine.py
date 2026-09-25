@@ -8,7 +8,7 @@ to clear on a later discovery pass and marks the proposal verified.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from registry_mcp.logging import get_logger
@@ -27,6 +27,17 @@ if TYPE_CHECKING:
     from registry_mcp.registry import RegistryStore
 
 _log = get_logger("proposal.engine")
+
+# How long auto-create waits before retrying a rejected finding whose service
+# hasn't changed. Covers what the registry can't see: a transient LLM or Git
+# failure, or an edit to the file in Git.
+_REJECTED_RETRY_AFTER = timedelta(days=1)
+
+
+def _as_naive_utc(moment: datetime) -> datetime:
+    """SQLite hands timestamps back naive; compare everything that way."""
+    return moment.replace(tzinfo=None) if moment.tzinfo else moment
+
 
 _APPLY_FOOTER = {
     "ansible": (
@@ -417,10 +428,31 @@ class ProposalEngine:
             latest = self._proposals.latest(service.id, FindingType.auth_mode_conflict)
             if latest is not None and latest.status == ProposalStatus.cancelled:
                 continue
+            if (
+                latest is not None
+                and latest.status == ProposalStatus.rejected
+                and not self._rejection_worth_retrying(service, latest)
+            ):
+                continue
             try:
                 await self.create_for_service(service.id, actor="discovery:auto")
             except Exception as exc:
                 _log.warning("auto_create_failed", service=service.name, error=str(exc))
+
+    def _rejection_worth_retrying(self, service: Service, rejected: Proposal) -> bool:
+        """Whether auto-create should ask again after a rejected patch.
+
+        Only once the service has changed since (new inputs), or after
+        `_REJECTED_RETRY_AFTER`. Retrying every pass re-asked the model the same
+        question, recorded another rejection, and sent another "manual review"
+        notification each time: every few minutes per service, forever, when
+        the reasoning layer was off. `proposal_create` still retries on request.
+        """
+        rejected_at = _as_naive_utc(rejected.created_at)
+        latest_change = self._store.list_change_events(service_id=service.id, limit=1)
+        if latest_change and _as_naive_utc(latest_change[0].created_at) > rejected_at:
+            return True
+        return _as_naive_utc(utcnow()) - rejected_at >= _REJECTED_RETRY_AFTER
 
     # -- conversational loop (Phase 3) --------------------------------------
     async def poll_pr_comments(self) -> None:
