@@ -3,7 +3,9 @@
 import json
 import logging
 
+import pytest
 import structlog
+from mcp.server.fastmcp.exceptions import ToolError
 from sqlmodel import Session
 
 from conftest import tool_payload
@@ -96,3 +98,33 @@ def test_logging_redacts_secrets(tmp_path):
             root.removeHandler(handler)
             handler.close()
         structlog.reset_defaults()
+
+
+_EVENT_TOOLS = {
+    "events_list_discoveries": {},
+    "events_list_changes": {},
+    "events_get_for_service": {"service_id": "any"},
+}
+
+
+@pytest.mark.parametrize("tool", _EVENT_TOOLS)
+@pytest.mark.parametrize("limit", [-1, 0, 1001])
+async def test_event_tools_reject_an_out_of_range_limit(server, tool, limit):
+    # SQLite reads a negative LIMIT as "no limit": -1 would return the whole log.
+    with pytest.raises(ToolError, match="limit"):
+        await server.call_tool(tool, {**_EVENT_TOOLS[tool], "limit": limit})
+
+
+@pytest.mark.parametrize("tool", _EVENT_TOOLS)
+async def test_event_tools_publish_the_limit_bounds(server, tool):
+    listed = {t.name: t for t in await server.list_tools()}
+    limit = listed[tool].inputSchema["properties"]["limit"]
+    assert (limit["minimum"], limit["maximum"], limit["default"]) == (1, 1000, 100)
+
+
+async def test_event_tools_honor_a_limit_in_range(server):
+    added = await call(server, "registry_add_service", {"name": "gitea", "display_name": "Gitea"})
+    await call(server, "registry_update_service", {"id": added["id"], "notes": "patched"})
+
+    one = await call(server, "events_list_changes", {"limit": 1})
+    assert [e["field"] for e in one["result"]] == ["notes"]
