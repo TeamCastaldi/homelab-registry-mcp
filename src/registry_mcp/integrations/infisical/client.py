@@ -47,6 +47,7 @@ version upgrade, rather than trusting an empty result at face value.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
 
@@ -107,6 +108,9 @@ class InfisicalClient:
         self._transport = transport
         self._token: str | None = None
         self._token_expires_at: float = 0.0
+        # Concurrent calls that find no valid token wait for one login
+        # instead of each doing their own.
+        self._login_lock = asyncio.Lock()
 
     async def _login(self) -> str:
         async with httpx.AsyncClient(timeout=self._timeout, transport=self._transport) as client:
@@ -128,10 +132,17 @@ class InfisicalClient:
         self._token = token
         return token
 
-    async def _access_token(self) -> str:
+    def _valid_token(self) -> str | None:
         if self._token is None or time.monotonic() >= self._token_expires_at:
-            return await self._login()
+            return None
         return self._token
+
+    async def _access_token(self) -> str:
+        if token := self._valid_token():
+            return token
+        async with self._login_lock:
+            # Another call may have logged in while this one waited.
+            return self._valid_token() or await self._login()
 
     async def list_secret_keys(
         self, project_id: str, environment: str, secret_path: str

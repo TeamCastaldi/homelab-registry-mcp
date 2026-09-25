@@ -1,5 +1,7 @@
 """Tests for the Infisical client and MCP tool (ADR-016, whole-project ADR-017)."""
 
+import asyncio
+
 import httpx
 import pytest
 
@@ -548,3 +550,40 @@ async def test_tool_non_recursive_by_default(infisical_settings_kwargs, monkeypa
     assert "keys" in result
     assert "secrets_by_path" not in result
     assert isinstance(NullNotificationProvider(), NullNotificationProvider)
+
+
+def _counting_transport(logins: list[int]):
+    """Serves a login and a masked secrets read, counting logins. Login yields to
+    the event loop, the way a real network round-trip does."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == LOGIN_PATH:
+            logins.append(1)
+            await asyncio.sleep(0)
+            return httpx.Response(200, json=LOGIN_OK)
+        return httpx.Response(200, json=SECRETS_MASKED)
+
+    return httpx.MockTransport(handler)
+
+
+async def test_tool_reuses_one_login_across_calls(infisical_settings_kwargs, monkeypatch):
+    logins: list[int] = []
+    _patch_client(monkeypatch, _counting_transport(logins))
+    server = build_server(IsolatedSettings(**infisical_settings_kwargs))
+
+    for _ in range(3):
+        assert "keys" in await call(server, "infisical_status", {})
+
+    assert len(logins) == 1
+
+
+async def test_client_concurrent_calls_share_one_login():
+    logins: list[int] = []
+    client = InfisicalClient("http://i", "cid", "csecret", transport=_counting_transport(logins))
+
+    results = await asyncio.gather(
+        *(client.list_secret_keys("proj1", "prod", "/") for _ in range(3))
+    )
+
+    assert all(keys == results[0] for keys in results)
+    assert len(logins) == 1
