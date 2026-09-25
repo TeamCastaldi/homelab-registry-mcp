@@ -108,14 +108,20 @@ async def gather_facts(
     path) covers the connect timeout; `host_key_checking = False` in the
     operator's own `ansible.cfg` (`ANSIBLE_CFG_PATH`) already covers what
     `StrictHostKeyChecking` would have.
+
+    The pattern is the one caller-supplied argument. With a leading `-`,
+    ansible reads it as an option: `--version` exits 0 with no host lines,
+    which parses as an empty, successful pass. So it is refused here, and
+    passed after `--` besides, where ansible takes it literally as a pattern.
     """
+    if pattern.startswith("-"):
+        raise AnsibleFactsError(f"host pattern may not start with '-': {pattern!r}")
     env = {
         **os.environ,
         "ANSIBLE_CONFIG": ansible_cfg_path,
     }
     cmd = [
         "ansible",
-        pattern,
         "-m",
         "setup",
         "-o",
@@ -125,6 +131,8 @@ async def gather_facts(
         ssh_user,
         "-e",
         f"ansible_ssh_timeout={connect_timeout_seconds}",
+        "--",
+        pattern,
     ]
     try:
         rc, stdout, stderr = await _run(cmd, env)
