@@ -327,9 +327,11 @@ def build_app(settings: Settings | None = None) -> tuple[FastMCP, Runtime]:
         Lists problems (a feature that's on but missing a setting it needs,
         and other known pitfalls), environment keys that match no setting but
         look meant for one (a typo, or a setting whose feature was removed),
-        the features that are on, which settings are set, and which of those
-        are set to their default anyway. Run it after an upgrade to find what
-        still needs adding to the deployment's secrets store.
+        the features that are on, and which settings are set. Also lists the
+        set settings that do nothing where they are: set to their default,
+        set only for features that are off, or set to an empty value. Run it
+        after an upgrade to find what still needs adding to, or can be removed
+        from, the deployment's secrets store.
         """
         return build_report(settings, process_environ(settings))
 

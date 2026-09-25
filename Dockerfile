@@ -40,11 +40,9 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY src ./src
 RUN uv sync --frozen --no-dev
 
-# HTTP transport for multi-client use behind Traefik.
-ENV MCP_TRANSPORT=streamable-http \
-    MCP_HOST=0.0.0.0 \
-    MCP_PORT=8765
-
+# The settings already default to streamable-http on 0.0.0.0:8765, so no ENV
+# lines here: a setting the image sets can't be removed from a deployment, and
+# the config report would list it as set to its default anyway.
 EXPOSE 8765
 VOLUME ["/data"]
 
