@@ -1,5 +1,48 @@
 # Changelog
 
+## [1.7.2](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.7.1...v1.7.2) (2026-09-25)
+
+
+### Bug Fixes
+
+* **adoption:** block ssh option injection and quote remote commands ([de07694](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/de07694581aca0f722e64aa1fb1c8aa6daf0c504))
+* **adoption:** never send live secret values to the LLM provider ([b73dfb5](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/b73dfb5c231ca733fb84ec20415f6198a4ce9ce9))
+* **config:** type every credential setting as SecretStr ([2cf4b97](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/2cf4b97996c8b76d6b5cee0609c8fa2319f107f7))
+* **discovery:** run on_pass_complete once per run_all, never concurrently ([d4cf0e3](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/d4cf0e3aef68db832221737d2cf8ac0247bb3034))
+* **discovery:** stop connect tools from fetching and echoing arbitrary URLs ([75be596](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/75be596592c57f20cba44926ce9d2b9a610bfc00))
+* **dspy:** bind LMs per module instead of dspy.configure() ([bf83621](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/bf83621f4b5d981265e6820044c135ed486e539e))
+* **events:** bound the events_* limit to 1-1000 ([7af6433](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/7af6433c7c248f17b428eff4a63d4ac1107de71b))
+* **hardware:** refuse an option-shaped host pattern in hardware-discover-now ([ed626d0](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/ed626d0b0160dc1621717f9283a39aaa8100b688))
+* **infisical:** reuse one client so the Universal Auth token cache holds ([b7f3edf](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/b7f3edf60b4c48919fb5054b89bc76f32a346ba7))
+* **intake:** isolate the clone from inherited git config and variables ([09ad5b6](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/09ad5b65036a58a880a0ddcac6bba3a0c254c60d))
+* **inventory:** handle null YAML entries and write the inventory atomically ([d6bf71f](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/d6bf71f7380f95f61151462a583759e06b598ea8))
+* keep blocking LLM calls off the event loop ([0c47434](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/0c474343edf0e87ba2073f060d42cfdb6ff2ced3))
+* **linking:** keep a manual Authentik link from being overwritten by discovery ([c6c77f3](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/c6c77f3ab504332a558d346ca6aa8b7a1de0df6d))
+* **logging:** redact key-named fields and secrets nested in dicts and lists ([b8c3c8e](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/b8c3c8e9ad119a5314776059da1399ae3c725479))
+* **mcp:** declare openWorldHint on every tool; make failed resource reads errors ([3543872](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/3543872911d1fffefda5433b20b80582b4b1dbff))
+* **mcp:** send reported tool failures as isError results ([4369bfc](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/4369bfcc04b8db92648aa38023cb426a34e7ef48))
+* **proposal:** give each proposal branch a unique suffix ([909717b](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/909717b335f89076fc0ddf93cbc6b1863e0848b2))
+* **proposal:** scrub credentials from generated commit/PR text and reasoning ([e91e346](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/e91e346865a3e5443e77b92f8e4762b63347d485))
+* **proposal:** stop auto-create retrying a rejected finding on every pass ([c32b752](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/c32b7522e3bbbbd66c2a483367e9da77adf7f35d))
+* **proposal:** track PR state so proposals leave `open` when their PR ends ([8311520](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/8311520e8b09fd0d398024303a83e348f9dfb9e8))
+* **registry:** stop no-op change events and stale-flag flapping ([552b8da](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/552b8da8de30f329412619fb94493177f4d24985))
+* remediate MCP server audit findings (security, spec conformance, proposal lifecycle) ([bf7fe21](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/bf7fe214c887309d8ef2c3f770d9961fe9f93043))
+* **secrets:** guard .gitattributes writes and paths inside .git/ ([7f4be46](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/7f4be4608b6dad2ed4fe018cf9028ef861bc689c))
+* **secrets:** make secrets_decrypt opt-in and re-lock after reading ([0638a4a](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/0638a4af7541294859b7c334a4b79851f9f9e2df))
+* **secrets:** replace the unworkable secrets_rotate with manual steps ([43377cf](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/43377cf5314651f8e634414ea5f457f210947add))
+* **server:** enable DNS-rebinding protection on /mcp for every bind ([cd3379c](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/cd3379cfe4a815bcd2cb0de3df23664bd5bf8c32))
+* **server:** one object graph, and a scheduler on every transport ([9e6f8ad](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/9e6f8ada8e9c6134b28c8b7fa35d9089b0624734))
+* **webhooks:** enforce the body cap while the Dockhand webhook body streams in ([448e02c](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/448e02cad3c858543e5206b280450df11db1567e))
+
+
+### Documentation
+
+* bring README and tests/README in line with the audit fixes ([891ba2f](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/891ba2f88400a9ef79467cf42d038c98666b5488))
+* describe MCP tool naming as it is, not as kebab-case ([cd2c401](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/cd2c4014524d7ccfb814d73975eed0b3648ec7a6))
+* fix drift between CLAUDE.md, config comments, and the code ([ad066d3](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/ad066d3a33dd319e412733e83b681ee6dbc11d91))
+* same tool-naming correction in CONTRIBUTING.md ([ed5ee30](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/ed5ee306ae62a5bd3be9dfba68aa9511a346f698))
+* **setup:** cover the host allowlist, secrets opt-in, and fix ADR links ([e497e88](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/e497e88a4052807c1e84aa3ec3a50e166bf6899d))
+
 ## [1.7.1](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.7.0...v1.7.1) (2026-09-22)
 
 
