@@ -50,7 +50,7 @@ def _build_client(settings: Settings) -> InfisicalClient | None:
     return InfisicalClient(
         settings.infisical_base_url,
         settings.infisical_client_id,
-        settings.infisical_client_secret,
+        settings.infisical_client_secret.get_secret_value(),
     )
 
 

@@ -27,8 +27,8 @@ def build_git_provider(settings: Settings) -> GitProvider | None:
     if not (settings.git_base_url and settings.git_token and settings.git_repo):
         return None
     if settings.git_provider == "gitea":
-        return GiteaGitProvider(settings.git_base_url, settings.git_token)
+        return GiteaGitProvider(settings.git_base_url, settings.git_token.get_secret_value())
     if settings.git_provider == "github":
-        return GitHubGitProvider(settings.git_base_url, settings.git_token)
+        return GitHubGitProvider(settings.git_base_url, settings.git_token.get_secret_value())
     # GitLab provider is a follow-up increment; fall back to disabled.
     return None

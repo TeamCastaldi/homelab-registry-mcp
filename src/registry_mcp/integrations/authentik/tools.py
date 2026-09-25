@@ -52,7 +52,7 @@ def register_authentik_tools(
             return None
         return AuthentikClient(
             settings.authentik_api_url,
-            settings.authentik_token,
+            settings.authentik_token.get_secret_value(),
             timeout=settings.authentik_timeout_seconds,
             retries=settings.authentik_retries,
         )

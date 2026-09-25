@@ -55,7 +55,7 @@ def key_bytes(settings: Settings) -> bytes:
             return p.read_bytes()
         raise RuntimeError(f"SECRETS_KEY_PATH is set but file not found: {p}")
     if settings.secrets_git_crypt_key:
-        return base64.b64decode(settings.secrets_git_crypt_key)
+        return base64.b64decode(settings.secrets_git_crypt_key.get_secret_value())
     raise RuntimeError(
         "No git-crypt key configured. Set SECRETS_KEY_PATH or SECRETS_GIT_CRYPT_KEY."
     )

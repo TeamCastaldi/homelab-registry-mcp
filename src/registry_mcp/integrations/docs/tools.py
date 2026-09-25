@@ -25,7 +25,7 @@ def register_docs_tools(mcp: FastMCP, settings: Settings) -> None:
             return None
         return DocsMcpClient(
             settings.docs_mcp_url,
-            settings.docs_mcp_token,
+            settings.docs_mcp_token.get_secret_value(),
             timeout=settings.docs_mcp_timeout_seconds,
         )
 

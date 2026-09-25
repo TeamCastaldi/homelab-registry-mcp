@@ -75,7 +75,7 @@ def build_sources(settings: Settings) -> dict[SourceType, DiscoverySource]:
         sources[SourceType.authentik] = AuthentikDiscoverySource(
             AuthentikClient(
                 settings.authentik_api_url,
-                settings.authentik_token,
+                settings.authentik_token.get_secret_value(),
                 timeout=settings.authentik_timeout_seconds,
                 retries=settings.authentik_retries,
             )
@@ -86,7 +86,7 @@ def build_sources(settings: Settings) -> dict[SourceType, DiscoverySource]:
         sources[SourceType.dockhand] = DockhandDiscoverySource(
             DockhandClient(
                 settings.dockhand_api_url,
-                settings.dockhand_token,
+                settings.dockhand_token.get_secret_value(),
                 timeout=settings.dockhand_timeout_seconds,
                 retries=settings.dockhand_retries,
             )

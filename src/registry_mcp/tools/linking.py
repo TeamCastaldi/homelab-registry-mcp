@@ -39,7 +39,7 @@ def register_linking_tools(
             return {"error": "AUTHENTIK_API_URL and AUTHENTIK_TOKEN must be configured"}
         client = AuthentikClient(
             settings.authentik_api_url,
-            settings.authentik_token,
+            settings.authentik_token.get_secret_value(),
             timeout=settings.authentik_timeout_seconds,
             retries=settings.authentik_retries,
         )

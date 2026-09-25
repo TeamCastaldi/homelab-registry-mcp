@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from registry_mcp.config import reveal
 from registry_mcp.providers.notification.base import NotificationProvider
 from registry_mcp.providers.notification.ntfy import NtfyNotificationProvider
 from registry_mcp.providers.notification.null import NullNotificationProvider
@@ -31,7 +32,7 @@ def build_notification_provider(settings: Settings) -> NotificationProvider:
         return NtfyNotificationProvider(
             settings.notification_url,
             settings.notification_topic,
-            token=settings.notification_token,
+            token=reveal(settings.notification_token),
         )
     if (
         settings.notification_provider == "smtp"
@@ -45,7 +46,7 @@ def build_notification_provider(settings: Settings) -> NotificationProvider:
             settings.notification_from_email,
             settings.notification_to_email,
             username=settings.notification_smtp_username,
-            password=settings.notification_smtp_password,
+            password=reveal(settings.notification_smtp_password),
             use_tls=settings.notification_smtp_use_tls,
         )
     return NullNotificationProvider()

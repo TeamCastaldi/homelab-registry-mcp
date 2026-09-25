@@ -37,7 +37,7 @@ from pydantic import ValidationError
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from registry_mcp.config import Settings
+from registry_mcp.config import Settings, reveal
 from registry_mcp.logging import get_logger
 from registry_mcp.proposal import ProposalEngine
 from registry_mcp.registry import RegistryStore
@@ -130,7 +130,7 @@ def register_webhook_routes(
     # `.strip()` here too: a whitespace-only secret is an unset one, and must
     # take the fail-closed path rather than registering a route nothing can
     # authorize against.
-    secret = (settings.dockhand_webhook_secret or "").strip()
+    secret = (reveal(settings.dockhand_webhook_secret) or "").strip()
     if not secret:
         _log.error(
             "dockhand_webhook_disabled_no_secret",

@@ -26,7 +26,7 @@ def register_dockhand_tools(mcp: FastMCP, settings: Settings) -> None:
             return None
         return DockhandClient(
             settings.dockhand_api_url,
-            settings.dockhand_token,
+            settings.dockhand_token.get_secret_value(),
             timeout=settings.dockhand_timeout_seconds,
             retries=settings.dockhand_retries,
         )

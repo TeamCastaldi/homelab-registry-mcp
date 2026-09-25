@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from conftest import IsolatedSettings
 from registry_mcp.config import Settings
 from registry_mcp.gitcrypt import (
     check_attr_path,
@@ -38,7 +39,7 @@ def _settings(**kwargs) -> Settings:
         secrets_git_crypt_key=None,
     )
     defaults.update(kwargs)
-    return Settings.model_construct(**defaults)
+    return IsolatedSettings(**defaults)
 
 
 def _make_mcp() -> tuple[object, dict]:

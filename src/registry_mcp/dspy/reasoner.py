@@ -21,6 +21,7 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING, Any
 
+from registry_mcp.config import reveal
 from registry_mcp.logging import get_logger
 from registry_mcp.models import AuthMode, Category
 
@@ -123,14 +124,14 @@ class Reasoner:
             settings = self._settings
             lm = dspy.LM(
                 settings.dspy_model,
-                api_key=settings.dspy_api_key,
+                api_key=reveal(settings.dspy_api_key),
                 max_tokens=settings.dspy_max_tokens,
             )
             # Whole-file emitters get their own LM with a larger token budget; too
             # small a limit truncates the response and fails field parsing.
             self._patch_lm = dspy.LM(
                 settings.dspy_model,
-                api_key=settings.dspy_api_key,
+                api_key=reveal(settings.dspy_api_key),
                 max_tokens=settings.dspy_patch_max_tokens,
             )
             self._resolve = dspy.ChainOfThought(ResolveServiceIdentity)

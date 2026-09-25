@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Transport = Literal["stdio", "sse", "streamable-http"]
@@ -14,7 +14,13 @@ ApplyModeName = Literal["manual", "webhook", "ansible"]
 
 
 class Settings(BaseSettings):
-    """Runtime configuration, loaded from environment and `.env`."""
+    """Runtime configuration, loaded from environment and `.env`.
+
+    Every credential is a `SecretStr`, so a repr, `str()`, JSON dump, or log
+    of these settings shows `**********` instead of the value. The real value
+    is read with `.get_secret_value()`, or `reveal()` when it may be unset,
+    only where it is handed to the client that needs it.
+    """
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -31,7 +37,7 @@ class Settings(BaseSettings):
     traefik_timeout_seconds: float = Field(default=10.0)
     traefik_retries: int = Field(default=3)
     authentik_api_url: str | None = Field(default=None)
-    authentik_token: str | None = Field(default=None)
+    authentik_token: SecretStr | None = Field(default=None)
     authentik_timeout_seconds: float = Field(default=10.0)
     authentik_retries: int = Field(default=3)
     # Dockhand read-only query client + discovery source (ADR-013). Distinct
@@ -39,11 +45,11 @@ class Settings(BaseSettings):
     # alert receiver) — these settings configure this server as an OUTBOUND
     # client of Dockhand's own REST API.
     dockhand_api_url: str | None = Field(default=None)
-    dockhand_token: str | None = Field(default=None)
+    dockhand_token: SecretStr | None = Field(default=None)
     dockhand_timeout_seconds: float = Field(default=10.0)
     dockhand_retries: int = Field(default=3)
     docs_mcp_url: str | None = Field(default=None)
-    docs_mcp_token: str | None = Field(default=None)
+    docs_mcp_token: SecretStr | None = Field(default=None)
     docs_mcp_timeout_seconds: float = Field(default=30.0)
 
     # MCP transport
@@ -78,7 +84,7 @@ class Settings(BaseSettings):
     # unaffected when this is false.
     dspy_enabled: bool = Field(default=False)
     dspy_model: str = Field(default="anthropic/claude-haiku-4-5-20251001")
-    dspy_api_key: str | None = Field(default=None)
+    dspy_api_key: SecretStr | None = Field(default=None)
     dspy_confidence_threshold: float = Field(default=0.7)
     dspy_max_tokens: int = Field(default=1024)
     # Patch generation must emit a complete corrected file plus several fields,
@@ -92,7 +98,7 @@ class Settings(BaseSettings):
     # Git provider: where remediation PRs are opened.
     git_provider: GitProviderName = Field(default="gitea")
     git_base_url: str | None = Field(default=None)
-    git_token: str | None = Field(default=None)
+    git_token: SecretStr | None = Field(default=None)
     git_repo: str | None = Field(default=None)  # owner/repo
     git_base_branch: str = Field(default="main")
 
@@ -100,7 +106,7 @@ class Settings(BaseSettings):
     notification_provider: NotificationProviderName = Field(default="none")
     notification_url: str | None = Field(default=None)
     notification_topic: str = Field(default="homelab-registry")
-    notification_token: str | None = Field(default=None)
+    notification_token: SecretStr | None = Field(default=None)
 
     # SMTP notification provider (Phase 5) — templated HTML email per proposal
     # event. Validated in production against SMTP2GO; any standard SMTP relay
@@ -108,7 +114,7 @@ class Settings(BaseSettings):
     notification_smtp_host: str | None = Field(default=None)
     notification_smtp_port: int = Field(default=587)
     notification_smtp_username: str | None = Field(default=None)
-    notification_smtp_password: str | None = Field(default=None)
+    notification_smtp_password: SecretStr | None = Field(default=None)
     notification_smtp_use_tls: bool = Field(default=True)
     notification_from_email: str | None = Field(default=None)
     notification_to_email: str | None = Field(default=None)
@@ -200,7 +206,7 @@ class Settings(BaseSettings):
     secrets_enabled: bool = Field(default=True)
     secrets_repo_path: str | None = Field(default=None)
     secrets_key_path: str | None = Field(default=None)
-    secrets_git_crypt_key: str | None = Field(default=None)
+    secrets_git_crypt_key: SecretStr | None = Field(default=None)
     # secrets_decrypt is the one tool that hands a plaintext secret value to
     # an MCP client (ADR-016's Infisical tool never does), so it is opt-in on
     # its own. secrets_list_keys reports key names without values either way.
@@ -217,7 +223,7 @@ class Settings(BaseSettings):
     infisical_enabled: bool = Field(default=False)
     infisical_base_url: str | None = Field(default=None)
     infisical_client_id: str | None = Field(default=None)
-    infisical_client_secret: str | None = Field(default=None)
+    infisical_client_secret: SecretStr | None = Field(default=None)
     infisical_project_id: str | None = Field(default=None)
     infisical_environment: str | None = Field(default=None)
     infisical_secret_path: str = Field(default="/")
@@ -263,7 +269,7 @@ class Settings(BaseSettings):
     # route unregistered entirely rather than mounted and rejecting — never an
     # open endpoint. Dockhand does not sign its webhook bodies, so a shared
     # bearer secret is the mechanism available.
-    dockhand_webhook_secret: str | None = Field(default=None)
+    dockhand_webhook_secret: SecretStr | None = Field(default=None)
     # Cap on an accepted request body. An inbound endpoint must never hand an
     # unbounded body to json.loads.
     dockhand_webhook_max_body_bytes: int = Field(default=65536, gt=0)
@@ -286,3 +292,8 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Build a `Settings` instance from the current environment."""
     return Settings()
+
+
+def reveal(secret: SecretStr | None) -> str | None:
+    """The plain value of an optional credential setting, or None when unset."""
+    return secret.get_secret_value() if secret is not None else None
