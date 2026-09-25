@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.8.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.7.2...v1.8.0) (2026-09-25)
+
+
+### Features
+
+* **config:** report missing, mistyped, and redundant settings by name ([290f415](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/290f4153dc4da64265394255535a6fece502885e))
+* **config:** report missing, mistyped, and redundant settings by name ([4dfc273](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/4dfc273bed185836439fa6252a0bcadcc1b9f2f9))
+
 ## [1.7.2](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.7.1...v1.7.2) (2026-09-25)
 
 
