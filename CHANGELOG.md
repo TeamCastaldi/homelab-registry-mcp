@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.9.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.8.0...v1.9.0) (2026-09-25)
+
+
+### Features
+
+* **config:** report empty settings and settings for features that are off ([aad4139](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/aad413927fd494fdfbd288c30072ad031bc00648))
+* **config:** report empty settings and settings for features that are off ([57cfb8b](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/57cfb8ba019cafe890538fe6f53c9798d9e929ac))
+
+
+### Bug Fixes
+
+* **docker:** stop baking default transport settings into the image ([32a238e](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/32a238e5eac7173cde10f9535d1168e2e1f492a7))
+
 ## [1.8.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.7.2...v1.8.0) (2026-09-25)
 
 
