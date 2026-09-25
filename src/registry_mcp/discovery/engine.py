@@ -111,6 +111,8 @@ class DiscoveryEngine:
         self._stale_threshold = stale_threshold
         self._reasoner = reasoner
         self._on_pass_complete = on_pass_complete
+        self._hook_lock = asyncio.Lock()
+        self._hook_pending = False
 
     @property
     def sources(self) -> list[SourceType]:
@@ -185,7 +187,40 @@ class DiscoveryEngine:
 
         return {"identity_resolver": identity_resolver, "metadata_enricher": metadata_enricher}
 
+    async def _pass_complete(self) -> None:
+        """Run the pass-complete hook once at a time, coalescing requests.
+
+        Sources run on their own intervals and usually fire together, so passes
+        finish seconds apart. One hook run reads everything they have written,
+        so a pass that finishes while a run is in progress only asks for one
+        more run after it, rather than a run of its own. Serializing also keeps
+        two runs from auto-creating a proposal for the same finding at once.
+        """
+        if self._on_pass_complete is None:
+            return
+        self._hook_pending = True
+        if self._hook_lock.locked():
+            return  # the run in progress loops once more for this request
+        async with self._hook_lock:
+            while self._hook_pending:
+                self._hook_pending = False
+                # The proposal sweep/auto-create hook; never let it break discovery.
+                try:
+                    await self._on_pass_complete()
+                except Exception as exc:
+                    _log.warning("on_pass_complete_failed", error=str(exc))
+
     async def run_source(self, source: SourceType) -> DiscoveryEvent:
+        event = await self._discover(source)
+        await self._pass_complete()
+        return event
+
+    async def run_all(self) -> list[DiscoveryEvent]:
+        events = [await self._discover(source) for source in self._sources]
+        await self._pass_complete()
+        return events
+
+    async def _discover(self, source: SourceType) -> DiscoveryEvent:
         started = utcnow()
         src = self._sources.get(source)
         if src is None:
@@ -212,7 +247,7 @@ class DiscoveryEngine:
             counts = {}
             status = DiscoveryStatus.failed
             error = str(exc)
-        event = self._store.record_discovery_event(
+        return self._store.record_discovery_event(
             source,
             started_at=started,
             finished_at=utcnow(),
@@ -220,16 +255,6 @@ class DiscoveryEngine:
             counts=counts,
             error=error,
         )
-        if self._on_pass_complete is not None:
-            # The proposal sweep/auto-create hook; never let it break discovery.
-            try:
-                await self._on_pass_complete()
-            except Exception as exc:
-                _log.warning("on_pass_complete_failed", source=str(source), error=str(exc))
-        return event
-
-    async def run_all(self) -> list[DiscoveryEvent]:
-        return [await self.run_source(source) for source in self._sources]
 
     def status(self) -> dict[str, dict | None]:
         result: dict[str, dict | None] = {}

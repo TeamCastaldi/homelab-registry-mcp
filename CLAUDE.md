@@ -177,8 +177,10 @@ at all, and `PROPOSAL_AUTO_CREATE=true` for unattended creation.
   stops before any Git write and returns the patch for review.
 - The engine consumes `GitProvider`/`NotificationProvider` protocols (Gitea/GitHub + Ntfy/Smtp/Null
   shipped); the discovery engine's `on_pass_complete` hook runs the PR-state sync, the
-  verification sweep, and auto-create (when enabled) after each pass — wrapped so it never
-  breaks discovery.
+  verification sweep, and auto-create (when enabled) after discovery — wrapped so it never
+  breaks discovery. It runs once per `run_all`, never concurrently with itself. Passes that
+  finish while a run is in progress share one follow-up run instead of each getting its own,
+  since the per-source scheduler jobs usually fire together.
 - **Proposal lifecycle:** `proposal/lifecycle.py`'s `retire_if_finished` reads the PR's state
   (`GitProvider.get_pr_state`) and moves a merged PR's proposal to `merged` and a closed one to
   `cancelled` — both periodically (`sync_pr_states`) and at every dedupe point (`_open_proposal`,

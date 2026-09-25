@@ -1,5 +1,7 @@
 """Tests for discovery sources, the reconciler/engine, scheduler, and tools."""
 
+import asyncio
+
 import httpx
 import pytest
 from mcp.server.fastmcp import FastMCP
@@ -253,6 +255,84 @@ async def test_failed_source_records_failed_event(store):
     event = await engine.run_source(SourceType.traefik)
     assert event.status == "failed"
     assert event.error is not None and "traefik down" in event.error
+
+
+# --- on_pass_complete (the proposal sweep/auto-create hook) ----------------
+
+
+class RecordingHook:
+    """Counts hook runs and the most that were ever in flight at once. With
+    `gate` set, each run waits on it, so a test can hold a run open."""
+
+    def __init__(self, gate: asyncio.Event | None = None) -> None:
+        self.gate = gate
+        self.runs = 0
+        self.in_flight = 0
+        self.max_in_flight = 0
+        self.entered = asyncio.Event()
+
+    async def __call__(self) -> None:
+        self.runs += 1
+        self.in_flight += 1
+        self.max_in_flight = max(self.max_in_flight, self.in_flight)
+        self.entered.set()
+        try:
+            if self.gate is not None:
+                await self.gate.wait()
+        finally:
+            self.in_flight -= 1
+
+
+def _three_sources():
+    return {
+        source: FakeSource(source, [])
+        for source in (SourceType.traefik, SourceType.docker, SourceType.dockhand)
+    }
+
+
+async def test_run_all_runs_the_hook_once(store):
+    hook = RecordingHook()
+    engine = DiscoveryEngine(store, _three_sources(), on_pass_complete=hook)
+
+    events = await engine.run_all()
+
+    assert len(events) == 3
+    assert hook.runs == 1
+
+
+async def test_passes_finishing_together_share_one_follow_up_hook_run(store):
+    """Scheduled sources fire together. Passes that finish while a hook run is
+    in progress get one more run between them, never overlapping ones."""
+    gate = asyncio.Event()
+    hook = RecordingHook(gate)
+    engine = DiscoveryEngine(store, _three_sources(), on_pass_complete=hook)
+
+    first = asyncio.create_task(engine.run_source(SourceType.traefik))
+    await hook.entered.wait()
+    # Both finish while the first hook run is still going, and neither waits on it.
+    await asyncio.wait_for(engine.run_source(SourceType.docker), timeout=5)
+    await asyncio.wait_for(engine.run_source(SourceType.dockhand), timeout=5)
+    gate.set()
+    await first
+
+    assert hook.runs == 2  # the first run, plus one for both later passes
+    assert hook.max_in_flight == 1
+
+
+async def test_a_failing_hook_never_breaks_discovery_or_later_runs(store):
+    calls = 0
+
+    async def flaky() -> None:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("git provider down")
+
+    engine = DiscoveryEngine(store, _three_sources(), on_pass_complete=flaky)
+    event = await engine.run_source(SourceType.traefik)
+    await engine.run_source(SourceType.traefik)
+
+    assert event.status == "ok"
+    assert calls == 2  # the lock was released after the failure
 
 
 # --- tools ----------------------------------------------------------------
