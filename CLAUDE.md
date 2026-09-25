@@ -280,6 +280,14 @@ committed.
   `ssh://`/scp-style (`git@host:path`, would spend the control-plane `SSH_KEY_PATH`
   on a foreign host) are all rejected — a private-range `https` host (a homelab's
   own Gitea) stays allowed, since the scheme is the boundary, not the address.
+- **Nothing outside the call can change the approved URL**: the clone runs with no
+  system or global git config (`GIT_CONFIG_GLOBAL=/dev/null`), no inherited `GIT_*`
+  variables except the trust anchors `GIT_SSL_CAINFO`/`GIT_SSL_CAPATH`, and
+  `protocol.allow=never` with only https allowed. A `url.*.insteadOf` in `~/.gitconfig`
+  or `GIT_CONFIG_*` could otherwise rewrite the approved URL (to `file://`, or to one
+  carrying the operator's token), and an unscoped `http.extraHeader` would go to a
+  foreign host. So a git proxy must come from `HTTPS_PROXY`, and a private CA from
+  `GIT_SSL_CAINFO` or the system trust store. `~/.gitconfig` is never read.
 - **Cloned content is untrusted too**: a repo carrying `README.md -> /etc/passwd`
   would otherwise hand host files back to an MCP client, so every file read refuses
   symlinks outright and re-verifies containment after resolving — the same
