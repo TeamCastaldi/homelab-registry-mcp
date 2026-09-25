@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.10.1](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.10.0...v1.10.1) (2026-09-25)
+
+
+### Bug Fixes
+
+* **normalization:** give each thread its own YAML object, run one sweep at a time ([118d305](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/118d305be897b9be662d66cf9609997972ed655a))
+* **normalization:** give each thread its own YAML object, run one sweep at a time ([1c731da](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/1c731da7b1a4c467d40ee14d3ddec220ed688497))
+
+
+### Documentation
+
+* ARD → ADR in the PR template ([b43a619](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/b43a6194265641a05a1d299a2e6de779a6f43d6d))
+
 ## [1.10.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.9.0...v1.10.0) (2026-09-25)
 
 
