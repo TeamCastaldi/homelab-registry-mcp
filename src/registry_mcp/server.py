@@ -19,6 +19,7 @@ from starlette.applications import Starlette
 from registry_mcp import __version__
 from registry_mcp.adoption import AdoptionDraftStore
 from registry_mcp.config import Settings, get_settings
+from registry_mcp.config_report import build_report, process_environ
 from registry_mcp.deletion import DeletionGateStore
 from registry_mcp.discovery.engine import DiscoveryEngine, build_sources
 from registry_mcp.discovery.scheduler import build_scheduler
@@ -98,6 +99,7 @@ _CLOSED_WORLD_TOOLS = frozenset(
         "secrets_list_keys",
         "health",
         "system_health_check",
+        "config_status",
     }
 )
 
@@ -317,6 +319,19 @@ def build_app(settings: Settings | None = None) -> tuple[FastMCP, Runtime]:
             "mode": "read-only" if read_only else "read-write",
             **current.to_dict(),
         }
+
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    def config_status() -> dict[str, Any]:
+        """Report this server's configuration by setting name, never by value.
+
+        Lists problems (a feature that's on but missing a setting it needs,
+        and other known pitfalls), environment keys that match no setting but
+        look meant for one (a typo, or a setting whose feature was removed),
+        the features that are on, which settings are set, and which of those
+        are set to their default anyway. Run it after an upgrade to find what
+        still needs adding to the deployment's secrets store.
+        """
+        return build_report(settings, process_environ(settings))
 
     _apply_open_world_hints(mcp)
     return mcp, Runtime(

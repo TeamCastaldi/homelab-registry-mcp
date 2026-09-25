@@ -222,6 +222,15 @@ sidecar instead. SOP-002 walks through deploying and wiring it up; see
 
 ## Troubleshooting
 
+- **Not sure which settings are missing, mistyped, or no longer needed?** Ask
+  an MCP client to call `config_status`, or run
+  `docker exec homelab-registry-mcp registry-mcp-config-check`. It lists every
+  feature that's on but missing a setting it needs, environment keys that look
+  like a typo of a real setting (`MCP_ALLOWED_HOST`) or belong to a removed
+  feature (`KOMODO_*`), and settings set to their default anyway. It names
+  settings only, never values, and the command exits non-zero when anything
+  needs attention. Run it after every upgrade to find what still needs adding
+  to your `.env` or Infisical.
 - **`docker compose ps` never shows the container running** — check
   `docker compose logs homelab-registry-mcp` for a startup error; a missing or
   malformed `.env` value is the most common cause.

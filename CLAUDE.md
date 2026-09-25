@@ -8,6 +8,7 @@ Python MCP server that is the authoritative service catalog for a homelab. It di
 uv sync                                 # install/sync deps (always run after pulling)
 uv run registry-mcp                     # start server (streamable-http on MCP_HOST:MCP_PORT; MCP_TRANSPORT=stdio for stdio)
 uv run registry-mcp-seed <file.yaml>    # idempotent YAML bootstrap
+uv run registry-mcp-config-check        # missing, mistyped, or redundant settings (names only)
 
 uv run pytest                           # run all tests
 uv run pytest tests/test_linking.py -v  # run a specific test file
@@ -34,6 +35,7 @@ CI runs `ruff check`, `ruff format --check`, `pytest -q`, and `ansible-lint` (ag
 src/registry_mcp/
 ├── server.py              # FastMCP wiring — register all tools here
 ├── config.py              # pydantic Settings (env vars → typed config)
+├── config_report.py       # config_status tool + registry-mcp-config-check: missing/mistyped settings, names only
 ├── errors.py              # the {"error": ...} convention: reports_error / resource_or_raise
 ├── gitcrypt.py            # shared git-crypt primitives (secrets tools + adoption's .env write)
 ├── health.py              # startup checks (repo, ansible.cfg, SSH key); any failure → read-only mode
@@ -576,12 +578,13 @@ Copy `.env.example` to `.env` and fill in the upstream URLs before running local
 - **LLM calls never run on the event loop**: every `Reasoner` call is a blocking litellm round-trip, so async code reaches it through `asyncio.to_thread` — otherwise every MCP session, the webhook, and the scheduler freeze for the whole call. Tests pin this with `conftest.BlockingCall`.
 - **Never call `dspy.configure()`**: DSPy 3.x lets only the first thread that ever calls it call it again, and a `Reasoner` is reached from both the event loop and `asyncio.to_thread` workers. `Reasoner._ensure()` (lock-guarded) binds every module to its own LM with `set_lm()` instead — after `_load_compiled()`, since `Predict.load_state()` resets `.lm`.
 - **Naming**: snake_case for Python, PascalCase for classes. MCP tool names are mixed, and the
-  names are a public contract, so existing tools are never renamed. 60 are snake_case (the
+  names are a public contract, so existing tools are never renamed. 61 are snake_case (the
   function name FastMCP uses by default: `registry_*`, `events_*`, `secrets_*`, `proposal_*`,
   and the integrations). 17 are kebab-case via an explicit `name=`: the `hardware-*`,
   `ansible-inventory-*`, and `service-*` families. A new tool follows its family's style; a
   new family uses snake_case, the default.
 - **Log secrets are redacted**: any field whose name contains `token`, `password`, `secret`, `authorization`, or `api_key`, or is `key` / ends in `_key`, is replaced with `***redacted***` before writing to logs, at any depth of nested dicts and lists (`logging/events.py`). `keys` and `key_path` stay visible, since names and paths aren't secrets. Redaction goes by field name only: a secret inside a string value (an error message, a raw payload) is not caught.
+- **Every setting a feature needs is listed in `config_report._FEATURES`**: the `config_status` tool and `registry-mcp-config-check` report a feature that's on but missing one, an environment key that's a near-miss of a real setting name, and one set to its default anyway, always by name, never by value. A new feature with required settings adds an entry there, and removing a feature adds its setting prefix to `_RETIRED_PREFIXES`, so leftover keys are reported rather than silently ignored.
 - **Credential settings are `SecretStr`**: every token, password, key, and client secret in `config.py` is typed `SecretStr | None`, so printing, dumping, or logging `Settings` shows `**********`. Read the value only where it's handed to the client that needs it: `.get_secret_value()` after a check that it's set, or `config.reveal()` when it may be unset. A new credential setting gets the same type.
 - **All repo-relative paths go through `gitcrypt.check_path`**: every user- or draft-supplied path (`secrets_*` tools, adoption's `.env` write) is validated by the shared helper in `gitcrypt.py` — reject absolute paths, reject `..` traversal, then `.resolve()` + `is_relative_to(repo)` as a final containment check (also catches symlink escapes), and reject anything that resolves inside `.git/` (its config can hold a remote's credentials; its hooks run on the commits these tools make). Never join a repo base with a caller-supplied path without it; `Path(base) / "/etc/passwd"` silently discards `base` and returns `/etc/passwd`. A path that will be written into `.gitattributes` also passes `gitcrypt.check_attr_path` (no whitespace, line breaks, globs, or quotes — a newline could add a rule that turns encryption off), existing entries are matched by exact line (`has_gitattributes_entry`), and every `.env` key/value goes through `check_dotenv_entry` (one line per entry).
 - **A secret never reaches Git through `GitProvider.commit_file()`**: that call is a raw hosting-API content write and bypasses git-crypt's local clean filter entirely. Anything that must land encrypted (the `.env` files `secrets_*` and adoption write) goes through `gitcrypt.py`'s local-clone subprocess helpers instead — see the brownfield adoption entry above.

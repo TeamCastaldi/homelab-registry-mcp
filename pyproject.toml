@@ -28,6 +28,7 @@ dependencies = [
 [project.scripts]
 registry-mcp = "registry_mcp.server:main"
 registry-mcp-seed = "registry_mcp.seed:main"
+registry-mcp-config-check = "registry_mcp.config_report:main"
 
 [dependency-groups]
 dev = [
