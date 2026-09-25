@@ -18,6 +18,15 @@ uv run ruff format .                    # format (line-length: 100)
 
 CI runs `ruff check`, `ruff format --check`, `pytest -q`, and `ansible-lint` (against `ansible/`) on every push.
 
+Releases are cut by release-please (`.github/workflows/release-please.yml`). Its release PR bumps
+`pyproject.toml` and, through a `toml` entry in `release-please-config.json`'s `extra-files`, the
+project's own `version` in `uv.lock`, so `uv sync` after pulling a release leaves the tree clean.
+That entry's jsonpath filters on `@.name.value`, not `@.name`: release-please's TOML updater
+evaluates the jsonpath against its position-tagged parse, where every value is a
+`{start, end, value}` object, and a filter on `@.name` matches nothing and edits nothing. CI
+installs with `uv sync --frozen`, which doesn't check the lock, so a stale lock shows up as a
+dirty `uv.lock` after `uv sync`, not as a CI failure.
+
 ## Session Config
 
 | Value | Setting |
