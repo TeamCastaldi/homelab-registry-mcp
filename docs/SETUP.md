@@ -43,7 +43,7 @@ cp .env.example .env
 # Set at least TRAEFIK_API_URL, AUTHENTIK_API_URL, AUTHENTIK_TOKEN, DOCKER_BASE_URL.
 # Also set MCP_ALLOWED_HOSTS to every Host clients use to reach /mcp, e.g.
 # registry-mcp.<your-domain>,<LAN_IP>:8765 — any other Host gets HTTP 421.
-# To pin the container image to the same release, add REGISTRY_MCP_VERSION=<same tag> to .env.
+# To pin the container image to the same release, add REGISTRY_MCP_VERSION=<that tag without its v, e.g. 1.10.1> to .env.
 ```
 
 `.env.example` documents every option — see also the environment variable

@@ -674,7 +674,22 @@ docker compose exec homelab-registry-mcp registry-mcp-seed /path/to/services.yam
 ```
 
 No source checkout needed on the target host — the image is pulled from
-GHCR. Pin the release by setting `REGISTRY_MCP_VERSION=v0.6.1` in `.env`.
+GHCR. Pin the release by setting `REGISTRY_MCP_VERSION` in `.env` to a version
+without the git tag's `v`: a `v1.10.1` release is published as `1.10.1`, `1.10`,
+and `latest` (`publish.yml`'s metadata tags), so `v1.10.1` fails to pull.
+
+**Redeploy on release (the maintainer's own deployment):** `publish.yml`'s
+`redeploy` job calls a Dockhand git stack's webhook
+(`POST /api/git/stacks/<id>/webhook`, HMAC-SHA256 signed the way GitHub signs
+its webhooks) once the tag's image is on GHCR. That's about five minutes after
+the release PR merges; a redeploy at the merge would pull the previous image.
+Opt-in via the `DOCKHAND_REDEPLOY_URL`/`DOCKHAND_REDEPLOY_SECRET` Actions
+secrets. With both unset the job skips itself, so forks are unaffected. The
+stack needs Dockhand's **Re-pull images** and **Force redeployment** on, since a
+registry release changes nothing in the homelab repo the stack syncs from, and
+its image tag must move (`latest`). Running the workflow by hand from a branch
+skips the build and only redeploys. Setup and troubleshooting:
+`docs/SOPs/SOP-006-Redeploy-On-Release.md`.
 
 Pre-reqs: Traefik on external `traefik` Docker network, DNS for `registry-mcp.<your-domain>`. Docker socket is mounted read-only.
 
