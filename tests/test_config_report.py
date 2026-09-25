@@ -59,7 +59,8 @@ def test_a_feature_needing_the_reasoning_layer_reports_it_off():
         git_base_url="https://git.lan", git_token="t", git_repo="o/r", adoption_enabled=True
     )
     assert result["problems"] == [
-        "Brownfield adoption is on but missing SECRETS_REPO_PATH, SSH_KEY_PATH, DSPY_ENABLED"
+        "Brownfield adoption is on but missing SECRETS_REPO_PATH, "
+        "SECRETS_KEY_PATH or SECRETS_GIT_CRYPT_KEY, SSH_KEY_PATH, DSPY_ENABLED"
     ]
 
 
@@ -131,6 +132,83 @@ def test_settings_set_to_their_default_are_listed_but_secrets_never_are():
     assert "GIT_TOKEN" in result["set"]
 
 
+def test_settings_for_a_feature_that_is_off_are_listed():
+    result = report(
+        notification_provider="smtp",
+        notification_smtp_host="smtp.lan",
+        notification_from_email="from@example.com",
+        notification_to_email="to@example.com",
+        notification_url="https://ntfy.lan",
+        notification_token="t",
+    )
+    assert result["for_features_off"] == [
+        {"key": "NOTIFICATION_TOKEN", "features_off": ["ntfy notifications"]},
+        {"key": "NOTIFICATION_URL", "features_off": ["ntfy notifications"]},
+    ]
+    assert result["ok"] is True
+    assert "NOTIFICATION_URL: ntfy notifications is off" in config_report.render_text(result)
+
+
+def test_a_shared_setting_is_unused_only_when_every_feature_reading_it_is_off():
+    unused = report(ssh_default_user="admin")["for_features_off"]
+    assert unused == [
+        {"key": "SSH_DEFAULT_USER", "features_off": ["Brownfield adoption", "Hardware discovery"]}
+    ]
+    assert "SSH_DEFAULT_USER: Brownfield adoption and Hardware discovery are off" in (
+        config_report.render_text(report(ssh_default_user="admin"))
+    )
+    in_use = report(ssh_default_user="admin", ansible_cfg_path="/a.cfg", ssh_key_path="/k")
+    assert in_use["for_features_off"] == []
+
+
+def test_settings_the_health_check_reads_are_never_unused():
+    result = report(secrets_enabled=False, secrets_repo_path="/opt/homelab")
+    assert "git-crypt secrets" not in result["features_on"]
+    assert result["for_features_off"] == []
+
+
+def test_every_feature_names_real_settings():
+    named = {name for feature in config_report._FEATURES for name in feature.settings()}
+    assert named | config_report._READ_REGARDLESS <= set(IsolatedSettings.model_fields)
+
+
+def test_an_empty_value_with_no_default_reads_as_unset():
+    result = report(dspy_enabled=True, dspy_api_key="k", dspy_compiled_path="", dspy_model="a/b")
+    assert result["empty"] == ["DSPY_COMPILED_PATH"]
+    assert result["ok"] is True
+    assert report(dspy_enabled=True, dspy_api_key="  ", dspy_model="a/b")["empty"] == [
+        "DSPY_API_KEY"
+    ]
+
+
+def test_an_empty_value_that_replaces_a_default_is_a_problem():
+    result = report(
+        git_base_url="https://git.lan", git_token="t", git_repo="o/r", git_base_branch=""
+    )
+    assert result["problems"] == ["GIT_BASE_BRANCH is set to an empty value, replacing its default"]
+    assert result["empty"] == []
+
+
+def test_a_setting_that_does_nothing_is_listed_once():
+    result = report(normalization_label="", normalization_schedule="weekly")
+    assert result["same_as_default"] == ["NORMALIZATION_SCHEDULE"]
+    assert result["for_features_off"] == [
+        {"key": "NORMALIZATION_LABEL", "features_off": ["Normalization"]}
+    ]
+    assert result["empty"] == []
+    assert result["problems"] == []
+
+
+@pytest.mark.parametrize("hosts", ["", " ", " , "])
+def test_allowed_hosts_naming_no_host_is_flagged_once_and_not_on_stdio(hosts):
+    http = build_report(IsolatedSettings(mcp_allowed_hosts=hosts), {})
+    assert http["problems"] == [
+        "MCP_ALLOWED_HOSTS is set but names no host: every client that reaches /mcp gets HTTP 421"
+    ]
+    stdio = build_report(IsolatedSettings(mcp_allowed_hosts=hosts, mcp_transport="stdio"), {})
+    assert stdio["problems"] == []
+
+
 def test_the_report_never_contains_a_value():
     values = {
         "authentik_token": "value-authentik-token",
@@ -138,6 +216,7 @@ def test_the_report_never_contains_a_value():
         "git_token": "value-git-token",
         "infisical_client_secret": "value-infisical-secret",
         "infisical_enabled": True,
+        "notification_url": "https://value-ntfy-url.lan",
     }
     rendered = json.dumps(report({"MCP_ALLOWED_HOST": "value-typo-host"}, **values))
     rendered += config_report.render_text(report(**values))
@@ -147,9 +226,16 @@ def test_the_report_never_contains_a_value():
 async def test_config_status_tool_serves_the_report(tmp_path):
     server = build_server(IsolatedSettings(registry_db_path=str(tmp_path / "r.db")))
     result = tool_payload(await server.call_tool("config_status", {}))
-    assert {"ok", "problems", "unknown_keys", "features_on", "set", "same_as_default"} <= set(
-        result
-    )
+    assert {
+        "ok",
+        "problems",
+        "unknown_keys",
+        "features_on",
+        "set",
+        "same_as_default",
+        "for_features_off",
+        "empty",
+    } <= set(result)
 
 
 @pytest.mark.parametrize(("settings", "code"), [({}, 1), (ALLOWED, 0)])

@@ -6,9 +6,6 @@ services:
     env_file:
       - .env
     environment:
-      MCP_TRANSPORT: streamable-http
-      MCP_HOST: 0.0.0.0
-      MCP_PORT: 8765
       DOCKER_BASE_URL: unix:///var/run/docker.sock
     ports:
       # Bind on all interfaces too, not just the `traefik` network below —
