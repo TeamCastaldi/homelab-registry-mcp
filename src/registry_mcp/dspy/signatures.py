@@ -139,10 +139,11 @@ class GenerateServiceCompose(dspy.Signature):
       those values later, outside your context;
     - include each backing service the intake requires (a database, a cache)
       as its own service in the same file, under the same rules;
-    - prefer reaching a web-facing service through the external reverse-proxy
-      network `${PROXY_NETWORK:-swarm-net}` over publishing a host port; any
-      host port mapping that is genuinely needed carries a `# temporary`
-      comment.
+    - prefer reaching a web-facing service through the reverse-proxy network
+      over publishing a host port, declaring that network under the top-level
+      `networks:` with `external: true` (another stack owns it); any host port
+      mapping that is genuinely needed carries a comment saying why (such as
+      `# temporary`).
 
     Output the COMPLETE file, never a fragment. If you are not confident the
     file is correct and runnable, say so with a low confidence score rather

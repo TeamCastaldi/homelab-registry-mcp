@@ -4,14 +4,14 @@
 |---|---|
 | Status | Complete |
 | Date | 2026-09-19 |
-| Companion | [ADR-001](../ARDs/ADR-001-Homelab-Control-Plane.md), [ADR-012](../ARDs/ADR-012-Scope-The-Repo-To-The-MCP-Server.md), ADR-015 (drafted in Phase 3 of this plan) |
+| Companion | [ADR-001](../ADRs/ADR-001-Homelab-Control-Plane.md), [ADR-012](../ADRs/ADR-012-Scope-The-Repo-To-The-MCP-Server.md), ADR-015 (drafted in Phase 3 of this plan) |
 
 ## Phase 1: Correct documentation drift and record open growth areas
 
 **Goal**: Fix the dangling references and mislabeling the capability scan surfaced, so the paper trail is accurate before new work is built on top of it.
 
 **Decisions captured**:
-- Scan finding: CLAUDE.md's "Deferred" line labels "multi-node Ansible bootstrap" as "(Phase E)", but [ADR-001](../ARDs/ADR-001-Homelab-Control-Plane.md) §11's actual Phase E ("Ansible Deploy Role") is complete — the withdrawn capability maps to the withdrawn OOBE, closest to lettered Phase G.
+- Scan finding: CLAUDE.md's "Deferred" line labels "multi-node Ansible bootstrap" as "(Phase E)", but [ADR-001](../ADRs/ADR-001-Homelab-Control-Plane.md) §11's actual Phase E ("Ansible Deploy Role") is complete — the withdrawn capability maps to the withdrawn OOBE, closest to lettered Phase G.
 - Scan finding: ADR-001 §12 cites `docs/plans/project-plan-registry-mcp.md` and `docs/plans/plan-ansibleSetup.md`, neither of which exists in `docs/plans/`.
 - Scan finding: `ansible/roles/docker-stack-deploy/README.md` cites `docs/plans/phase-4-cd.md`, which doesn't exist — the content lives in `docs/plans/updated-phases.md`'s "Phase 4: Automated Deployment Pipeline (GitOps CD)" section.
 - Q9 answer: "Stay exactly what it accepts today. But note somewhere what features could be added later." (`hardware-discover-now`'s fact-gathering scope).
@@ -60,7 +60,7 @@ Hand `SOP-004` to the operator and run its steps against control-plane and heimd
 - Confirmed design detail: `HardwareNode` already carries `hostname`, `ip_address`, `ansible_host`, and `ansible_groups` (`src/registry_mcp/models/hardware.py`), so the tool syncs an existing node row rather than inventing a parallel registration flow.
 
 **Tasks**:
-- [x] Draft `docs/ARDs/ADR-015-Ansible-Inventory-Sync-Tool.md` amending ADR-012 to permit a math-gated Ansible inventory-sync tool scoped to already-registered hardware nodes
+- [x] Draft `docs/ADRs/ADR-015-Ansible-Inventory-Sync-Tool.md` amending ADR-012 to permit a math-gated Ansible inventory-sync tool scoped to already-registered hardware nodes
 - [x] Add `ANSIBLE_INVENTORY_PATH` setting for the inventory-sync tool's write target
 - [x] Add `PendingInventoryWrite` model and `InventoryGateStore` math-confirm gate for inventory writes
 - [x] Add an inventory YAML writer that upserts one host entry without disturbing the rest of the file

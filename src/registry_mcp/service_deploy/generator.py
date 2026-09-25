@@ -16,6 +16,7 @@ a normalization sweep treats them.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -37,11 +38,12 @@ _log = get_logger("service_deploy.generator")
 REQUIRED_RULES_SUMMARY = (
     "every service uses a published image with a pinned version tag (never "
     ":latest, never a build: key), sets a restart: policy, and has a "
-    "container_name equal to its service key; an external reverse-proxy "
-    "network uses ${PROXY_NETWORK:-swarm-net} as its key under the top-level "
-    "networks: mapping, never a hardcoded name; any host "
-    "ports: mapping carries a # temporary comment; no hardcoded credentials — "
-    "secrets are ${VAR} interpolations."
+    "container_name equal to its service key; a shared network another stack "
+    "also joins (such as the reverse-proxy network) is declared under the "
+    "top-level networks: mapping with external: true, never created by this "
+    "stack; any host ports: mapping carries a comment saying why it's "
+    "published (# temporary until the reverse proxy routes it); no hardcoded "
+    "credentials — secrets are ${VAR} interpolations."
 )
 
 # Label for Tier 2 findings; the draft has no repo path until Phase 5 commits it.
@@ -82,9 +84,11 @@ class ComposeGenerator:
         repo: str | None = None,
         base: str = "main",
         conventions_path: str = "docs/spec/compose.yaml",
+        shared_networks: Iterable[str] = rules.DEFAULT_SHARED_NETWORKS,
     ) -> None:
         self._reasoner = reasoner
         self._threshold = threshold
+        self._shared_networks = tuple(shared_networks)
         self._git = git
         self._repo = repo
         self._base = base
@@ -168,7 +172,10 @@ class ComposeGenerator:
             )
 
         findings = rules.check(
-            yaml.safe_load(normalized.content), raw_text=normalized.content, path=_DRAFT_PATH
+            yaml.safe_load(normalized.content),
+            raw_text=normalized.content,
+            path=_DRAFT_PATH,
+            shared_networks=self._shared_networks,
         )
         return ComposeDraft(
             ok=True,

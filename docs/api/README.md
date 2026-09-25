@@ -24,7 +24,7 @@ there is no Swagger / `/docs` page — the authoritative tool list is registered
 ## What does not belong here
 
 - The canonical tool registration (that lives in `src/registry_mcp/server.py`)
-- Architecture decisions about the interface (those go in `docs/ARDs/` — see
+- Architecture decisions about the interface (those go in `docs/ADRs/` — see
   `ADR-002-Client-Interfaces.md`)
 - Deployment or infrastructure runbooks (those go in `docs/SOPs/`)
 

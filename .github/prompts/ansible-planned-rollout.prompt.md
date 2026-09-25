@@ -5,7 +5,7 @@ description: "Gated Ansible capability-planning workflow — scan real vs. proje
 ## Config
 <!-- Fill in once when you set up this repo -->
 ANSIBLE_ROOT: ansible/
-ADR_PATH: docs/ARDs/
+ADR_PATH: docs/ADRs/
 PLAN_PATH: docs/plans/
 SOP_PATH: docs/SOPs/
 SRC_ROOT: src/registry_mcp/

@@ -125,7 +125,7 @@ later, and the deleted code remains in this repo's history.
    an existing Docker host. If adoption becomes a goal, the sibling-repo option above is
    the path back, and it should have its own record.
 2. **ADR-001 §5 and ADR-003 remain readable but non-binding.** Both are kept per
-   `docs/ARDs/README.md`; ADR-003 carries a superseded-by header, and a reader of
+   `docs/ADRs/README.md`; ADR-003 carries a superseded-by header, and a reader of
    ADR-001 §5 should treat its OOBE duties as withdrawn by this record.
 3. **`docs/plans/updated-phases.md` Phase 1 is now historical.** It describes building
    the installation pipeline this record removes. The plan file is a historical

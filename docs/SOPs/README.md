@@ -20,7 +20,7 @@ that someone unfamiliar with the project can follow it without guesswork. See
 
 - One-off scripts (this repo ships no operator scripts — they belong in your
   own homelab config repo)
-- Architecture decisions behind the procedures (those go in `docs/ARDs/`)
+- Architecture decisions behind the procedures (those go in `docs/ADRs/`)
 - High-level plans or roadmaps (those go in `docs/plans/`)
 
 ## Naming convention

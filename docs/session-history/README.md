@@ -18,7 +18,7 @@ for the next. Without them, every session starts cold. The `session-start` and
 ## What does not belong here
 
 - Formal status reports for stakeholders (standalone docs or `docs/SOPs/`)
-- Architecture decisions made during a session (those go in `docs/ARDs/`)
+- Architecture decisions made during a session (those go in `docs/ADRs/`)
 - Plans for future work (those go in `docs/plans/`)
 
 ## Naming convention

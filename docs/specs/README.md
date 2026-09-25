@@ -18,7 +18,7 @@ without having to make structural decisions on the fly.
 
 ## What does not belong here
 
-- Why a technology was chosen (that goes in `docs/ARDs/`)
+- Why a technology was chosen (that goes in `docs/ADRs/`)
 - Roadmaps and timelines (those go in `docs/plans/`)
 - Step-by-step procedures (those go in `docs/SOPs/`)
 

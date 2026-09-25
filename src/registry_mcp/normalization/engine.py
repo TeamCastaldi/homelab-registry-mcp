@@ -15,10 +15,14 @@ import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from apscheduler.triggers.base import BaseTrigger
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
+
 from registry_mcp.logging import get_logger
 from registry_mcp.models import FindingType, Proposal, ProposalStatus
 from registry_mcp.normalization.formatter import normalize as format_file
-from registry_mcp.normalization.rules import Finding
+from registry_mcp.normalization.rules import R_NOT_COMPOSE, Finding, network_names
 from registry_mcp.normalization.scanner import FileReport, scan
 from registry_mcp.proposal.lifecycle import branch_suffix, retire_if_finished
 from registry_mcp.providers.git import GitError
@@ -32,24 +36,35 @@ if TYPE_CHECKING:
 
 _log = get_logger("normalization.engine")
 
-_SCHEDULE_SECONDS = {"daily": 86400, "weekly": 604800, "monthly": 2592000}
+DEFAULT_SCHEDULE = "0 7 * * wed,sat"
+_PRESETS = {"daily": "0 7 * * *", "weekly": "0 7 * * sat", "monthly": "0 7 1 * *"}
 
 
-def schedule_seconds(schedule: str) -> int:
-    """Map ``NORMALIZATION_SCHEDULE`` to an APScheduler interval in seconds.
-    Accepts the named presets or a raw positive-integer-seconds string;
-    falls back to weekly for anything else — including zero or negative,
-    which APScheduler's interval trigger rejects outright at ``add_job()``."""
-    if schedule in _SCHEDULE_SECONDS:
-        return _SCHEDULE_SECONDS[schedule]
-    try:
-        seconds = int(schedule)
-    except (TypeError, ValueError):
-        seconds = None
-    if seconds is None or seconds <= 0:
-        _log.warning("normalization_schedule_invalid", schedule=schedule, fallback="weekly")
-        return _SCHEDULE_SECONDS["weekly"]
-    return seconds
+def schedule_trigger(schedule: str) -> BaseTrigger:
+    """Map ``NORMALIZATION_SCHEDULE`` to an APScheduler trigger.
+
+    A named preset or a five-field crontab runs at fixed times in the
+    server's time zone (``TZ``), so a restart doesn't push the next run
+    back. A plain number of seconds is an interval measured from startup,
+    which every restart resets. Anything else, including zero or a negative
+    number, falls back to ``DEFAULT_SCHEDULE``.
+    """
+    value = schedule.strip()
+    crontab = _PRESETS.get(value.lower(), value)
+    if len(crontab.split()) == 5:
+        try:
+            return CronTrigger.from_crontab(crontab)
+        except ValueError:
+            pass
+    else:
+        try:
+            seconds = int(value)
+        except ValueError:
+            seconds = 0
+        if seconds > 0:
+            return IntervalTrigger(seconds=seconds)
+    _log.warning("normalization_schedule_invalid", schedule=schedule, fallback=DEFAULT_SCHEDULE)
+    return CronTrigger.from_crontab(DEFAULT_SCHEDULE)
 
 
 @dataclass
@@ -97,7 +112,11 @@ class NormalizationEngine:
 
     def _process_file(self, report: FileReport) -> _FileChange | None:
         """Deterministic pass first, DSPy escalation only for what it left
-        unresolved. Returns ``None`` when nothing needs to change."""
+        unresolved. Returns ``None`` when nothing needs to change, or when the
+        file isn't a compose file at all (reported as R-008): there's nothing
+        for either pass to normalize."""
+        if any(finding.rule_id == R_NOT_COMPOSE for finding in report.findings):
+            return None
         new_path = report.path
         if report.misnamed and self._settings.normalization_rename_misnamed:
             new_path = report.path.rsplit("/", 1)[0] + "/compose.yaml"
@@ -316,12 +335,11 @@ class NormalizationEngine:
                 repo,
                 ref,
                 path_glob=self._settings.normalization_path_glob,
+                node=node,
+                shared_networks=network_names(self._settings.normalization_shared_networks),
             )
         except GitError as exc:
             return {"error": f"scan failed: {exc}"}
-
-        if node is not None:
-            grouped = {node: grouped[node]} if node in grouped else {}
 
         items = [
             await self._normalize_node(name, reports, dry_run=effective_dry_run, actor=actor)

@@ -21,9 +21,9 @@ services:
     labels:
       - "traefik.enable=true"
     networks:
-      - ${PROXY_NETWORK:-swarm-net}
+      - swarm-net
 networks:
-  ${PROXY_NETWORK:-swarm-net}:
+  swarm-net:
     external: true
 """
 
@@ -136,8 +136,9 @@ async def test_tier2_findings_are_reported_not_blocking():
 
 
 async def test_formatter_skipped_rules_are_reported():
-    # A comment on a key the reorder would move makes N-006 unsafe to apply.
+    # Removing a commented `version:` line would drop its comment, so N-004 is skipped.
     compose = (
+        'version: "3"  # legacy\n'
         "services:\n"
         "  app:\n"
         "    restart: unless-stopped  # policy\n"
@@ -147,8 +148,8 @@ async def test_formatter_skipped_rules_are_reported():
     draft, _ = await _generate(_raw(compose=compose))
 
     assert draft.ok is True
-    assert "N-006" in draft.skipped_rules
-    assert "# policy" in draft.compose
+    assert draft.skipped_rules == ["N-004"]
+    assert "# legacy" in draft.compose and "# policy" in draft.compose
 
 
 async def test_credentials_are_scrubbed_from_draft_and_reasoning():

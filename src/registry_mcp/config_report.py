@@ -160,6 +160,7 @@ _FEATURES = (
             "normalization_dry_run",
             "normalization_rename_misnamed",
             "normalization_label",
+            "normalization_shared_networks",
         ),
     ),
     _Feature(
@@ -181,7 +182,7 @@ _FEATURES = (
         "Compose generation",
         lambda s: s.service_deploy_enabled,
         ("dspy_enabled",),
-        ("service_deploy_conventions_path",),
+        ("service_deploy_conventions_path", "normalization_shared_networks"),
     ),
     _Feature(
         "git-crypt secrets",

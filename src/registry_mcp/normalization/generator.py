@@ -40,15 +40,16 @@ _log = get_logger("normalization.generator")
 # Handed to NormalizeConfigFile as `canonical_form` — a compact restatement of
 # docs/specs/spec-compose-normal-form.md's Tier 1 rules, not the whole spec.
 CANONICAL_FORM_SUMMARY = (
-    "2-space indent; no top-level version: key; top-level keys ordered "
-    "services, volumes, networks, configs, secrets, then alphabetical; "
-    "per-service keys ordered image, container_name, restart, depends_on, "
-    "env_file, environment, command, entrypoint, ports, volumes, networks, "
-    "labels, healthcheck, deploy, then alphabetical; labels as a sorted "
-    "mapping (never a list) with quoted string values; ports as quoted "
-    "strings; environment as a mapping; every existing comment preserved "
-    "verbatim and attached to the same line it annotated; no --- document "
-    "marker; exactly one trailing newline."
+    "2-space indent; no top-level version: key; top-level keys ordered name, "
+    "then x- extension fields in their existing order, then services, "
+    "volumes, networks, configs, secrets, then alphabetical; per-service keys "
+    "ordered image, container_name, restart, depends_on, env_file, "
+    "environment, command, entrypoint, ports, volumes, networks, labels, "
+    "healthcheck, deploy, then alphabetical; labels as a sorted mapping "
+    "(never a list) with double-quoted string values; short-syntax ports as "
+    "double-quoted strings; environment as a mapping; every existing comment "
+    "preserved verbatim and kept with the key or line it annotated; no --- "
+    "document marker; exactly one trailing newline."
 )
 
 

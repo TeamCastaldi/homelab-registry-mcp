@@ -13,7 +13,7 @@ Point a Dockhand instance at this server's `/webhooks/dockhand` endpoint so its
 container-update and CVE-scan alerts become staged proposals — pull requests a
 human reviews — instead of being read and acted on by hand.
 
-See [ADR-010](../ARDs/ADR-010-Dockhand-Update-Webhook.md) for the full design
+See [ADR-010](../ADRs/ADR-010-Dockhand-Update-Webhook.md) for the full design
 rationale; this SOP is just the setup steps.
 
 ---
@@ -220,7 +220,7 @@ included, by default, while header values are not logged unless explicitly
 configured. That trades a standing secret leak in your access logs for
 skipping one extra container. If you don't run access logging, that trade
 may be yours to make, but it is not the path this SOP walks through — see
-[ADR-010](../ARDs/ADR-010-Dockhand-Update-Webhook.md) for the full reasoning.
+[ADR-010](../ADRs/ADR-010-Dockhand-Update-Webhook.md) for the full reasoning.
 
 **Expected result:** The Dockhand channel saves without error, and a Test
 notification shows as delivered in apprise-api's own log/UI.

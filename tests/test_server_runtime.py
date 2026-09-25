@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 
+from apscheduler.triggers.cron import CronTrigger
 from starlette.testclient import TestClient
 
 from conftest import IsolatedSettings
@@ -56,6 +57,24 @@ def test_write_path_jobs_are_never_scheduled_in_read_only_mode():
 
     degraded = build_runtime_scheduler(dataclasses.replace(runtime, read_only=True))
     assert {j.id for j in degraded.get_jobs()} == {"discovery-traefik"}
+
+
+def test_normalization_sweep_runs_at_fixed_times_so_a_restart_doesnt_delay_it():
+    settings = _settings(
+        git_base_url="https://git.test",
+        git_token="tok",
+        git_repo="nathan/homelab",
+        normalization_enabled=True,
+    )
+    _, runtime = build_app(settings)
+    job = build_runtime_scheduler(dataclasses.replace(runtime, read_only=False)).get_job(
+        "normalization-sweep"
+    )
+    assert isinstance(job.trigger, CronTrigger)
+    assert str(job.trigger) == (
+        "cron[month='*', day='*', day_of_week='wed,sat', hour='7', minute='0']"
+    )
+    assert job.misfire_grace_time == 3600
 
 
 def test_nothing_to_schedule_returns_none():

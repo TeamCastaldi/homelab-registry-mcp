@@ -17,7 +17,7 @@ reach both nodes and do something useful there. Run this before relying on
 `docker-stack-deploy`, `hardware-discover-now`, or the inventory-sync tool
 against a node you haven't verified yet.
 
-See [ADR-001](../ARDs/ADR-001-Homelab-Control-Plane.md) §4.3 and
+See [ADR-001](../ADRs/ADR-001-Homelab-Control-Plane.md) §4.3 and
 [`docs/plans/ansible-planned-rollout.md`](../plans/ansible-planned-rollout.md)
 for the design context this SOP verifies.
 
