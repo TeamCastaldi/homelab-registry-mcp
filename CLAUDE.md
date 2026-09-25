@@ -6,7 +6,7 @@ Python MCP server that is the authoritative service catalog for a homelab. It di
 
 ```bash
 uv sync                                 # install/sync deps (always run after pulling)
-uv run registry-mcp                     # start server (stdio by default)
+uv run registry-mcp                     # start server (streamable-http on MCP_HOST:MCP_PORT; MCP_TRANSPORT=stdio for stdio)
 uv run registry-mcp-seed <file.yaml>    # idempotent YAML bootstrap
 
 uv run pytest                           # run all tests
@@ -36,13 +36,15 @@ src/registry_mcp/
 ├── config.py              # pydantic Settings (env vars → typed config)
 ├── errors.py              # the {"error": ...} convention: reports_error / resource_or_raise
 ├── gitcrypt.py            # shared git-crypt primitives (secrets tools + adoption's .env write)
+├── health.py              # startup checks (repo, ansible.cfg, SSH key); any failure → read-only mode
 ├── models/
 │   ├── service.py         # Service, ServiceSource (SQLModel tables)
 │   ├── event.py           # ChangeEvent, DiscoveryEvent (audit log)
 │   ├── hardware.py        # HardwareNode, HardwareChangeEvent, NodeRole, NodeStatus
 │   ├── proposal.py        # Proposal, FindingType, ProposalStatus (Phase 8)
 │   ├── adoption.py        # AdoptionDraft, DetectedSecret (Phase 7 brownfield adoption)
-│   └── deletion.py        # PendingDeletion, DeletionEntityType — the math-gate challenge record
+│   ├── deletion.py        # PendingDeletion, DeletionEntityType — the math-gate challenge record
+│   └── inventory.py       # PendingInventoryWrite — the math gate in front of the inventory write (ADR-015)
 ├── registry/
 │   ├── store.py           # SQLite CRUD + event recording
 │   └── reconcile.py       # Match discovered candidates → registry entries
@@ -51,11 +53,16 @@ src/registry_mcp/
 │   ├── engine.py          # Orchestrates discovery passes
 │   ├── scheduler.py       # APScheduler wiring
 │   ├── traefik.py / docker.py / authentik.py / dockhand.py  # source implementations
+│   └── outpost.py         # deterministic Authentik outpost-sidecar detection, shared by the sources
 ├── dspy/                  # reasoning layer (Phase 7) — DSPy enrichment, confidence-gated
 │   ├── signatures.py      # ResolveServiceIdentity, InferServiceMetadata, SummarizeAccessAudit, GenerateRemediationPatch, DetectHardcodedSecrets
 │   └── reasoner.py        # Reasoner: lazy LM config, gates, graceful degradation
 ├── hardware/              # hardware node registry (Phase 9a)
-│   └── store.py           # HardwareStore: node CRUD, service linking, capacity summary
+│   ├── store.py           # HardwareStore: node CRUD, service linking, capacity summary
+│   └── ansible_facts.py   # `ansible <host> -m setup` fact-gather + parsing (Phase 9b)
+├── inventory/             # Ansible inventory write (ADR-015), math-gated
+│   ├── store.py           # InventoryGateStore: request/confirm challenge for one host's entry
+│   └── writer.py          # comment-safe ruamel.yaml upsert of one host into the YAML inventory
 ├── proposal/              # proposal layer (Phase 8) — opens PRs, never merges/writes FS
 │   ├── generator.py       # calls DSPy GenerateRemediationPatch + confidence/YAML gates
 │   ├── adoption.py        # AdoptionGenerator: calls DSPy DetectHardcodedSecrets + same gates
@@ -85,7 +92,8 @@ src/registry_mcp/
 │   ├── traefik/           # httpx client + 7 MCP tools + resource + prompt
 │   ├── authentik/         # httpx client + 10 MCP tools + resource + prompt
 │   ├── dockhand/          # httpx client + 7 MCP tools + resource + prompt (ADR-013, read-only)
-│   └── infisical/         # Universal Auth httpx client + 1 MCP tool (ADR-016, read-only, off by default)
+│   ├── infisical/         # Universal Auth httpx client + 1 MCP tool (ADR-016, read-only, off by default)
+│   └── docs/              # MCP client for documentation-mcp + get_service_documentation passthrough
 ├── tools/
 │   ├── registry.py        # CRUD: add/get/list/update/delete (math-gated, see deletion/) service
 │   ├── events.py          # query change + discovery logs
@@ -96,11 +104,14 @@ src/registry_mcp/
 │   ├── proposal.py        # proposal_create/list_open/get/cancel/verify/normalize (Phase 8)
 │   ├── adoption.py        # proposal_adopt_service[_finalize/_cancel/_get] (Phase 7 brownfield)
 │   ├── intake.py          # service-intake-repo + shared run_intake() (conversational deploy Phase 1, ADR-018)
-│   └── service_deploy.py  # service-deploy-generate-compose (conversational deploy Phase 2, ADR-019)
+│   ├── service_deploy.py  # service-deploy-generate-compose (conversational deploy Phase 2, ADR-019)
+│   └── ansible_inventory.py  # ansible-inventory-sync-node[-confirm] (ADR-015)
 ├── webhooks/              # inbound HTTP receivers (ADR-010) — alerts → staged proposals
 │   ├── schemas.py         # Pydantic Dockhand payload models + pure parsing helpers
 │   └── dockhand.py        # POST /webhooks/dockhand — update/CVE alert → proposal
-├── logging/events.py      # structlog config with secret redaction
+├── logging/
+│   ├── events.py          # structlog config with secret redaction
+│   └── tool_calls.py      # per-call log + turns a reported {"error": ...} into isError: true
 └── seed.py                # YAML bootstrap logic
 tests/                     # mirrors src/ layout; uses in-memory SQLite
 ```
@@ -463,6 +474,8 @@ closes that gap without ever exposing a value. Off by default (`INFISICAL_ENABLE
 | `DOCKHAND_TOKEN` | unset | Dockhand API token (`dh_...`); scope to a read-only role if available |
 | `DOCKHAND_TIMEOUT_SECONDS` | `10` | |
 | `DOCKHAND_RETRIES` | `3` | |
+| `DOCS_MCP_URL` / `DOCS_MCP_TOKEN` | unset | Both enable the read-only `get_service_documentation` tool, a passthrough to a documentation-mcp server (streamable-http, bearer token) for official, version-specific docs |
+| `DOCS_MCP_TIMEOUT_SECONDS` | `30` | |
 | `DOCKER_BASE_URL` | unset | Enables Docker discovery; e.g. `unix:///var/run/docker.sock` |
 | `REGISTRY_DB_PATH` | `/data/registry.db` | SQLite location |
 | `REGISTRY_LOG_PATH` | `/data/events.log` | JSON event log |

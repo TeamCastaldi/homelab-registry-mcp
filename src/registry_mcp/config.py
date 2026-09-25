@@ -193,8 +193,10 @@ class Settings(BaseSettings):
     # fat-fingered id deleting something irreversible.
     delete_challenge_ttl_minutes: int = Field(default=5, gt=0)
 
-    # Secrets / git-crypt (Phase C) — all opt-in; off by default.
-    # secrets_key_path takes priority over secrets_git_crypt_key.
+    # Secrets / git-crypt (Phase C). The secrets_* tools are registered by
+    # default but do nothing until SECRETS_REPO_PATH names a real repo; each
+    # returns an error until then. secrets_key_path takes priority over
+    # secrets_git_crypt_key.
     secrets_enabled: bool = Field(default=True)
     secrets_repo_path: str | None = Field(default=None)
     secrets_key_path: str | None = Field(default=None)
