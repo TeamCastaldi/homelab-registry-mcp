@@ -100,7 +100,7 @@ cp .env.example .env
 # registry-mcp.<your-domain>,<LAN_IP>:8765 — any other Host gets HTTP 421.
 # If you run Dockhand, also set DOCKHAND_API_URL/DOCKHAND_TOKEN to enable its
 # read-only tools and discovery source.
-# To pin the container image to the same release, add REGISTRY_MCP_VERSION=<same tag> to .env.
+# To pin the container image to the same release, add REGISTRY_MCP_VERSION=<that tag without its v, e.g. 1.10.1> to .env.
 ```
 
 `.env.example` documents every option. The write path and the reasoning layer

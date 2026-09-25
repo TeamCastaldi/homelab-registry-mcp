@@ -50,3 +50,106 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=homelab-registry-mcp-publish
           cache-to: type=gha,mode=max,scope=homelab-registry-mcp-publish
+
+  # Redeploys the maintainer's own Dockhand git stack once the new image is on
+  # GHCR, by calling that stack's webhook (docs/SOPs/SOP-006). Runs after a
+  # tag's image is pushed, or on its own when the workflow is run by hand from
+  # a branch (no build, just a redeploy of what the stack already points at).
+  # Without both secrets set it does nothing, so forks are unaffected.
+  redeploy:
+    needs: push
+    if: >-
+      always() &&
+      (needs.push.result == 'success' ||
+      (github.event_name == 'workflow_dispatch' && needs.push.result == 'skipped'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions: {}
+    concurrency:
+      group: dockhand-redeploy
+      cancel-in-progress: false
+
+    steps:
+      - name: Call the Dockhand stack webhook
+        env:
+          WEBHOOK_URL: ${{ secrets.DOCKHAND_REDEPLOY_URL }}
+          WEBHOOK_SECRET: ${{ secrets.DOCKHAND_REDEPLOY_SECRET }}
+          REF: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        shell: python3 {0}
+        run: |
+          import hashlib
+          import hmac
+          import json
+          import os
+          import sys
+          import urllib.error
+          import urllib.request
+          from urllib.parse import urlsplit
+
+          def fail(message):
+              print(f"::error::{message}")
+              sys.exit(1)
+
+          url = os.environ["WEBHOOK_URL"].strip()
+          secret = os.environ["WEBHOOK_SECRET"].strip()
+          if not url and not secret:
+              print("::notice::DOCKHAND_REDEPLOY_URL and DOCKHAND_REDEPLOY_SECRET are not set; skipping")
+              sys.exit(0)
+          if not url or not secret:
+              fail("Set both DOCKHAND_REDEPLOY_URL and DOCKHAND_REDEPLOY_SECRET, or neither")
+          if not url.startswith("https://"):
+              fail("DOCKHAND_REDEPLOY_URL must be an https:// URL")
+
+          # Dockhand checks a GitHub-style signature: HMAC-SHA256 of the raw body,
+          # keyed by the stack's webhook secret. The body itself is not read.
+          body = json.dumps({"ref": os.environ["REF"], "sha": os.environ["SHA"]}).encode()
+          signature = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+          request = urllib.request.Request(
+              url,
+              data=body,
+              method="POST",
+              headers={
+                  "Content-Type": "application/json",
+                  "X-Hub-Signature-256": signature,
+                  "User-Agent": "homelab-registry-mcp-publish",
+              },
+          )
+          # Dockhand answers once the deploy has finished, so this waits for it.
+          try:
+              with urllib.request.urlopen(request, timeout=600) as response:
+                  status, raw, final_url = response.status, response.read(), response.url
+          except urllib.error.HTTPError as exc:
+              status, raw, final_url = exc.code, exc.read(), url
+          except OSError as exc:
+              # This repo's run logs are public: keep the host out of the message.
+              reason = str(getattr(exc, "reason", exc))
+              fail(f"Could not reach Dockhand: {reason.replace(urlsplit(url).hostname or url, '<host>')}")
+
+          if final_url != url:
+              fail("The webhook request was redirected; something such as forward auth sits in front of it")
+          try:
+              result = json.loads(raw)
+          except ValueError:
+              result = {}
+          if not isinstance(result, dict):
+              result = {}
+          detail = " ".join(str(result.get("error") or "").split())[:500]
+
+          hints = {
+              401: "the signature didn't verify; DOCKHAND_REDEPLOY_SECRET must match the stack's webhook secret",
+              403: "the webhook is turned off for this stack in Dockhand",
+              404: "Dockhand has no git stack with the ID in DOCKHAND_REDEPLOY_URL",
+          }
+          if status in hints:
+              fail(f"Dockhand returned {status}: {hints[status]}")
+          if status != 200:
+              fail(f"Dockhand returned {status}: {detail or 'no error message'}")
+          if result.get("skipped"):
+              fail(
+                  "Dockhand skipped the redeploy because the homelab repo hasn't changed; "
+                  "turn on the stack's Force redeployment setting"
+              )
+          if result.get("success") is not True:
+              fail(f"Dockhand's deploy failed: {detail or 'no error message'}")
+          print(f"Dockhand redeployed the stack for {os.environ['REF']}")
