@@ -57,7 +57,7 @@ src/registry_mcp/
 │   ├── traefik.py / docker.py / authentik.py / dockhand.py  # source implementations
 │   └── outpost.py         # deterministic Authentik outpost-sidecar detection, shared by the sources
 ├── dspy/                  # reasoning layer (Phase 7) — DSPy enrichment, confidence-gated
-│   ├── signatures.py      # ResolveServiceIdentity, InferServiceMetadata, SummarizeAccessAudit, GenerateRemediationPatch, DetectHardcodedSecrets
+│   ├── signatures.py      # ResolveServiceIdentity, InferServiceMetadata, InferServiceRequirements, GenerateServiceCompose, GenerateRemediationPatch, NormalizeConfigFile, ApplyReviewFeedback, DetectHardcodedSecrets, SummarizeAccessAudit
 │   └── reasoner.py        # Reasoner: lazy LM config, gates, graceful degradation
 ├── hardware/              # hardware node registry (Phase 9a)
 │   ├── store.py           # HardwareStore: node CRUD, service linking, capacity summary
@@ -115,7 +115,7 @@ src/registry_mcp/
 │   ├── events.py          # structlog config with secret redaction
 │   └── tool_calls.py      # per-call log + turns a reported {"error": ...} into isError: true
 └── seed.py                # YAML bootstrap logic
-tests/                     # mirrors src/ layout; uses in-memory SQLite
+tests/                     # mirrors src/ layout; a throwaway SQLite file per test (see tests/README.md)
 ```
 
 ## Architecture
@@ -608,7 +608,7 @@ Copy `.env.example` to `.env` and fill in the upstream URLs before running local
 
 ## Testing
 
-Tests use `pytest-asyncio` (`asyncio_mode="auto"`) and an in-memory SQLite fixture to avoid touching `.env` or real APIs.
+Tests use `pytest-asyncio` (`asyncio_mode="auto"`) and a throwaway SQLite database per test (the `settings` fixture, under `tmp_path`) to avoid touching `.env` or real APIs. Conventions, including the rule that a fake is no more forgiving than the real service, are in `tests/README.md`; known gaps (hollow tests, over-forgiving fakes) and the plan to close them are in `docs/plans/2026-09-test-suite-audit.md`.
 
 ```bash
 uv run pytest                            # all tests
@@ -616,7 +616,7 @@ uv run pytest -v tests/test_linking.py   # one file
 uv run pytest --cov=src                  # with coverage
 ```
 
-Fixtures live in `tests/conftest.py` (IsolatedSettings, in-memory store).
+Fixtures live in `tests/conftest.py` (IsolatedSettings, settings, store, server).
 
 ## Docker / Homelab Deploy
 
@@ -694,6 +694,23 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
 
 ## Current Status
 
+- **Test suite audited (2026-09-25), remediation not started**: all 40 test files (845 tests)
+  reviewed file by file, each suspected flaw proven with a mutation probe in a throwaway
+  worktree (~160 probes; all 46 labelled controls caught). See
+  `docs/plans/2026-09-test-suite-audit.md`, with per-file verdicts in
+  `docs/plans/2026-09-test-suite-audit-verdicts.jsonl`. 20 files KEEP, 20 REWRITE, none
+  redundant as a whole, and only 13 tests are dead weight. The real gap is under-assertion:
+  dozens of realistic breakages pass the entire suite. Mostly that is because the
+  Dockhand/Traefik/Authentik HTTP fakes route on path alone and the Git fakes ignore auth
+  headers, so a read-only client sending POST or a provider sending no token goes
+  unnoticed. Other causes: `"error" in result` checks satisfied by something else, read
+  tools tested only when empty, and settings-to-code wiring rarely asserted. Tier 1 of the
+  plan covers strict fakes, event-retention purge, proposal routing (a normalization PR
+  opened under the security label passes the suite today), and secret-handling paths.
+  One application defect was found and **not yet fixed**: `gitcrypt.detect_format` tests
+  `path.suffix == ".env"`, which is empty for a file named `.env`. Such a file is parsed only
+  when the uppercase-`KEY=` heuristic matches, so `secrets_decrypt` returns a `.env` with
+  lowercase keys as raw text.
 - **Normalization made usable on a real, commented repo**: checked against the operator's 46
   compose files, 36 used to escalate to DSPy on every sweep (the formatter refused to reorder
   any block with a comment), so manual runs timed out and the weekly interval job, reset by

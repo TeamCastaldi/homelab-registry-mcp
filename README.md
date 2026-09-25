@@ -163,6 +163,7 @@ In Claude Desktop, add an MCP server with the same URL under Settings.
 - [docs/SOPs/SOP-004-Verify-Ansible-Control-Plane-Plumbing.md](docs/SOPs/SOP-004-Verify-Ansible-Control-Plane-Plumbing.md) — runbook for verifying `ANSIBLE_CFG_PATH`/`SSH_KEY_PATH`-driven Ansible execution actually works end-to-end
 - [docs/SOPs/SOP-005-Connect-Infisical-Machine-Identity.md](docs/SOPs/SOP-005-Connect-Infisical-Machine-Identity.md) — runbook for creating the Infisical Machine Identity `infisical_status` authenticates with
 - [docs/plans/phase-d.md](docs/plans/phase-d.md) — historical: migration from workload node to a dedicated control-plane node. The migration itself is complete; its Traefik static-backend routing model is superseded by ADR-006/ADR-007, which co-locate Traefik on the same node behind standard Docker labels
+- [docs/plans/2026-09-test-suite-audit.md](docs/plans/2026-09-test-suite-audit.md) — test-suite audit (2026-09-25): a KEEP/REWRITE verdict for every test file, the mutation probes behind each claim, and a prioritized remediation plan; the per-file JSON verdicts are in the companion `2026-09-test-suite-audit-verdicts.jsonl`
 - [CONTRIBUTING.md](CONTRIBUTING.md) — branch naming, commit format, and the local checks to run before a PR
 - [SECURITY.md](SECURITY.md) — security posture, supported versions, and how to report a vulnerability
 - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — expected conduct in project spaces

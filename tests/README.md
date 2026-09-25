@@ -43,7 +43,12 @@ tests/
   asserts the loop keeps running meanwhile.
 - A fake should be no more forgiving than the real service where it matters. The
   proposal and normalization `FakeGit` refuse a branch that already exists, as
-  Gitea and GitHub do; a fake that accepted duplicates once hid a real bug.
+  Gitea and GitHub do; a fake that accepted duplicates once hid a real bug. Not
+  every fake meets this yet. `docs/plans/2026-09-test-suite-audit.md` lists the
+  ones that don't (the Dockhand, Traefik, and Authentik transports route on URL
+  path alone; the Git fakes ignore auth headers), plus two webhook dispatch tests
+  that break hermeticity with a real outbound call to `https://git.test`, and the
+  fix for each.
 - Files are named `test_<module>.py`; test functions `test_<what_it_does>`.
 - Each test should verify one thing.
 
