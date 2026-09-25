@@ -117,6 +117,15 @@ proxy network is `swarm-net`. The new signature, the required-rules summary, R-0
 finding text, and the spec's R-005 row all name `${PROXY_NETWORK:-swarm-net}`.
 Detection is unchanged, because R-005 matches on the `${PROXY_NETWORK` prefix.
 
+> **Amended 2026-09-25:** the `${PROXY_NETWORK:-swarm-net}`-as-key form this section
+> describes is invalid Compose. Compose interpolates values, never mapping keys, so a
+> network declared as `${PROXY_NETWORK:-swarm-net}:` and joined as `- ${PROXY_NETWORK:-swarm-net}`
+> fails with "service refers to undefined network swarm-net" (checked with Docker Compose
+> v5.1.1). R-005 now reports a shared network (`NORMALIZATION_SHARED_NETWORKS`, default
+> `swarm-net,proxy-net`) declared without `external: true`, and the required-rules summary and
+> `GenerateServiceCompose` ask for that instead. An interpolated name, where wanted, goes in
+> `name:` under a fixed key. The text above is kept as the record of what was decided then.
+
 ## Consequences
 
 ### Positive

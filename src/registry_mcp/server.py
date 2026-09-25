@@ -33,7 +33,8 @@ from registry_mcp.integrations.infisical import register_infisical_tools
 from registry_mcp.integrations.traefik import register_traefik_tools
 from registry_mcp.inventory import InventoryGateStore
 from registry_mcp.logging import configure_logging, get_logger, install_tool_call_logging
-from registry_mcp.normalization import NormalizationEngine, NormalizationGenerator, schedule_seconds
+from registry_mcp.normalization import NormalizationEngine, NormalizationGenerator, schedule_trigger
+from registry_mcp.normalization.rules import network_names
 from registry_mcp.proposal import AdoptionGenerator, PatchGenerator, ProposalEngine, ProposalStore
 from registry_mcp.providers.git import GitProvider, build_git_provider
 from registry_mcp.providers.notification import build_notification_provider
@@ -293,6 +294,7 @@ def build_app(settings: Settings | None = None) -> tuple[FastMCP, Runtime]:
             repo=settings.git_repo,
             base=settings.git_base_branch,
             conventions_path=settings.service_deploy_conventions_path,
+            shared_networks=network_names(settings.normalization_shared_networks),
         ),
     )
 
@@ -379,15 +381,21 @@ def build_runtime_scheduler(runtime: Runtime) -> AsyncIOScheduler | None:
         and not runtime.read_only
     ):
         scheduler = scheduler or AsyncIOScheduler()
+        trigger = schedule_trigger(settings.normalization_schedule)
         scheduler.add_job(
             runtime.normalization.run_sweep,
-            "interval",
-            seconds=schedule_seconds(settings.normalization_schedule),
+            trigger,
             id="normalization-sweep",
             replace_existing=True,
+            # A run due while the server was busy still happens within the hour.
+            misfire_grace_time=3600,
+            coalesce=True,
         )
+        next_run = trigger.get_next_fire_time(None, datetime.now(trigger.timezone))
         get_logger("normalization.engine").info(
-            "normalization_sweep_scheduled", schedule=settings.normalization_schedule
+            "normalization_sweep_scheduled",
+            schedule=settings.normalization_schedule,
+            next_run=next_run.isoformat() if next_run else None,
         )
     return scheduler
 

@@ -10,6 +10,7 @@ LLM calls — same "detection layer stays deterministic" discipline
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -21,10 +22,21 @@ from registry_mcp.proposal.generator import _scrub_credentials
 R_LATEST_TAG = "R-001"
 R_BUILD_KEY = "R-002"
 R_NO_RESTART = "R-003"
-R_UNFLAGGED_PORTS = "R-004"
-R_HARDCODED_NETWORK = "R-005"
+R_UNEXPLAINED_PORTS = "R-004"
+R_SHARED_NETWORK_NOT_EXTERNAL = "R-005"
 R_HARDCODED_SECRET = "R-006"
 R_CONTAINER_NAME_MISMATCH = "R-007"
+R_NOT_COMPOSE = "R-008"
+
+# Networks that more than one stack joins. Each stack must declare them
+# `external: true` so a stray `up` can never create or redefine them.
+DEFAULT_SHARED_NETWORKS = ("swarm-net", "proxy-net")
+
+
+def network_names(setting: str) -> tuple[str, ...]:
+    """``NORMALIZATION_SHARED_NETWORKS``, comma-separated, as a tuple."""
+    return tuple(name.strip() for name in setting.split(",") if name.strip())
+
 
 # Tier 1 canonical key orders (N-005, N-006).
 TOP_LEVEL_KEY_ORDER = ("services", "volumes", "networks", "configs", "secrets")
@@ -45,7 +57,9 @@ SERVICE_KEY_ORDER = (
     "deploy",
 )
 
-_PORTS_BLOCK_RE = re.compile(r"^(?P<indent>[ \t]*)ports:[ \t]*(#.*)?$", re.MULTILINE)
+_PORTS_LINE_RE = re.compile(r"^(?P<indent>[ \t]*)ports:[ \t]*(?P<comment>#.*)?$")
+# `${VAR}`, `${VAR:-default}` or `${VAR-default}` as a whole value.
+_INTERPOLATION_RE = re.compile(r"^\$\{[A-Za-z_][A-Za-z0-9_]*(?::?-(?P<default>[^}]*))?\}$")
 
 
 @dataclass(frozen=True)
@@ -79,14 +93,40 @@ def key_sort_key(order: tuple[str, ...]):
     return _key
 
 
+def top_level_sort_key(name: Any) -> tuple[int, int, str]:
+    """N-005: ``name`` first, then ``x-`` extension fields in their existing
+    order (they usually define the YAML anchors services refer to, and an
+    alias must come after its anchor), then ``TOP_LEVEL_KEY_ORDER``, then any
+    remaining key alphabetically."""
+    name = str(name)
+    if name == "name":
+        return (0, 0, "")
+    if name.startswith("x-"):
+        return (1, 0, "")
+    if name in TOP_LEVEL_KEY_ORDER:
+        return (2, TOP_LEVEL_KEY_ORDER.index(name), "")
+    return (3, 0, name)
+
+
+def compose_string(value: Any) -> str:
+    """The string Compose makes of a label or environment value: YAML
+    booleans become ``true``/``false`` (not Python's ``True``), null becomes
+    empty, anything else its ``str()``."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if value is None:
+        return ""
+    return str(value)
+
+
 def _labels_as_mapping(labels: Any) -> dict[str, str]:
     """A compose ``labels:`` value (list *or* mapping form) reduced to the
-    ``{key: str(value)}`` shape both forms are equivalent to at the Docker
+    ``{key: string}`` shape both forms are equivalent to at the Docker
     level."""
     if labels is None:
         return {}
     if isinstance(labels, dict):
-        return {str(k): str(v) for k, v in labels.items()}
+        return {str(k): compose_string(v) for k, v in labels.items()}
     result: dict[str, str] = {}
     for item in labels:
         key, _, value = str(item).partition("=")
@@ -94,12 +134,13 @@ def _labels_as_mapping(labels: Any) -> dict[str, str]:
     return result
 
 
-def _ports_as_strings(ports: Any) -> list[str]:
-    """A compose ``ports:`` value reduced to its string form regardless of
-    whether an entry was written as a bare number or a quoted string."""
+def _ports_as_strings(ports: Any) -> list[Any]:
+    """A compose ``ports:`` value with each short-syntax entry reduced to its
+    string form, whether it was written as a bare number or a quoted string.
+    A long-syntax entry (a mapping) is compared as it is."""
     if ports is None:
         return []
-    return [str(p) for p in ports]
+    return [p if isinstance(p, dict) else str(p) for p in ports]
 
 
 def _environment_as_mapping(env: Any) -> dict[str, str | None]:
@@ -108,7 +149,7 @@ def _environment_as_mapping(env: Any) -> dict[str, str | None]:
     if env is None:
         return {}
     if isinstance(env, dict):
-        return {str(k): (None if v is None else str(v)) for k, v in env.items()}
+        return {str(k): (None if v is None else compose_string(v)) for k, v in env.items()}
     result: dict[str, str | None] = {}
     for item in env:
         key, sep, value = str(item).partition("=")
@@ -176,45 +217,77 @@ def _has_pinned_tag(image: str) -> bool:
     return tag != "latest"
 
 
-def _ports_missing_temporary_comment(raw_text: str) -> bool:
-    """True when a ``ports:`` block exists with no ``# temporary`` comment
-    anywhere in it — a text-level heuristic since a parsed YAML structure
-    doesn't retain which line a comment was attached to. SOP-001 requires
-    this comment on any interim port mapping; false positives/negatives here
-    only affect a reported finding, never an auto-applied change."""
-    for match in _PORTS_BLOCK_RE.finditer(raw_text):
+def _ports_without_reason(raw_text: str) -> bool:
+    """True when a ``ports:`` block carries no comment at all: none on the
+    ``ports:`` line, on the line directly above it, or among its entries. A
+    published port should say why it's there (``# temporary`` until Traefik
+    routes it, or why it stays). A text-level heuristic, since a parsed YAML
+    structure doesn't keep comments; a miss only affects a reported finding,
+    never an auto-applied change."""
+    lines = raw_text.splitlines()
+    for idx, line in enumerate(lines):
+        match = _PORTS_LINE_RE.match(line)
+        if match is None:
+            continue
         indent = len(match.group("indent"))
-        block_lines = [match.group(0)]
-        for line in raw_text[match.end() :].splitlines():
-            if not line.strip():
+        explained = match.group("comment") is not None or (
+            idx > 0 and lines[idx - 1].lstrip().startswith("#")
+        )
+        for following in lines[idx + 1 :]:
+            if not following.strip():
                 continue
-            line_indent = len(line) - len(line.lstrip(" \t"))
-            if line.strip().startswith("-") and line_indent > indent:
-                block_lines.append(line)
-                continue
-            break
-        block_text = "\n".join(block_lines)
-        if "temporary" not in block_text.lower():
+            depth = len(following) - len(following.lstrip(" \t"))
+            # Deeper lines are entries (or their comments); an entry may also
+            # sit at the key's own indent when the list isn't indented.
+            if depth < indent or (depth == indent and not following.lstrip().startswith("-")):
+                break
+            if "#" in following:
+                explained = True
+        if not explained:
             return True
     return False
 
 
-def _proxy_network_is_hardcoded(doc: dict) -> bool:
+def _network_name(key: Any, config: Any) -> str | None:
+    """The name Docker gives a top-level network: its ``name:``, else its key.
+    An interpolated name resolves to its default, or ``None`` when it has
+    none (the name isn't known until deploy time)."""
+    name = str(config.get("name", key) if isinstance(config, dict) else key)
+    match = _INTERPOLATION_RE.match(name)
+    if match:
+        return match.group("default")
+    return name
+
+
+def _shared_networks_not_external(doc: dict, shared: Iterable[str]) -> list[str]:
+    """Top-level network keys naming a shared network without ``external: true``."""
     networks = doc.get("networks")
     if not isinstance(networks, dict):
-        return False
-    for name, network_config in networks.items():
-        is_external = isinstance(network_config, dict) and network_config.get("external")
-        if is_external and "${PROXY_NETWORK" not in str(name):
-            return True
-    return False
+        return []
+    shared = set(shared)
+    return [
+        str(key)
+        for key, config in networks.items()
+        if _network_name(key, config) in shared
+        and not (isinstance(config, dict) and config.get("external"))
+    ]
 
 
-def check(doc: Any, *, raw_text: str, path: str) -> list[Finding]:
-    """Tier 2 findings for a parsed compose document. Never mutates ``doc``."""
+def check(
+    doc: Any,
+    *,
+    raw_text: str,
+    path: str,
+    shared_networks: Iterable[str] = DEFAULT_SHARED_NETWORKS,
+) -> list[Finding]:
+    """Tier 2 findings for a parsed compose document. Never mutates ``doc``.
+
+    A document with no top-level ``services:`` mapping isn't a compose file;
+    it gets the single R-008 finding and nothing else.
+    """
     findings: list[Finding] = []
     if not isinstance(doc, dict) or not isinstance(doc.get("services"), dict):
-        return findings
+        return [not_compose(path, "no top-level services: mapping")]
 
     for name, service in doc["services"].items():
         if not isinstance(service, dict):
@@ -243,18 +316,23 @@ def check(doc: Any, *, raw_text: str, path: str) -> list[Finding]:
                 )
             )
 
-    if _ports_missing_temporary_comment(raw_text):
-        findings.append(
-            Finding(R_UNFLAGGED_PORTS, path, None, "ports: mapping has no # temporary comment")
-        )
-
-    if _proxy_network_is_hardcoded(doc):
+    if _ports_without_reason(raw_text):
         findings.append(
             Finding(
-                R_HARDCODED_NETWORK,
+                R_UNEXPLAINED_PORTS,
                 path,
                 None,
-                "external network name is hardcoded, not ${PROXY_NETWORK:-swarm-net}",
+                "ports: mapping has no comment saying why it's published",
+            )
+        )
+
+    for network in _shared_networks_not_external(doc, shared_networks):
+        findings.append(
+            Finding(
+                R_SHARED_NETWORK_NOT_EXTERNAL,
+                path,
+                None,
+                f"shared network {network!r} is not declared external: true",
             )
         )
 
@@ -265,3 +343,8 @@ def check(doc: Any, *, raw_text: str, path: str) -> list[Finding]:
         )
 
     return findings
+
+
+def not_compose(path: str, why: str) -> Finding:
+    """R-008: the file sits where a compose file belongs but isn't one."""
+    return Finding(R_NOT_COMPOSE, path, None, f"not a compose file: {why}")

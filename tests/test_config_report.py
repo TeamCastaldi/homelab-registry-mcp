@@ -190,7 +190,7 @@ def test_an_empty_value_that_replaces_a_default_is_a_problem():
 
 
 def test_a_setting_that_does_nothing_is_listed_once():
-    result = report(normalization_label="", normalization_schedule="weekly")
+    result = report(normalization_label="", normalization_schedule="0 7 * * wed,sat")
     assert result["same_as_default"] == ["NORMALIZATION_SCHEDULE"]
     assert result["for_features_off"] == [
         {"key": "NORMALIZATION_LABEL", "features_off": ["Normalization"]}

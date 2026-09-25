@@ -3,42 +3,80 @@ and engine. Git and notification providers are faked so nothing touches the
 network — same duck-typed style as ``test_proposal_engine.py``.
 """
 
+import re
+from datetime import datetime
+
+import pytest
+from apscheduler.triggers.interval import IntervalTrigger
+
 from conftest import IsolatedSettings
 from registry_mcp.models import ProposalStatus
-from registry_mcp.normalization.engine import NormalizationEngine, schedule_seconds
+from registry_mcp.normalization.engine import (
+    DEFAULT_SCHEDULE,
+    NormalizationEngine,
+    schedule_trigger,
+)
+from registry_mcp.normalization.formatter import _comments
 from registry_mcp.normalization.formatter import normalize as format_file
 from registry_mcp.normalization.generator import NormalizationGenerator
-from registry_mcp.normalization.rules import canonical_projection, check, is_equivalent
+from registry_mcp.normalization.rules import (
+    canonical_projection,
+    check,
+    is_equivalent,
+    network_names,
+)
 from registry_mcp.normalization.scanner import scan
 from registry_mcp.proposal.store import ProposalStore
 from registry_mcp.providers.git import GitError, OpenedPR
 from registry_mcp.registry import RegistryStore
 
 # ---------------------------------------------------------------------------
-# engine.py: schedule_seconds
+# engine.py: schedule_trigger
 # ---------------------------------------------------------------------------
 
 
-def test_schedule_seconds_named_presets():
-    assert schedule_seconds("daily") == 86400
-    assert schedule_seconds("weekly") == 604800
-    assert schedule_seconds("monthly") == 2592000
+def _runs(schedule: str, count: int = 4) -> list[str]:
+    """The next ``count`` run times of ``schedule`` after a fixed start, as
+    ``"Wed 07:00"`` strings."""
+    trigger = schedule_trigger(schedule)
+    now = datetime(2026, 9, 21, 12, 0, tzinfo=trigger.timezone)  # a Monday, noon
+    runs, previous = [], None
+    for _ in range(count):
+        previous = trigger.get_next_fire_time(previous, now)
+        runs.append(previous.strftime("%a %d %H:%M"))
+        now = previous
+    return runs
 
 
-def test_schedule_seconds_raw_positive_value():
-    assert schedule_seconds("120") == 120
+def test_default_schedule_runs_wednesday_and_saturday_at_seven():
+    assert _runs(DEFAULT_SCHEDULE) == [
+        "Wed 23 07:00",
+        "Sat 26 07:00",
+        "Wed 30 07:00",
+        "Sat 03 07:00",
+    ]
 
 
-def test_schedule_seconds_falls_back_to_weekly_for_zero():
-    assert schedule_seconds("0") == 604800
+def test_named_presets_run_at_fixed_times():
+    assert _runs("daily", 2) == ["Tue 22 07:00", "Wed 23 07:00"]
+    assert _runs("weekly", 2) == ["Sat 26 07:00", "Sat 03 07:00"]
+    assert _runs("monthly", 1) == ["Thu 01 07:00"]
 
 
-def test_schedule_seconds_falls_back_to_weekly_for_negative():
-    assert schedule_seconds("-5") == 604800
+def test_a_crontab_is_accepted():
+    assert _runs("30 6 * * mon", 1) == ["Mon 28 06:30"]
 
 
-def test_schedule_seconds_falls_back_to_weekly_for_garbage():
-    assert schedule_seconds("bogus") == 604800
+def test_plain_seconds_is_an_interval():
+    trigger = schedule_trigger("120")
+    assert isinstance(trigger, IntervalTrigger)
+    assert trigger.interval.total_seconds() == 120
+
+
+def test_an_invalid_schedule_falls_back_to_the_default():
+    default = str(schedule_trigger(DEFAULT_SCHEDULE))
+    for bad in ("bogus", "0", "-5", "99 99 * * *", "1 2 3"):
+        assert str(schedule_trigger(bad)) == default, bad
 
 
 # ---------------------------------------------------------------------------
@@ -62,6 +100,20 @@ def test_canonical_projection_drops_version_key():
     with_version = {"version": "3.8", "services": {"a": {}}}
     without_version = {"services": {"a": {}}}
     assert canonical_projection(with_version) == canonical_projection(without_version)
+
+
+def test_canonical_projection_compares_label_booleans_as_compose_does():
+    as_bool = {"services": {"a": {"labels": {"traefik.enable": True}}}}
+    as_string = {"services": {"a": {"labels": {"traefik.enable": "true"}}}}
+    python_cased = {"services": {"a": {"labels": {"traefik.enable": "True"}}}}
+    assert canonical_projection(as_bool) == canonical_projection(as_string)
+    assert canonical_projection(as_bool) != canonical_projection(python_cased)
+
+
+def test_canonical_projection_keeps_long_syntax_ports_as_mappings():
+    as_mapping = {"services": {"a": {"ports": [{"target": 80, "published": 8080}]}}}
+    as_string = {"services": {"a": {"ports": [str({"target": 80, "published": 8080})]}}}
+    assert canonical_projection(as_mapping) != canonical_projection(as_string)
 
 
 def test_canonical_projection_detects_a_real_value_change():
@@ -116,36 +168,70 @@ def test_check_flags_missing_restart():
     assert any(f.rule_id == "R-003" for f in findings)
 
 
-def test_check_flags_unflagged_ports():
-    raw = "services:\n  a:\n    ports:\n      - 8080:80\n"
-    doc = {"services": {"a": {"image": "x:1", "restart": "always", "ports": ["8080:80"]}}}
-    findings = check(doc, raw_text=raw, path="x/compose.yaml")
+_PORTS_DOC = {"services": {"a": {"image": "x:1", "restart": "always", "ports": ["8080:80"]}}}
+
+
+def test_check_flags_ports_with_no_comment():
+    raw = "services:\n  a:\n    ports:\n      - 8080:80\n    # about volumes\n    volumes: []\n"
+    findings = check(_PORTS_DOC, raw_text=raw, path="x/compose.yaml")
     assert any(f.rule_id == "R-004" for f in findings)
 
 
-def test_check_accepts_ports_with_temporary_comment():
-    raw = "services:\n  a:\n    ports:\n      - 8080:80  # temporary\n"
-    doc = {"services": {"a": {"image": "x:1", "restart": "always", "ports": ["8080:80"]}}}
-    findings = check(doc, raw_text=raw, path="x/compose.yaml")
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "services:\n  a:\n    ports:\n      - 8080:80  # temporary\n",
+        "services:\n  a:\n    ports:  # LAN access for the MCP client\n      - 8080:80\n",
+        "services:\n  a:\n    # published on purpose: DNS\n    ports:\n      - 53:53\n",
+        "services:\n  a:\n    ports:\n      # the admin UI\n      - 8080:80\n",
+        "services:\n  a:\n    ports:\n    - 8080:80  # indentless list\n",
+    ],
+)
+def test_check_accepts_ports_with_any_comment(raw):
+    findings = check(_PORTS_DOC, raw_text=raw, path="x/compose.yaml")
     assert not any(f.rule_id == "R-004" for f in findings)
 
 
-def test_check_flags_hardcoded_proxy_network():
-    doc = {
-        "services": {"a": {"image": "x:1", "restart": "always"}},
-        "networks": {"traefik": {"external": True}},
-    }
-    findings = check(doc, raw_text="", path="x/compose.yaml")
-    assert any(f.rule_id == "R-005" for f in findings)
+def _networks(networks, **kwargs):
+    doc = {"services": {"a": {"image": "x:1", "restart": "always"}}, "networks": networks}
+    return [
+        f for f in check(doc, raw_text="", path="x/compose.yaml", **kwargs) if f.rule_id == "R-005"
+    ]
 
 
-def test_check_accepts_interpolated_proxy_network():
-    doc = {
-        "services": {"a": {"image": "x:1", "restart": "always"}},
-        "networks": {"${PROXY_NETWORK:-swarm-net}": {"external": True}},
-    }
-    findings = check(doc, raw_text="", path="x/compose.yaml")
-    assert not any(f.rule_id == "R-005" for f in findings)
+def test_check_flags_a_shared_network_not_declared_external():
+    findings = _networks({"swarm-net": {"driver": "overlay"}, "proxy-net": None})
+    assert [f.detail for f in findings] == [
+        "shared network 'swarm-net' is not declared external: true",
+        "shared network 'proxy-net' is not declared external: true",
+    ]
+
+
+@pytest.mark.parametrize(
+    "networks",
+    [
+        {"swarm-net": {"external": True}},
+        {"swarm-net": {"name": "swarm-net", "external": True}},
+        {"proxy": {"name": "${PROXY_NETWORK:-swarm-net}", "external": True}},
+        {"app-internal": {"driver": "bridge"}},  # a stack's own network
+        {"proxy": {"name": "${PROXY_NETWORK}"}},  # name unknown until deploy
+    ],
+)
+def test_check_accepts_external_shared_and_private_networks(networks):
+    assert _networks(networks) == []
+
+
+def test_check_resolves_an_interpolated_name_to_its_default():
+    findings = _networks({"proxy": {"name": "${PROXY_NETWORK:-swarm-net}"}})
+    assert [f.detail for f in findings] == ["shared network 'proxy' is not declared external: true"]
+
+
+def test_check_uses_the_configured_shared_networks():
+    networks = {"traefik": {"driver": "bridge"}, "swarm-net": {"driver": "overlay"}}
+    findings = _networks(networks, shared_networks=network_names(" traefik , ,"))
+    assert [f.detail for f in findings] == [
+        "shared network 'traefik' is not declared external: true"
+    ]
 
 
 def test_check_flags_hardcoded_secret():
@@ -161,9 +247,12 @@ def test_check_flags_container_name_mismatch():
     assert any(f.rule_id == "R-007" for f in findings)
 
 
-def test_check_returns_nothing_for_non_compose_yaml():
-    assert check({"foo": "bar"}, raw_text="", path="x.yaml") == []
-    assert check("not a dict", raw_text="", path="x.yaml") == []
+def test_check_reports_a_file_that_isnt_compose():
+    for doc in ({"foo": "bar"}, "TBD", None):
+        findings = check(doc, raw_text="", path="x.yaml")
+        assert [(f.rule_id, f.detail) for f in findings] == [
+            ("R-008", "not a compose file: no top-level services: mapping")
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -221,15 +310,143 @@ def test_formatter_preserves_temporary_comment_on_ports():
     assert "# temporary" in result.content
 
 
-def test_formatter_skips_unsafe_reorder_when_comment_present():
+def test_formatter_moves_a_comment_with_its_key():
     text = (
         "services:\n  a:\n    restart: unless-stopped\n"
         "    # pin this to a real tag before merging\n    image: x:1\n"
     )
     result = format_file(text)
-    assert result is not None
-    assert "N-006" in result.skipped_rules
-    assert "# pin this to a real tag before merging" in result.content
+    assert result.skipped_rules == []
+    assert result.content == (
+        "services:\n  a:\n    # pin this to a real tag before merging\n    image: x:1\n"
+        "    restart: unless-stopped\n"
+    )
+
+
+def test_formatter_keeps_blank_lines_in_place_and_the_file_header_on_top():
+    text = (
+        "# my stack\n"
+        "networks:\n  swarm-net:\n    external: true\n"
+        "\n"
+        "# the app\n"
+        "services:\n  a:\n    image: x:1\n"
+    )
+    result = format_file(text)
+    assert result.content == (
+        "# my stack\n"
+        "# the app\n"
+        "services:\n  a:\n    image: x:1\n"
+        "\n"
+        "networks:\n  swarm-net:\n    external: true\n"
+    )
+
+
+def test_formatter_sorts_labels_with_their_comments():
+    text = (
+        "services:\n  a:\n    image: x:1\n    labels:\n"
+        '      z.last: "1"\n      # why this router\n      a.first: "2"\n'
+        "\nnetworks:\n  n:\n    external: true\n"
+    )
+    result = format_file(text)
+    assert result.skipped_rules == []
+    assert (
+        '    labels:\n      # why this router\n      a.first: "2"\n      z.last: "1"\n\nnetworks:'
+        in result.content
+    )
+
+
+def _squeeze(text: str) -> str:
+    """``text`` with the run of spaces before each inline comment cut to one."""
+    return re.sub(r"(\S) +#", r"\1 #", text)
+
+
+def test_formatter_converts_a_commented_label_list():
+    text = (
+        "services:\n  a:\n    image: x:1\n    labels:\n"
+        "      # turn it on\n"
+        '      - "traefik.enable=true"  # required\n'
+        '      - "b.x=2"\n'
+    )
+    result = format_file(text)
+    assert result.skipped_rules == []
+    # ruamel keeps an inline comment at its original column; only the spacing may move.
+    assert _squeeze(result.content).endswith(
+        '    labels:\n      b.x: "2"\n      # turn it on\n      traefik.enable: "true" # required\n'
+    )
+
+
+def test_formatter_converts_a_commented_environment_list_and_quotes_ambiguous_values():
+    text = (
+        "services:\n  a:\n    image: x:1\n    environment:\n"
+        "      - ALLOW_EMPTY_PASSWORD=yes  # dev only\n"
+        "      - PUID=1000\n"
+        "      - EMPTY=\n"
+        "      - NAME=it's plain\n"
+        "      - FROM_HOST\n"
+    )
+    result = format_file(text)
+    assert result.skipped_rules == []
+    assert (
+        '    environment:\n      ALLOW_EMPTY_PASSWORD: "yes" # dev only\n      PUID: "1000"\n'
+        '      EMPTY: ""\n      NAME: it\'s plain\n      FROM_HOST:\n'
+    ) in _squeeze(result.content)
+
+
+def test_formatter_writes_label_booleans_as_compose_sees_them():
+    text = "services:\n  a:\n    image: x:1\n    labels:\n      on: true\n      off: false\n"
+    result = format_file(text)
+    assert '      off: "false"\n      on: "true"\n' in result.content
+
+
+def test_formatter_leaves_long_syntax_ports_alone():
+    text = (
+        "services:\n  a:\n    image: x:1\n    ports:\n      - 8080:80\n"
+        "      - target: 80\n        published: 8081\n"
+    )
+    result = format_file(text)
+    assert '      - "8080:80"\n      - target: 80\n        published: 8081\n' in result.content
+
+
+def test_formatter_keeps_anchors_above_their_aliases():
+    text = (
+        "name: demo\nx-env: &env\n  A: '1'\n"
+        "networks:\n  n:\n    external: true\n"
+        "services:\n  a:\n    environment: *env\n    image: x:1\n"
+    )
+    result = format_file(text)
+    assert result.skipped_rules == []
+    assert result.content == (
+        "name: demo\nx-env: &env\n  A: '1'\n"
+        "services:\n  a:\n    image: x:1\n    environment: *env\n"
+        "networks:\n  n:\n    external: true\n"
+    )
+
+
+def test_formatter_leaves_a_service_with_a_merge_key_in_its_order():
+    text = (
+        "x-base: &base\n  restart: always\n"
+        "services:\n  a:\n    <<: *base\n    labels: {}\n    image: x:1\n"
+    )
+    result = format_file(text)
+    assert result.skipped_rules == []
+    assert "    <<: *base\n    labels: {}\n    image: x:1\n" in result.content
+
+
+def test_formatter_skips_a_commented_version_key():
+    text = 'version: "3.8"  # legacy\nservices:\n  a:\n    image: x:1\n'
+    result = format_file(text)
+    assert result.skipped_rules == ["N-004"]
+    assert "# legacy" in result.content
+
+
+def test_comments_ignores_hashes_inside_values():
+    text = (
+        'a: "x # not a comment"  # real one\n'
+        "b: it's # after an apostrophe\n"
+        "c: http://host/#fragment\n"
+        "# full line\n"
+    )
+    assert sorted(_comments(text)) == ["# after an apostrophe", "# full line", "# real one"]
 
 
 def test_formatter_is_idempotent():
@@ -245,6 +462,18 @@ def test_formatter_returns_none_for_non_compose_yaml():
 
 def test_formatter_returns_none_for_invalid_yaml():
     assert format_file("services: [unclosed\n") is None
+
+
+def test_formatter_is_idempotent_on_a_commented_file():
+    text = (
+        'version: "3"\nnetworks:\n  n:\n    external: true\n\nservices:\n  a:\n'
+        "    # why\n    restart: always\n    labels:\n      - b=1  # b\n      - a=2\n"
+        "    image: x:1\n"
+    )
+    first = format_file(text)
+    assert first.skipped_rules == []
+    assert _comments(first.content) == _comments(text)
+    assert format_file(first.content).changed is False
 
 
 # ---------------------------------------------------------------------------
@@ -335,6 +564,7 @@ async def test_generator_escalate_reasoner_disabled_returns_none():
 class FakeGit:
     def __init__(self, files=None, truncated=False):
         self.files = dict(files or {})
+        self.reads = []
         self.branches = []
         self.commits = []
         self.deletes = []
@@ -351,6 +581,7 @@ class FakeGit:
         return list(self.files.keys())
 
     async def read_file(self, repo, path, ref):
+        self.reads.append(path)
         return self.files[path]
 
     async def create_branch(self, repo, branch, base):
@@ -396,6 +627,52 @@ async def test_scan_includes_misnamed_compose_files():
     git = FakeGit(files={"nodes/pi/sonarr/docker-compose.yml": "services:\n  sonarr: {}\n"})
     grouped = await scan(git, "nathan/homelab", "main", path_glob="nodes/*/*/compose.yaml")
     assert grouped["pi"][0].misnamed is True
+
+
+async def test_scan_reads_only_the_requested_nodes_files():
+    git = FakeGit(
+        files={
+            "nodes/pi/plex/compose.yaml": "services:\n  plex:\n    image: x:1\n",
+            "nodes/waldorf/sonarr/compose.yaml": "services:\n  sonarr:\n    image: x:1\n",
+        }
+    )
+    grouped = await scan(git, "o/r", "main", path_glob="nodes/*/*/compose.yaml", node="pi")
+    assert list(grouped) == ["pi"]
+    assert git.reads == ["nodes/pi/plex/compose.yaml"]
+
+
+async def test_scan_reports_files_that_arent_compose():
+    git = FakeGit(
+        files={
+            "nodes/pi/mealie-mcp/compose.yaml": "TBD\n",
+            "nodes/pi/broken/compose.yaml": "services:\n  a: [unclosed\n",
+        }
+    )
+    grouped = await scan(git, "o/r", "main", path_glob="nodes/*/*/compose.yaml")
+    details = {r.path: [(f.rule_id, f.detail) for f in r.findings] for r in grouped["pi"]}
+    assert details == {
+        "nodes/pi/mealie-mcp/compose.yaml": [
+            ("R-008", "not a compose file: no top-level services: mapping")
+        ],
+        "nodes/pi/broken/compose.yaml": [
+            ("R-008", "not a compose file: doesn't parse as YAML (line 3)")
+        ],
+    }
+
+
+async def test_scan_checks_the_configured_shared_networks():
+    git = FakeGit(
+        files={
+            "nodes/pi/a/compose.yaml": (
+                "services:\n  a:\n    image: x:1\n    restart: always\n"
+                "networks:\n  traefik:\n    driver: bridge\n"
+            )
+        }
+    )
+    grouped = await scan(
+        git, "o/r", "main", path_glob="nodes/*/*/compose.yaml", shared_networks=("traefik",)
+    )
+    assert [f.rule_id for f in grouped["pi"][0].findings] == ["R-005"]
 
 
 async def test_scan_collects_tier2_findings():
@@ -565,6 +842,23 @@ async def test_run_sweep_scoped_to_single_node():
     result = await engine.run_sweep(node="pi")
     assert len(result["items"]) == 1
     assert result["items"][0]["node"] == "pi"
+    assert git.reads == ["nodes/pi/plex/compose.yaml"]
+
+
+class FailingReasoner:
+    def normalize_config(self, **kwargs):
+        raise AssertionError("a file that isn't compose must never reach DSPy")
+
+
+async def test_run_sweep_never_escalates_a_file_that_isnt_compose():
+    files = {"nodes/ollama/mealie-mcp/compose.yaml": "TBD\n"}
+    gen = NormalizationGenerator(FailingReasoner(), threshold=0.8)
+    engine, proposals, git = _engine(files, generator=gen)
+    result = await engine.run_sweep()
+    item = result["items"][0]
+    assert item["skipped"] == "no changes needed"
+    assert [f["rule_id"] for f in item["findings"]] == ["R-008"]
+    assert git.branches == []
 
 
 _PLEX_NORMALIZED = {
@@ -578,8 +872,8 @@ _PLEX_NORMALIZED = {
 async def test_run_sweep_escalates_to_dspy_when_formatter_skips_rules():
     files = {
         "nodes/pi/plex/compose.yaml": (
-            "services:\n  plex:\n    restart: unless-stopped\n"
-            "    # pin this before merging\n    image: x:1\n"
+            'version: "3"  # legacy\nservices:\n  plex:\n    restart: unless-stopped\n'
+            "    image: x:1\n"
         )
     }
     gen = NormalizationGenerator(FakeReasoner(_PLEX_NORMALIZED), threshold=0.8)
@@ -590,15 +884,15 @@ async def test_run_sweep_escalates_to_dspy_when_formatter_skips_rules():
 
 
 async def test_run_sweep_keeps_deterministic_partial_when_dspy_rejects():
-    # Two things wrong: an obsolete `version:` key (the formatter can always
-    # remove this safely) and a key order the formatter must skip because of
-    # the comment in the way. When DSPy also fails to finish the job, the
-    # version removal it already made should still be committed rather than
+    # Two things wrong: a key order the formatter can always fix, and an
+    # obsolete `version:` key it must leave because removing it would drop
+    # the comment on that line. When DSPy also fails to finish the job, the
+    # reorder it already made should still be committed rather than
     # discarding the whole file's progress.
     files = {
         "nodes/pi/plex/compose.yaml": (
-            'version: "3"\nservices:\n  plex:\n    restart: unless-stopped\n'
-            "    # pin this before merging\n    image: x:1\n"
+            'version: "3"  # legacy\nservices:\n  plex:\n    restart: unless-stopped\n'
+            "    image: x:1\n"
         )
     }
     gen = NormalizationGenerator(
@@ -607,8 +901,9 @@ async def test_run_sweep_keeps_deterministic_partial_when_dspy_rejects():
     engine, proposals, git = _engine(files, generator=gen)
     result = await engine.run_sweep()
     assert "pr_number" in result["items"][0]
-    assert "version" not in git.commits[-1]["content"]
-    assert "# pin this before merging" in git.commits[-1]["content"]
+    committed = git.commits[-1]["content"]
+    assert committed.index("image:") < committed.index("restart:")
+    assert 'version: "3"  # legacy' in committed
 
 
 async def test_run_sweep_escalation_runs_off_the_event_loop():
@@ -616,8 +911,8 @@ async def test_run_sweep_escalation_runs_off_the_event_loop():
 
     files = {
         "nodes/pi/plex/compose.yaml": (
-            "services:\n  plex:\n    restart: unless-stopped\n"
-            "    # pin this before merging\n    image: x:1\n"
+            'version: "3"  # legacy\nservices:\n  plex:\n    restart: unless-stopped\n'
+            "    image: x:1\n"
         )
     }
     reasoner = FakeReasoner(_PLEX_NORMALIZED)

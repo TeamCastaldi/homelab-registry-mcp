@@ -217,25 +217,35 @@ bundle a security remediation; they are always separate PRs with separate labels
 (`NORMALIZATION_LABEL` vs `PROPOSAL_LABEL`), sharing only the `Proposal` table
 (`finding_type=normalization`, `service_id=None`).
 - **Hybrid rewrite, deterministic first:** `formatter.py` applies every Tier 1 (formatting)
-  rule via a `ruamel.yaml` round-trip — no LLM call, fully repeatable. It's comment-safe by
-  construction: `ruamel` anchors "a comment above key X" to the *previous* key's trailing-comment
-  slot, not to X, so a blind key reorder can silently relocate a comment onto the wrong line.
-  The formatter checks whether a mapping/list carries any attached comment before reordering
-  it or converting its shape (labels/environment list→mapping); when one does, that specific
-  rule is left unapplied and recorded in `skipped_rules` rather than risking misplacement.
+  rule with no LLM call, fully repeatable, in two stages. A `ruamel.yaml` round-trip reshapes
+  values (drops `version:`, turns a labels/environment list into a mapping, quotes label values
+  and short-syntax ports); a comment on a list entry moves to the mapping entry that replaces
+  it. Keys are then reordered **as text**, not in the parsed mapping: `ruamel` anchors "a
+  comment above key X" to the *previous* key's trailing-comment slot, so a parsed reorder would
+  move comments onto the wrong line. In the text, each key moves as one block with the comment
+  lines directly above it, and blank lines stay where they were as separators
+  (`formatter.reorder_mapping`). Each reorder is checked on its own (equivalence plus
+  every comment kept, `_same_meaning`); one that fails is left undone and recorded in
+  `skipped_rules`. `name` and `x-` extension fields go first at the top level so an anchor
+  stays above its aliases, and a mapping with a `<<:` merge key keeps its order.
 - **DSPy `NormalizeConfigFile` is the escalation path**, not a co-equal half — it only ever
-  finishes the *specific* rules the formatter skipped (or the whole file, on the rare case the
-  formatter can't parse it at all), never rewrites a file DSPy hasn't seen partially normalized
-  already. Same no-fallback discipline as `GenerateRemediationPatch`: `PROPOSAL_CONFIDENCE_THRESHOLD`
-  gate, YAML validity, no rule-based patch if it fails.
+  finishes the *specific* rules the formatter skipped (in practice rare: a comment on a
+  `version:` line it would have to delete), or the whole file when the formatter can't reshape
+  it at all. A file that isn't a compose file (R-008, e.g. a `TBD` placeholder) is never
+  escalated. Same no-fallback discipline as `GenerateRemediationPatch`:
+  `PROPOSAL_CONFIDENCE_THRESHOLD` gate, YAML validity, no rule-based patch if it fails.
 - **The equivalence guarantee** is normalization's own gate, stricter than the security path's:
   `rules.is_equivalent(before, after)` parses both sides and projects labels/ports/environment
-  to their representation-independent form (a labels list and a labels mapping compare equal)
-  before comparing — a rewrite that changes anything Docker would see differently is never
-  committed, regardless of which path produced it.
-- Judgment-call findings (`:latest` tags, missing `restart:`, a `build:` key, an unflagged
-  `ports:` mapping, a hardcoded proxy network or secret, a `container_name` mismatch) are
-  **reported, never auto-fixed** — returned under `findings` and listed in the PR body.
+  to their representation-independent form (a labels list and a labels mapping compare equal;
+  values as the strings Compose makes of them, so `true` is `"true"`, never Python's `"True"`;
+  a long-syntax port compared as a mapping) before comparing — a rewrite that changes anything
+  Docker would see differently is never committed, regardless of which path produced it.
+- Judgment-call findings (`:latest` tags, missing `restart:`, a `build:` key, a `ports:`
+  mapping with no comment saying why, a shared network (`NORMALIZATION_SHARED_NETWORKS`)
+  declared without `external: true`, a hardcoded secret, a `container_name` mismatch, a file
+  that isn't compose) are **reported, never auto-fixed** — returned under `findings` and listed
+  in the PR body. Compose doesn't interpolate mapping keys, so a network written as
+  `${PROXY_NETWORK:-swarm-net}:` is invalid; an interpolated name belongs in `name:`.
 - N-100 (renaming a misnamed `docker-compose.yml`/`.yaml`/`compose.yml` to the only filename
   `ansible/roles/docker-stack-deploy` can see, `compose.yaml`) is gated by its own
   `NORMALIZATION_RENAME_MISNAMED` flag, off by default — it makes a stack **deploy-visible for
@@ -245,10 +255,13 @@ bundle a security remediation; they are always separate PRs with separate labels
   every stack a merged PR touches, so batching per node bounds that blast radius to one host per
   merge. `NORMALIZATION_MAX_FILES_PER_PR` caps a single node's diff size.
 - `GitProvider` gained `list_files()` (one recursive git-trees call, repo-wide) and
-  `delete_file()` (for N-100) — implemented on both Gitea and GitHub providers.
+  `delete_file()` (for N-100) — implemented on both Gitea and GitHub providers. The scan
+  filters by node before reading anything and reads files a few at a time in parallel.
 - Triggered by the `proposal_normalize` tool (`node`/`dry_run` params) or the
   `NORMALIZATION_SCHEDULE` scheduler job — same three-part gate as comment polling (opt-in flag,
-  write path configured, not read-only).
+  write path configured, not read-only). The schedule is a crontab (default Wednesday and
+  Saturday at 07:00 in the server's `TZ`) so a restart never pushes the next run back; a plain
+  seconds value is still accepted but restarts with the server.
 
 **Brownfield adoption (`docs/plans/updated-phases.md` Phase 7, `adoption/` + `proposal/adoption.py`
 + `tools/adoption.py`):** brings a live, pre-existing Docker service (discovered but never
@@ -514,12 +527,13 @@ closes that gap without ever exposing a value. Off by default (`INFISICAL_ENABLE
 | `PROPOSAL_COMMENT_POLL_INTERVAL_SECONDS` | `300` | Poll interval (seconds) when `PROPOSAL_COMMENT_POLL_ENABLED=true` |
 | `PROPOSAL_COMMENT_ALLOWED_USERS` | unset | Comma-separated GitHub/Gitea usernames trusted to trigger a revision. **Fails closed** — empty means every comment is ignored |
 | `NORMALIZATION_ENABLED` | `false` | Scans `nodes/*/*/compose.yaml` against `docs/specs/spec-compose-normal-form.md` and opens one PR per node with safe formatting fixes; requires `GIT_*` |
-| `NORMALIZATION_SCHEDULE` | `weekly` | `daily`, `weekly`, `monthly`, or a raw seconds value |
+| `NORMALIZATION_SCHEDULE` | `0 7 * * wed,sat` | A five-field crontab (day names, not numbers: APScheduler counts Monday as 0), or `daily`/`weekly`/`monthly` (07:00 daily, Saturdays, the 1st), in the server's time zone — set `TZ` (e.g. `America/New_York`), UTC otherwise. A plain seconds value is an interval from startup that every restart resets |
 | `NORMALIZATION_PATH_GLOB` | `nodes/*/*/compose.yaml` | Which files the canonical form applies to |
 | `NORMALIZATION_MAX_FILES_PER_PR` | `25` | Caps one node's PR diff size on a first run against a messy repo |
 | `NORMALIZATION_DRY_RUN` | `false` | Generate diffs and log them without opening PRs |
 | `NORMALIZATION_RENAME_MISNAMED` | `false` | Renames `docker-compose.yml`/`.yaml`/`compose.yml` → `compose.yaml` (N-100) — makes a previously deploy-invisible stack visible, so it's opt-in separately from the rest of normalization |
 | `NORMALIZATION_LABEL` | `normalization` | PR label — always distinct from `PROPOSAL_LABEL` so a normalization PR is never mistaken for a security one |
+| `NORMALIZATION_SHARED_NETWORKS` | `swarm-net,proxy-net` | Networks more than one stack joins; R-005 reports a stack that declares one without `external: true`, and compose generation is told to declare them that way |
 | `SECRETS_ENABLED` | `true` | Enables `secrets_*` MCP tools (Phase C git-crypt integration) |
 | `SECRETS_REPO_PATH` | unset | Absolute path to the cloned private homelab repo on this node. `pydantic-settings` reads `.env` as literal strings — `$HOME`/`~` are not expanded, so use a concrete absolute path (e.g. `/opt/homelab` on the Pi, `/Users/you/homelab` on macOS) |
 | `SECRETS_KEY_PATH` | unset | Absolute path to the exported git-crypt key file (priority over env var); same no-expansion caveat as `SECRETS_REPO_PATH` |
@@ -680,6 +694,17 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
 
 ## Current Status
 
+- **Normalization made usable on a real, commented repo**: checked against the operator's 46
+  compose files, 36 used to escalate to DSPy on every sweep (the formatter refused to reorder
+  any block with a comment), so manual runs timed out and the weekly interval job, reset by
+  every restart, never ran. Now keys are reordered as text with their comments (0
+  escalations on that repo; `docker compose config` output identical before and after for
+  every file it could load), the scan filters by node first and reads in parallel, a file
+  that isn't compose is reported (R-008) instead of escalated, and the schedule is a crontab
+  (Wednesday and Saturday 07:00). Also fixed: label booleans written as `'True'`, long-syntax
+  ports turned into strings, `yes`-style values left unquoted. R-005 now checks shared
+  networks are `external: true` (the old key-interpolation form is invalid Compose), and R-004
+  accepts any comment explaining a published port.
 - **ADR-019 accepted and implemented — conversational deploy Phase 2, compose
   generation**: `service_deploy/` (`ComposeGenerator` — layered conventions, the
   no-fallback gate chain, canonical formatter pass, Tier 2 findings reported), the
@@ -687,7 +712,9 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
   the read-only `service-deploy-generate-compose` MCP tool (shipped ahead of the
   plan's Phase 5 so generation quality can be judged on real repos early). Also
   corrected the proxy-network default to `${PROXY_NETWORK:-swarm-net}` (R-005 text
-  and spec row; detection unchanged). Not yet validated against real repos.
+  and spec row; detection unchanged). Since amended: that key-interpolated form is
+  invalid Compose, so R-005 and generation now require shared networks to be declared
+  `external: true` instead (see ADR-019's amendment note). Not yet validated against real repos.
 - **ADR-018 accepted and implemented — conversational deploy Phase 1, repo intake**:
   `intake/` (`fetch.py` — https-only URL allowlist, shallow clone via subprocess
   `git`, symlink-safe file reads; `parse.py` — deterministic Dockerfile/compose

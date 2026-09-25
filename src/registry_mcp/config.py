@@ -150,8 +150,14 @@ class Settings(BaseSettings):
     # any safe formatting fixes. Reuses GIT_*; always a separate PR/label
     # from security proposals, never bundled with one.
     normalization_enabled: bool = Field(default=False)
-    normalization_schedule: str = Field(default="weekly")
+    # A five-field crontab (use day names: wed,sat), `daily`/`weekly`/
+    # `monthly`, or plain seconds. Crontabs and presets run at fixed times in
+    # the server's time zone (set TZ), so a restart doesn't delay them.
+    normalization_schedule: str = Field(default="0 7 * * wed,sat")
     normalization_path_glob: str = Field(default="nodes/*/*/compose.yaml")
+    # Networks more than one stack joins; R-005 reports a stack that declares
+    # one without `external: true`. Also named in compose generation's rules.
+    normalization_shared_networks: str = Field(default="swarm-net,proxy-net")
     # Caps the diff size of a single node's PR on a first run against a messy repo.
     normalization_max_files_per_pr: int = Field(default=25)
     normalization_dry_run: bool = Field(default=False)
