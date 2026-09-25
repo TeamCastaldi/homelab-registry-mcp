@@ -8,6 +8,11 @@
           "type": "generic",
           "path": "README.md",
           "search-by-regex": "VERSION=v[0-9]+\\.[0-9]+\\.[0-9]+"
+        },
+        {
+          "type": "toml",
+          "path": "uv.lock",
+          "jsonpath": "$.package[?(@.name.value == 'homelab-registry-mcp')].version"
         }
       ]
     }

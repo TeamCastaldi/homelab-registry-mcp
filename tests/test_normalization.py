@@ -3,7 +3,9 @@ and engine. Git and notification providers are faked so nothing touches the
 network — same duck-typed style as ``test_proposal_engine.py``.
 """
 
+import asyncio
 import re
+import threading
 from datetime import datetime
 
 import pytest
@@ -439,6 +441,47 @@ def test_formatter_skips_a_commented_version_key():
     assert "# legacy" in result.content
 
 
+_THREAD_FILES = [
+    (
+        "networks:\n  n:\n    external: true\n\nservices:\n  a:\n    restart: always\n"
+        "    # why\n    image: x:1\n    labels:\n      - b=1  # b\n      - a=2\n"
+    ),
+    (
+        'version: "3"\nservices:\n  b:\n    environment:\n      - A=yes\n      - B=1\n'
+        "    ports:\n      - 8080:80\n    image: y:2\n"
+    ),
+    "name: s\nx-e: &e\n  A: '1'\nservices:\n  c:\n    environment: *e\n    image: z:3\n",
+]
+
+
+def test_formatter_is_safe_to_run_in_several_threads_at_once():
+    # Each file is formatted in a worker thread, and sweeps can overlap. A
+    # ruamel YAML object shared across threads corrupted its own parser and
+    # emitter state, failing most files with errors like "expected NodeEvent,
+    # but got DocumentStartEvent".
+    expected = [format_file(text).content for text in _THREAD_FILES]
+    mismatches, errors = [], []
+
+    def work():
+        try:
+            for _ in range(20):
+                for text, want in zip(_THREAD_FILES, expected, strict=True):
+                    result = format_file(text)
+                    if result is None or result.content != want:
+                        mismatches.append(text)
+        except Exception as exc:  # a failure here must fail the test, not vanish
+            errors.append(exc)
+
+    threads = [threading.Thread(target=work) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert errors == []
+    assert mismatches == []
+
+
 def test_comments_ignores_hashes_inside_values():
     text = (
         'a: "x # not a comment"  # real one\n'
@@ -823,6 +866,43 @@ async def test_run_sweep_caps_files_per_pr():
     engine, proposals, git = _engine(files, settings=settings)
     await engine.run_sweep()
     assert len(git.commits) == 2
+
+
+class BlockingGit(FakeGit):
+    """A FakeGit whose listing waits until the test lets it go, so a sweep can
+    be held open."""
+
+    def __init__(self, files):
+        super().__init__(files)
+        self.listing = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def list_files(self, repo, ref):
+        self.listing.set()
+        await self.release.wait()
+        return await super().list_files(repo, ref)
+
+
+async def test_a_second_sweep_is_refused_while_one_is_running():
+    git = BlockingGit({"nodes/pi/plex/compose.yaml": _compose("plex")})
+    engine, proposals, _ = _engine({}, git=git)
+
+    first = asyncio.create_task(engine.run_sweep())
+    await git.listing.wait()
+    try:
+        # Without the single-sweep rule this would wait on the held listing.
+        second = await asyncio.wait_for(engine.run_sweep(dry_run=True), timeout=5)
+    finally:
+        git.release.set()
+    first_result = await first
+
+    assert second == {
+        "error": "a normalization sweep is already running; try again when it finishes"
+    }
+    assert "pr_number" in first_result["items"][0]
+    assert len(git.opened) == 1
+    # Once it has finished, the next sweep runs.
+    assert "items" in await engine.run_sweep(dry_run=True)
 
 
 async def test_run_sweep_not_configured_returns_error():

@@ -18,6 +18,15 @@ uv run ruff format .                    # format (line-length: 100)
 
 CI runs `ruff check`, `ruff format --check`, `pytest -q`, and `ansible-lint` (against `ansible/`) on every push.
 
+Releases are cut by release-please (`.github/workflows/release-please.yml`). Its release PR bumps
+`pyproject.toml` and, through a `toml` entry in `release-please-config.json`'s `extra-files`, the
+project's own `version` in `uv.lock`, so `uv sync` after pulling a release leaves the tree clean.
+That entry's jsonpath filters on `@.name.value`, not `@.name`: release-please's TOML updater
+evaluates the jsonpath against its position-tagged parse, where every value is a
+`{start, end, value}` object, and a filter on `@.name` matches nothing and edits nothing. CI
+installs with `uv sync --frozen`, which doesn't check the lock, so a stale lock shows up as a
+dirty `uv.lock` after `uv sync`, not as a CI failure.
+
 ## Session Config
 
 | Value | Setting |
@@ -261,7 +270,11 @@ bundle a security remediation; they are always separate PRs with separate labels
   `NORMALIZATION_SCHEDULE` scheduler job — same three-part gate as comment polling (opt-in flag,
   write path configured, not read-only). The schedule is a crontab (default Wednesday and
   Saturday at 07:00 in the server's `TZ`) so a restart never pushes the next run back; a plain
-  seconds value is still accepted but restarts with the server.
+  seconds value is still accepted but restarts with the server. One sweep runs at a time: a call
+  made while one is running gets an error at once, since two sweeps could both open a PR for the
+  same node. Files are formatted in worker threads, so the formatter keeps one ruamel `YAML`
+  object per thread (`formatter._yaml()`): ruamel keeps its parser and emitter state on that
+  object, and sharing one across threads failed nearly every file.
 
 **Brownfield adoption (`docs/plans/updated-phases.md` Phase 7, `adoption/` + `proposal/adoption.py`
 + `tools/adoption.py`):** brings a live, pre-existing Docker service (discovered but never
@@ -661,7 +674,22 @@ docker compose exec homelab-registry-mcp registry-mcp-seed /path/to/services.yam
 ```
 
 No source checkout needed on the target host — the image is pulled from
-GHCR. Pin the release by setting `REGISTRY_MCP_VERSION=v0.6.1` in `.env`.
+GHCR. Pin the release by setting `REGISTRY_MCP_VERSION` in `.env` to a version
+without the git tag's `v`: a `v1.10.1` release is published as `1.10.1`, `1.10`,
+and `latest` (`publish.yml`'s metadata tags), so `v1.10.1` fails to pull.
+
+**Redeploy on release (the maintainer's own deployment):** `publish.yml`'s
+`redeploy` job calls a Dockhand git stack's webhook
+(`POST /api/git/stacks/<id>/webhook`, HMAC-SHA256 signed the way GitHub signs
+its webhooks) once the tag's image is on GHCR. That's about five minutes after
+the release PR merges; a redeploy at the merge would pull the previous image.
+Opt-in via the `DOCKHAND_REDEPLOY_URL`/`DOCKHAND_REDEPLOY_SECRET` Actions
+secrets. With both unset the job skips itself, so forks are unaffected. The
+stack needs Dockhand's **Re-pull images** and **Force redeployment** on, since a
+registry release changes nothing in the homelab repo the stack syncs from, and
+its image tag must move (`latest`). Running the workflow by hand from a branch
+skips the build and only redeploys. Setup and troubleshooting:
+`docs/SOPs/SOP-006-Redeploy-On-Release.md`.
 
 Pre-reqs: Traefik on external `traefik` Docker network, DNS for `registry-mcp.<your-domain>`. Docker socket is mounted read-only.
 

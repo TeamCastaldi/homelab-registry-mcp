@@ -91,6 +91,7 @@ class NormalizationEngine:
         self._generator = generator
         self._notifier = notifier
         self._git = git
+        self._sweep_lock = asyncio.Lock()
 
     @property
     def configured(self) -> bool:
@@ -322,10 +323,20 @@ class NormalizationEngine:
         ``node`` restricts the sweep to a single node; ``dry_run`` overrides
         ``NORMALIZATION_DRY_RUN`` for this call only. Returns
         ``{"items": [...per-node result...], "findings": [...], "scanned": N}``.
+
+        One sweep runs at a time. A call made while one is running gets an
+        error at once rather than waiting: two sweeps could otherwise both find
+        no open proposal for a node and both open a PR for it.
         """
         if not self.configured:
             return {"error": "write path not configured (set GIT_BASE_URL, GIT_TOKEN, GIT_REPO)"}
+        if self._sweep_lock.locked():
+            _log.info("normalization_sweep_busy", actor=actor)
+            return {"error": "a normalization sweep is already running; try again when it finishes"}
+        async with self._sweep_lock:
+            return await self._sweep(node=node, dry_run=dry_run, actor=actor)
 
+    async def _sweep(self, *, node: str | None, dry_run: bool | None, actor: str) -> dict[str, Any]:
         effective_dry_run = dry_run if dry_run is not None else self._settings.normalization_dry_run
         repo = self._settings.git_repo
         ref = self._settings.git_base_branch
