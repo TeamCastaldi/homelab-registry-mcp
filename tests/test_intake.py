@@ -238,8 +238,16 @@ class TestCloneIsolation:
     async def test_inherited_config_cannot_redirect_an_approved_url(
         self, host_repo, isolated_home, monkeypatch, rewrite
     ):
+        """intake Q1-Q3: `pytest.raises(IntakeError)` alone proves nothing about
+        *which* URL the clone actually tried — an isolation regression that let
+        the redirect through would still raise IntakeError, just for a
+        different reason (this host repo has no matching remote-tracking data,
+        or the file:// scheme itself might one day be permitted). Asserting the
+        error names `_APPROVED_URL`'s own unreachable host (`.invalid` never
+        resolves) proves the clone reached the approved URL, not the rewrite
+        target."""
         rewrite(isolated_home, monkeypatch, f"file://{host_repo}")
-        with pytest.raises(IntakeError):
+        with pytest.raises(IntakeError, match="intake.invalid"):
             await fetch_repo(_APPROVED_URL, timeout_seconds=30, max_repo_mb=10)
 
     @pytest.mark.parametrize("rewrite", [_rewrite_via_global_config, _rewrite_via_env])
@@ -264,6 +272,33 @@ class TestCloneIsolation:
         assert env["GIT_CONFIG_GLOBAL"] == os.devnull
         # A trust anchor still reaches git: a homelab Gitea behind a private CA.
         assert env["GIT_SSL_CAINFO"] == "/etc/ssl/private-ca.pem"
+
+    async def test_clone_passes_the_isolated_env_to_the_subprocess(self, monkeypatch):
+        """intake Q1: dropping `env=_git_env()` from the subprocess call makes
+        every isolation guarantee `_git_env()` provides moot, but end-to-end
+        that failure mode is hard to distinguish from others — git's own
+        protocol allowlist (a `-c` flag, not an env var) still refuses the
+        redirect target regardless, so the earlier redirect test's error
+        message doesn't reliably tell the two apart. Assert the actual
+        subprocess call directly instead."""
+        calls: list[dict | None] = []
+
+        class FakeProcess:
+            returncode = 0
+
+            async def communicate(self):
+                return b"", b""
+
+        async def fake_create_subprocess_exec(*args, **kwargs):
+            calls.append(kwargs.get("env"))
+            return FakeProcess()
+
+        monkeypatch.setattr(
+            fetch_mod.asyncio, "create_subprocess_exec", fake_create_subprocess_exec
+        )
+        await fetch_mod._clone("https://example.test/repo", Path("/tmp/unused"), timeout_seconds=5)
+
+        assert calls == [fetch_mod._git_env()]
 
     async def test_git_refuses_every_transport_but_https(self, host_repo, tmp_path):
         # Below check_repo_url: if a URL is rewritten anyway, git itself says no.

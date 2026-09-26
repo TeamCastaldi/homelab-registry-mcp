@@ -13,11 +13,12 @@ import dataclasses
 from datetime import timedelta
 
 from apscheduler.triggers.cron import CronTrigger
-from sqlmodel import Session
+from sqlmodel import Session, select
 from starlette.testclient import TestClient
 
 from conftest import IsolatedSettings
-from registry_mcp.models import DiscoveryStatus, SourceType
+from registry_mcp.adoption import AdoptionDraftStore
+from registry_mcp.models import AdoptionDraft, AdoptionDraftStatus, DiscoveryStatus, SourceType
 from registry_mcp.models.event import ChangeEvent
 from registry_mcp.models.service import utcnow
 from registry_mcp.registry import RegistryStore
@@ -114,6 +115,36 @@ def test_build_app_purges_old_events_at_startup(tmp_path):
 
     remaining = {e.new for e in seed.list_change_events()}
     assert remaining == {"new"}
+
+
+def test_build_app_purges_expired_adoption_drafts_at_startup(tmp_path):
+    """G3: pending adoption drafts hold captured live secret values until the
+    operator answers — the startup purge that expires anything past its TTL
+    (`AdoptionDraftStore.purge_expired`, same idiom as the deletion/inventory
+    gates) was never actually exercised through `build_app` by any test."""
+    db_path = str(tmp_path / "r.db")
+    seed = RegistryStore(db_path)
+    adoption_store = AdoptionDraftStore(seed.engine)
+    now = utcnow()
+    with Session(seed.engine) as session:
+        session.add(
+            AdoptionDraft(
+                service_id="svc-1",
+                host="workload-01",
+                ssh_user="root",
+                container_name="plex",
+                compose_path="/opt/plex/docker-compose.yml",
+                target_file_path="nodes/workload-01/plex/compose.yaml",
+                expires_at=now - timedelta(minutes=5),
+            )
+        )
+        session.commit()
+
+    build_app(_settings(registry_db_path=db_path, traefik_api_url=None))
+
+    with Session(adoption_store.engine) as session:
+        draft = session.exec(select(AdoptionDraft)).one()
+    assert draft.status == AdoptionDraftStatus.expired
 
 
 def test_nothing_to_schedule_returns_none():

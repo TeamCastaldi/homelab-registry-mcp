@@ -201,6 +201,108 @@ def test_normalize_config_end_to_end_with_dummy_lm():
     assert "image: x:1" in result["normalized_file"]
 
 
+# --- GenerateRemediationPatch: raw passthrough, caller owns the gate -------
+# reasoning Q1/Q2: this output mapping, and the two below, never ran anywhere
+# else in the suite — every proposal/adoption test fakes the Reasoner one
+# layer up (FakeReasoner.generate_remediation_patch(**kwargs) returning a
+# canned dict directly), so a field swapped or dropped on the way from the
+# DSPy prediction object to the dict `Reasoner` returns went unnoticed.
+
+
+def test_generate_remediation_patch_returns_raw_outputs():
+    reasoner = _enabled_reasoner()
+    reasoner._patch = lambda **kw: SimpleNamespace(
+        patch="services:\n  plex:\n    image: plex\n",
+        commit_message="fix: attach authentik-auth middleware",
+        pr_title="Secure plex",
+        pr_body="Adds authentik-auth@file to the router.",
+        confidence=0.91,
+        reasoning="router had no auth middleware",
+    )
+
+    result = reasoner.generate_remediation_patch(
+        service={"name": "plex"},
+        finding_type="auth_mode_conflict",
+        current_file="services:\n  plex: {}\n",
+        file_path="nodes/pi/plex/compose.yaml",
+        apply_mode="manual",
+    )
+
+    assert result["patch"] == "services:\n  plex:\n    image: plex\n"
+    assert result["commit_message"] == "fix: attach authentik-auth middleware"
+    assert result["pr_title"] == "Secure plex"
+    assert result["pr_body"] == "Adds authentik-auth@file to the router."
+    assert result["confidence"] == 0.91
+    assert result["reasoning"] == "router had no auth middleware"
+
+
+def test_generate_remediation_patch_survives_module_error():
+    reasoner = _enabled_reasoner()
+
+    def _boom(**kw):
+        raise RuntimeError("LM exploded")
+
+    reasoner._patch = _boom
+    result = reasoner.generate_remediation_patch(
+        service={"name": "plex"},
+        finding_type="auth_mode_conflict",
+        current_file="",
+        file_path="nodes/pi/plex/compose.yaml",
+        apply_mode="manual",
+    )
+    assert result is None
+
+
+# --- ApplyReviewFeedback: raw passthrough, caller owns the gate ------------
+
+
+def test_apply_review_feedback_returns_raw_outputs():
+    reasoner = _enabled_reasoner()
+    reasoner._revise = lambda **kw: SimpleNamespace(
+        revised_file="services:\n  plex:\n    restart: unless-stopped\n",
+        commit_message="fix: apply review feedback",
+        confidence=0.88,
+        reasoning="reviewer asked for a restart policy",
+    )
+
+    result = reasoner.apply_review_feedback(
+        file_path="nodes/pi/plex/compose.yaml",
+        current_file="services:\n  plex: {}\n",
+        feedback="please add a restart policy",
+    )
+
+    assert result["revised_file"] == "services:\n  plex:\n    restart: unless-stopped\n"
+    assert result["commit_message"] == "fix: apply review feedback"
+    assert result["confidence"] == 0.88
+    assert result["reasoning"] == "reviewer asked for a restart policy"
+
+
+# --- DetectHardcodedSecrets: raw passthrough, caller owns the gate ---------
+
+
+def test_detect_hardcoded_secrets_returns_raw_outputs():
+    reasoner = _enabled_reasoner()
+    reasoner._detect_secrets = lambda **kw: SimpleNamespace(
+        sanitized_compose="services:\n  app:\n    environment:\n      TOKEN: ${TOKEN}\n",
+        detected_secret_keys=["TOKEN", "DB_PASSWORD"],
+        confidence=0.77,
+        reasoning="TOKEN and DB_PASSWORD looked like live values",
+    )
+
+    result = reasoner.detect_hardcoded_secrets(
+        compose_content="services:\n  app:\n    environment:\n      TOKEN: supersecret\n",
+        container_env={"TOKEN": None},
+        container_labels={},
+    )
+
+    assert result["sanitized_compose"] == (
+        "services:\n  app:\n    environment:\n      TOKEN: ${TOKEN}\n"
+    )
+    assert result["detected_secret_keys"] == ["TOKEN", "DB_PASSWORD"]
+    assert result["confidence"] == 0.77
+    assert result["reasoning"] == "TOKEN and DB_PASSWORD looked like live values"
+
+
 # --- MCP tool: summarize events is gated on the reasoning layer ------------
 
 
