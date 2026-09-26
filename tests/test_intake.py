@@ -600,7 +600,9 @@ class TestServiceIntakeRepoTool:
         assert reasoner.calls == []  # never called when disabled
 
     async def test_inference_above_threshold_is_included(self, monkeypatch):
-        snapshot = RepoSnapshot(repo_url="x", dockerfile="FROM alpine\n")
+        snapshot = RepoSnapshot(
+            repo_url="x", dockerfile="FROM alpine\n", readme="# Paperless-ngx\nNeeds postgres."
+        )
         inferred = {
             "service_name": "paperless-ngx",
             "summary": "Document management",
@@ -610,7 +612,7 @@ class TestServiceIntakeRepoTool:
             "confidence": 0.9,
             "reasoning": "README mentions postgres",
         }
-        tool, _ = _register(
+        tool, reasoner = _register(
             monkeypatch,
             snapshot,
             settings=_intake_settings(service_deploy_confidence_threshold=0.8),
@@ -621,6 +623,14 @@ class TestServiceIntakeRepoTool:
 
         assert result["inference"] == inferred
         assert "inference_rejection_reason" not in result
+        # Q5/Q6: nothing asserted on the reasoner's actual call kwargs anywhere
+        # else in this file — a `run_intake()` that passed `detected={}` or
+        # `readme=""` unconditionally (deterministic facts silently dropped
+        # from the one call that must never contradict them) would still pass
+        # every other test here.
+        assert reasoner.calls[0]["detected"] == result["requirements"]
+        assert reasoner.calls[0]["detected"]["base_image"] == "alpine"
+        assert reasoner.calls[0]["readme"] == "# Paperless-ngx\nNeeds postgres."
 
     async def test_inference_below_threshold_is_discarded(self, monkeypatch):
         snapshot = RepoSnapshot(repo_url="x", dockerfile="FROM alpine\n")

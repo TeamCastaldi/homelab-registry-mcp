@@ -396,6 +396,27 @@ async def test_tool_disabled_returns_error(tmp_path):
     assert "error" in result
 
 
+async def test_tool_disabled_returns_error_even_with_full_config(
+    infisical_settings_kwargs, monkeypatch
+):
+    """I1: the bare-defaults case above never sets `INFISICAL_BASE_URL`/
+    `_CLIENT_ID`/etc either, so it can't tell "the enabled check said no" apart
+    from "the config-completeness check said no" — a client with the
+    `INFISICAL_ENABLED` check deleted entirely would still return the same
+    error there and pass. Flipping only `infisical_enabled=False` on an
+    otherwise fully-configured settings object, and proving no HTTP request is
+    ever made, pins the enabled check specifically."""
+    captured: list[httpx.Request] = []
+    _patch_client(monkeypatch, _transport(LOGIN_OK, SECRETS_MASKED, captured=captured))
+    settings_kwargs = {**infisical_settings_kwargs, "infisical_enabled": False}
+
+    server = build_server(IsolatedSettings(**settings_kwargs))
+    result = await call(server, "infisical_status", {})
+
+    assert "error" in result
+    assert captured == []
+
+
 async def test_tool_enabled_but_unconfigured_returns_error(tmp_path):
     server = build_server(
         IsolatedSettings(registry_db_path=str(tmp_path / "r.db"), infisical_enabled=True)

@@ -27,6 +27,7 @@ from registry_mcp.models import (
     DetectedSecret,
     HardwareNode,
     NodeRole,
+    ProposalStatus,
     SourceType,
 )
 from registry_mcp.proposal import ProposalStore
@@ -682,7 +683,12 @@ class TestProposalAdoptService:
             result = await tools["proposal_adopt_service"](service.id)
 
         assert "rejected" in result
-        assert len(proposals.list_all()) == 1
+        # P5: counting proposals alone doesn't prove the persisted status is
+        # actually `rejected` rather than `open` — a rejected sanitization
+        # saved as `open` would still pass a bare "one proposal exists" check.
+        recorded = proposals.list_all()
+        assert len(recorded) == 1
+        assert recorded[0].status == ProposalStatus.rejected
         assert any("manual review" in s["title"] for s in notifier.sent)
 
 
@@ -806,6 +812,11 @@ class TestProposalAdoptServiceFinalize:
         written = write_text.call_args[0][0]
         assert written != "TOKEN=livevalue\n"
         assert written.startswith("TOKEN=")
+        # P3: neither assertion above catches a rotated value of "" — the
+        # written line would still differ from the live one and still start
+        # with "TOKEN=".
+        assert written.strip() != "TOKEN="
+        assert len(written.strip()) > len("TOKEN=")
 
     async def test_finalize_skips_gitcrypt_when_no_secrets_detected(self, store, hardware_store):
         git = FakeGit()
@@ -828,7 +839,10 @@ class TestProposalAdoptServiceFinalize:
         tools, _, _ = _setup(store, hardware_store)
         service, drafted = await self._drafted(store, hardware_store, tools)
         result = await tools["proposal_adopt_service_finalize"](drafted["draft_id"], "bogus")
-        assert "error" in result
+        # P1: "error" in result alone is satisfied by any unrelated failure —
+        # dropping this validation outright would still hit a KeyError or
+        # similar downstream and report *some* error.
+        assert result["error"] == "secret_strategy must be one of ['keep', 'rotate']"
 
     async def test_finalize_invalid_secret_strategy_ignored_when_no_secrets(
         self, store, hardware_store
@@ -856,7 +870,11 @@ class TestProposalAdoptServiceFinalize:
         service, drafted = await self._drafted(store, hardware_store, tools)
         adoption_store.set_status(drafted["draft_id"], AdoptionDraftStatus.finalized)
         result = await tools["proposal_adopt_service_finalize"](drafted["draft_id"])
-        assert "error" in result
+        # P2: "error" in result alone doesn't distinguish this from any other
+        # failure, and doesn't prove the second finalize attempt left the
+        # persisted status alone rather than re-finalizing or corrupting it.
+        assert "already be finalized, cancelled, or expired" in result["error"]
+        assert adoption_store.get(drafted["draft_id"]).status == AdoptionDraftStatus.finalized
 
 
 class TestProposalAdoptServiceCancelAndGet:
@@ -880,6 +898,10 @@ class TestProposalAdoptServiceCancelAndGet:
         )
         result = tools["proposal_adopt_service_cancel"](draft.id)
         assert result["status"] == "cancelled"
+        # P4: the returned dict alone doesn't prove the status was persisted —
+        # a cancel that computed the response but never called set_status
+        # would pass the line above and still leave the draft pending.
+        assert adoption_store2.get(draft.id).status == AdoptionDraftStatus.cancelled
 
     async def test_cancel_unknown_draft_returns_error(self, store, hardware_store):
         tools, _, _ = _setup(store, hardware_store)

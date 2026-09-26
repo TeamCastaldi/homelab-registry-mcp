@@ -63,6 +63,25 @@ async def test_event_tools_query_changes(server):
     assert all(e["service_id"] == sid for e in for_service["result"])
 
 
+async def test_event_tools_get_for_service_excludes_other_services(server):
+    """EV3: with only one service ever created, `all(e["service_id"] == sid ...)`
+    above is true even if the tool ignores `service_id` entirely and returns every
+    change event in the database — there's nothing else in there to leak. Seeding
+    a second service's events is the only way to prove the filter actually excludes
+    them, not just that the one service present happens to match."""
+    plex = await call(server, "registry_add_service", {"name": "plex", "display_name": "Plex"})
+    gitea = await call(server, "registry_add_service", {"name": "gitea", "display_name": "Gitea"})
+    await call(server, "registry_update_service", {"id": plex["id"], "notes": "plex notes"})
+    await call(server, "registry_update_service", {"id": gitea["id"], "notes": "gitea notes"})
+
+    for_plex = await call(server, "events_get_for_service", {"service_id": plex["id"]})
+
+    assert for_plex["result"]
+    assert all(e["service_id"] == plex["id"] for e in for_plex["result"])
+    assert not any(e["service_id"] == gitea["id"] for e in for_plex["result"])
+    assert not any(e["new"] == "gitea notes" for e in for_plex["result"])
+
+
 async def test_event_tools_discoveries(server, store):
     empty = await call(server, "events_list_discoveries", {})
     assert empty["result"] == []

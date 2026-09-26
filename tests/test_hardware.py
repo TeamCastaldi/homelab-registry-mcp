@@ -224,16 +224,22 @@ def test_capacity_summary_aggregates_pools(hardware_store):
     assert len(summary["pools"]) == 2
 
 
-def test_service_get_full_context_includes_hardware(store, hardware_store, server):
+async def test_service_get_full_context_includes_hardware(store, hardware_store, server):
+    """L1: the two assertions below the fixture setup only ever exercised the
+    store layer directly — `service_get_full_context` itself, including the
+    `hardware_store and service.hardware_node_id` branch that fills the
+    `hardware_node` key, was never actually called. A regression there (a typo
+    in the attribute name, the branch dropped entirely, `hardware_store` never
+    wired into the tool) would pass this file and every other hardware test."""
     svc = store.create_service(Service(name="myapp", display_name="My App"))
     node = hardware_store.create_node(_node())
     hardware_store.link_service(svc.id, node.id)
 
-    # Verify via store directly (server wiring is validated by build_server in conftest)
-    updated_svc = store.get_service(svc.id)
-    assert updated_svc.hardware_node_id == node.id
-    fetched_node = hardware_store.get_node(updated_svc.hardware_node_id)
-    assert fetched_node.hostname == "workload-01"
+    context = tool_payload(await server.call_tool("service_get_full_context", {"id": svc.id}))
+
+    assert context["hardware_node"] is not None
+    assert context["hardware_node"]["hostname"] == "workload-01"
+    assert context["hardware_node"]["id"] == node.id
 
 
 def test_discovery_status_counts_by_status(hardware_store):
