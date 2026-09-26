@@ -10,13 +10,17 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+from datetime import timedelta
 
 from apscheduler.triggers.cron import CronTrigger
+from sqlmodel import Session
 from starlette.testclient import TestClient
 
 from conftest import IsolatedSettings
 from registry_mcp.models import DiscoveryStatus, SourceType
+from registry_mcp.models.event import ChangeEvent
 from registry_mcp.models.service import utcnow
+from registry_mcp.registry import RegistryStore
 from registry_mcp.server import _run_stdio, build_app, build_runtime_scheduler, http_app
 
 
@@ -75,6 +79,41 @@ def test_normalization_sweep_runs_at_fixed_times_so_a_restart_doesnt_delay_it():
         "cron[month='*', day='*', day_of_week='wed,sat', hour='7', minute='0']"
     )
     assert job.misfire_grace_time == 3600
+
+
+def test_build_app_purges_old_events_at_startup(tmp_path):
+    """SR2: `build_app` must run `purge_old_events` itself — a discovery
+    engine that stopped calling it, or called it with the wrong setting,
+    would otherwise never be caught, since every other test here uses a
+    fresh `:memory:` database with nothing to purge in the first place."""
+    db_path = str(tmp_path / "r.db")
+    seed = RegistryStore(db_path)
+    now = utcnow()
+    with Session(seed.engine) as session:
+        session.add(
+            ChangeEvent(
+                field="notes",
+                old=None,
+                new="old",
+                actor="manual",
+                created_at=now - timedelta(days=10),
+            )
+        )
+        session.add(
+            ChangeEvent(
+                field="notes",
+                old=None,
+                new="new",
+                actor="manual",
+                created_at=now - timedelta(hours=1),
+            )
+        )
+        session.commit()
+
+    build_app(_settings(registry_db_path=db_path, event_retention_days=7, traefik_api_url=None))
+
+    remaining = {e.new for e in seed.list_change_events()}
+    assert remaining == {"new"}
 
 
 def test_nothing_to_schedule_returns_none():
