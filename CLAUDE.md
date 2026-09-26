@@ -14,6 +14,7 @@ uv run pytest                           # run all tests
 uv run pytest tests/test_linking.py -v  # run a specific test file
 uv run ruff check .                     # lint
 uv run ruff format .                    # format (line-length: 100)
+uv run mutmut run                       # mutation testing (src/registry_mcp; see tests/README.md)
 ```
 
 CI runs `ruff check`, `ruff format --check`, `pytest -q`, and `ansible-lint` (against `ansible/`) on every push.

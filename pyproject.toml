@@ -36,6 +36,7 @@ dev = [
     "ansible>=14.1.0",
     "molecule>=26.8.0",
     "molecule-plugins[docker]>=26.7.15",
+    "mutmut>=3.8.0",
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "ruff>=0.6",
@@ -68,3 +69,6 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 pythonpath = ["src"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.mutmut]
+source_paths = ["src/registry_mcp"]
