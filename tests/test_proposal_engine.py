@@ -30,8 +30,10 @@ class FakeReasoner:
     def __init__(self, result=VALID_PATCH, revision_result=VALID_REVISION):
         self.result = result
         self.revision_result = revision_result
+        self.patch_calls: list[dict] = []
 
     def generate_remediation_patch(self, **kwargs):
+        self.patch_calls.append(kwargs)
         return self.result
 
     def apply_review_feedback(self, **kwargs):
@@ -643,12 +645,15 @@ async def test_poll_pr_comments_noop_when_not_configured(store):
 
 
 def test_store_find_open_scopes_by_service_and_type(store):
+    """E2: the type filter was never varied — only the service_id was —
+    so `find_open` ignoring `finding_type` entirely would have passed."""
     proposals = ProposalStore(store.engine)
     from registry_mcp.models import FindingType
 
     proposals.create(Proposal(service_id="svc-1", finding_type=FindingType.auth_mode_conflict))
     assert proposals.find_open("svc-1", FindingType.auth_mode_conflict) is not None
     assert proposals.find_open("svc-2", FindingType.auth_mode_conflict) is None
+    assert proposals.find_open("svc-1", FindingType.vulnerability_scan) is None
 
 
 def test_store_migrates_proposal_table_missing_last_comment_id():
@@ -798,6 +803,28 @@ async def test_create_for_vulnerability_with_fix_opens_pr(store):
     assert result["finding_type"] == "vulnerability_scan"
     assert git.opened
     assert proposals.get(result["id"]).status == ProposalStatus.open
+
+
+async def test_create_for_vulnerability_context_carries_the_fixed_tag_not_the_current_one(store):
+    """E3: the CVE path's context is built as free text and never asserted —
+    a swap that put current_tag where fixed_tag belongs (the vulnerable
+    version, as the "fix") would pass every other test here."""
+    service = _plain(store)
+    reasoner = FakeReasoner()
+    engine, _ = _engine(store, git=FakeGit(), reasoner=reasoner)
+
+    await engine.create_for_vulnerability(
+        service.id,
+        image="lscr.io/linuxserver/plex",
+        current_tag="1.32.0",
+        fixed_tag="1.32.2",
+        severity="critical",
+        cve_ids=["CVE-2026-1234"],
+    )
+
+    context = reasoner.patch_calls[-1]["context"]
+    assert "new_tag: 1.32.2" in context
+    assert "new_tag: 1.32.0" not in context
 
 
 async def test_create_for_vulnerability_without_fix_records_rejected_and_opens_no_pr(store):

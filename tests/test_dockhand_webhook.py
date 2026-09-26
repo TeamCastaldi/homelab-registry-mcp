@@ -11,8 +11,10 @@ import json
 import httpx
 import structlog.testing
 
+import registry_mcp.server as server_module
 from conftest import IsolatedSettings
 from registry_mcp.models import Service
+from registry_mcp.proposal import ProposalStore
 from registry_mcp.registry import RegistryStore
 from registry_mcp.server import build_server
 
@@ -287,7 +289,65 @@ async def test_vulnerability_disabled_is_ignored(tmp_path):
 # --- dispatch ---
 
 
-async def test_known_container_reaches_proposal_engine(tmp_path):
+class RecordingEngine:
+    """Stands in for `ProposalEngine` at the webhook route: records exactly
+    what the dispatch handler called, with what arguments — the only way to
+    prove WH1 (tags reaching the wrong parameter) and WH2 (every alert
+    collapsing onto the CVE path) without a real outbound call."""
+
+    def __init__(self):
+        self.image_update_calls: list[dict] = []
+        self.vulnerability_calls: list[dict] = []
+        self.configured = True  # build_app wires .after_discovery only when True
+
+    async def after_discovery(self, *args, **kwargs) -> None:
+        return None
+
+    async def create_for_image_update(self, service_id, *, image, current_tag, new_tag):
+        self.image_update_calls.append(
+            {
+                "service_id": service_id,
+                "image": image,
+                "current_tag": current_tag,
+                "new_tag": new_tag,
+            }
+        )
+        return {"status": "open", "finding_type": "image_update"}
+
+    async def create_for_vulnerability(
+        self, service_id, *, image, current_tag, fixed_tag, severity, cve_ids
+    ):
+        self.vulnerability_calls.append(
+            {
+                "service_id": service_id,
+                "image": image,
+                "current_tag": current_tag,
+                "fixed_tag": fixed_tag,
+                "severity": severity,
+                "cve_ids": cve_ids,
+            }
+        )
+        return {"status": "open", "finding_type": "vulnerability_scan"}
+
+
+def _server_with_recording_engine(monkeypatch, settings):
+    """Build the server with its proposal engine swapped for a `RecordingEngine`
+    — the old tests here reached a real `ProposalEngine`, which made a real
+    outbound call to the fake `https://git.test` host and asserted only that
+    it failed downstream, never what was actually dispatched (or breaking the
+    suite's hermetic rule in the process)."""
+    engine = RecordingEngine()
+
+    def fake_build_proposal_engine(settings, store, reasoner, *, read_only=False):
+        return engine, ProposalStore(store.engine), None
+
+    monkeypatch.setattr(server_module, "build_proposal_engine", fake_build_proposal_engine)
+    return build_server(settings), engine
+
+
+async def test_image_update_alert_dispatches_with_the_right_tags_not_swapped(tmp_path, monkeypatch):
+    """WH1: current_tag/new_tag reaching create_for_image_update swapped would
+    open a PR that downgrades the image instead of upgrading it."""
     db_path = str(tmp_path / "r.db")
     store = RegistryStore(db_path)
     store.create_service(
@@ -295,18 +355,49 @@ async def test_known_container_reaches_proposal_engine(tmp_path):
     )
 
     settings = _healthy_settings(tmp_path, db_path)
-    resp = await _post(build_server(settings), json=_payload(), headers=_auth())
+    server, engine = _server_with_recording_engine(monkeypatch, settings)
+    resp = await _post(server, json=_payload(), headers=_auth())
 
     assert resp.status_code == 200
-    body = resp.json()
-    # git_base_url/git_token/git_repo are all set (see _healthy_settings), so
-    # engine.configured is True and this reaches a real GitProvider.read_file
-    # call against a fake host — it fails downstream (not "write path not
-    # configured"), which is what matters here: the image_update finding
-    # reached the engine rather than being skipped for an unmatched container.
-    assert "skipped" not in body
-    assert "error" in body
-    assert "write path not configured" not in body["error"]
+    assert resp.json() == {"status": "open", "finding_type": "image_update"}
+    assert engine.vulnerability_calls == []  # WH2: not every alert becomes a CVE
+    assert len(engine.image_update_calls) == 1
+    call = engine.image_update_calls[0]
+    assert call["current_tag"] == "1.32.0"
+    assert call["new_tag"] == "1.32.1"
+
+
+async def test_vulnerability_alert_dispatches_to_create_for_vulnerability(tmp_path, monkeypatch):
+    """WH2, the other direction: a real CVE alert must actually reach
+    create_for_vulnerability, not get silently dropped onto the image-update
+    path (which takes no severity/cve_ids and would fail loudly, but only a
+    dedicated dispatch test — not the "no image" case below — proves it)."""
+    db_path = str(tmp_path / "r.db")
+    store = RegistryStore(db_path)
+    store.create_service(Service(name="plex", display_name="Plex", host="workload-01"))
+
+    settings = _healthy_settings(tmp_path, db_path)
+    server, engine = _server_with_recording_engine(monkeypatch, settings)
+    resp = await _post(
+        server,
+        json={
+            "event": "vulnerability_found",
+            "container": "plex",
+            "current_image": "lscr.io/linuxserver/plex:1.32.0",
+            "fixed_image": "lscr.io/linuxserver/plex:1.32.2",
+            "severity": "critical",
+            "cve_ids": ["CVE-2026-1234"],
+        },
+        headers=_auth(),
+    )
+
+    assert resp.status_code == 200
+    assert engine.image_update_calls == []
+    assert len(engine.vulnerability_calls) == 1
+    call = engine.vulnerability_calls[0]
+    assert call["current_tag"] == "1.32.0"
+    assert call["fixed_tag"] == "1.32.2"
+    assert call["cve_ids"] == ["CVE-2026-1234"]
 
 
 async def test_non_bearer_authorization_falls_through_to_token_header(tmp_path):
@@ -408,14 +499,17 @@ async def test_apprise_json_payload_shape_is_accepted(tmp_path):
     assert "digest-only" in resp.json()["ignored"]
 
 
-async def test_apprise_payload_with_tags_reaches_the_engine(tmp_path):
+async def test_apprise_payload_with_tags_dispatches_with_the_right_tags(tmp_path, monkeypatch):
+    """WH1 again, on the generic Apprise payload shape rather than the
+    structured one — its key=value parsing is a separate code path."""
     db_path = str(tmp_path / "r.db")
     store = RegistryStore(db_path)
     store.create_service(Service(name="plex", display_name="Plex", host="workload-01"))
 
     settings = _healthy_settings(tmp_path, db_path)
+    server, engine = _server_with_recording_engine(monkeypatch, settings)
     resp = await _post(
-        build_server(settings),
+        server,
         json=_apprise_payload(
             message=(
                 "image=lscr.io/linuxserver/plex:1.32.1 old_image=lscr.io/linuxserver/plex:1.32.0"
@@ -425,8 +519,12 @@ async def test_apprise_payload_with_tags_reaches_the_engine(tmp_path):
     )
 
     assert resp.status_code == 200
-    body = resp.json()
-    assert "ignored" not in body and "skipped" not in body
+    assert resp.json() == {"status": "open", "finding_type": "image_update"}
+    assert engine.vulnerability_calls == []
+    assert len(engine.image_update_calls) == 1
+    call = engine.image_update_calls[0]
+    assert call["current_tag"] == "1.32.0"
+    assert call["new_tag"] == "1.32.1"
 
 
 # --- raw payload logging (DOCKHAND_WEBHOOK_LOG_RAW_PAYLOAD) ---
