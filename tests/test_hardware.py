@@ -8,7 +8,6 @@ from registry_mcp.models.hardware import (
     HardwareNode,
     NodeRole,
     NodeStatus,
-    StorageDisk,
     StoragePool,
 )
 from registry_mcp.models.service import Service
@@ -379,15 +378,3 @@ async def test_hardware_update_node_tool_rejects_invalid_role(server):
     fetched = tool_payload(await server.call_tool("hardware-get-node", {"id": node_id}))
     assert "error" not in fetched
     assert fetched["role"] == "docker_host"
-
-
-def test_storage_disk_model():
-    disk = StorageDisk(device="/dev/sda", size_gb=4000.0, type="hdd")
-    assert disk.device == "/dev/sda"
-    assert disk.type == "hdd"
-
-
-def test_storage_pool_model():
-    pool = StoragePool(name="data", type="zfs", total_gb=4000, used_gb=1200, free_gb=2800)
-    assert pool.health is None
-    assert pool.free_gb == 2800

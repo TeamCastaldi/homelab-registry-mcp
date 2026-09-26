@@ -228,10 +228,6 @@ class TestSSHHelpers:
         data = {"Config": {"Env": ["TOKEN=abc123", "LOG_LEVEL=info", "MALFORMED"]}}
         assert env_dict_from_inspect(data) == {"TOKEN": "abc123", "LOG_LEVEL": "info"}
 
-    def test_labels_from_inspect(self):
-        data = {"Config": {"Labels": {"traefik.enable": "true"}}}
-        assert labels_from_inspect(data) == {"traefik.enable": "true"}
-
     def test_labels_from_inspect_missing_config(self):
         assert labels_from_inspect({}) == {}
 

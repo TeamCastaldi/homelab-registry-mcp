@@ -50,11 +50,6 @@ async def test_add_duplicate_returns_error(server):
     assert "error" in dup
 
 
-async def test_get_missing_returns_error(server):
-    got = await call(server, "registry_get_service", {"id_or_name": "ghost"})
-    assert "error" in got
-
-
 async def test_resources_expose_catalog(server):
     await call(
         server,

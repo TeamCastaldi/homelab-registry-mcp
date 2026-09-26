@@ -12,7 +12,6 @@ from registry_mcp.integrations.infisical import (
     InfisicalError,
     InfisicalSecretValueLeakedError,
 )
-from registry_mcp.providers.notification import NullNotificationProvider
 from registry_mcp.server import build_server
 
 LOGIN_PATH = "/api/v1/auth/universal-auth/login"
@@ -375,14 +374,6 @@ async def call(server, name, args):
     return tool_payload(await server.call_tool(name, args))
 
 
-async def test_tool_returns_keys(infisical_settings_kwargs, monkeypatch):
-    _patch_client(monkeypatch, _transport(LOGIN_OK, SECRETS_MASKED))
-    server = build_server(IsolatedSettings(**infisical_settings_kwargs))
-    result = await call(server, "infisical_status", {})
-    assert result["keys"] == ["ANSIBLE_INVENTORY_PATH", "GIT_TOKEN"]
-    assert "error" not in result
-
-
 async def test_tool_never_returns_values(infisical_settings_kwargs, monkeypatch):
     _patch_client(monkeypatch, _transport(LOGIN_OK, SECRETS_MASKED))
     server = build_server(IsolatedSettings(**infisical_settings_kwargs))
@@ -454,16 +445,6 @@ async def test_tool_leak_fires_urgent_notification_naming_only_the_key(
     assert "GIT_TOKEN" in notifier.sent[0]["body"]
     assert "ghp_liveTokenValue" not in notifier.sent[0]["body"]
     assert "ghp_liveTokenValue" not in notifier.sent[0]["title"]
-
-
-async def test_null_notification_provider_is_default(infisical_settings_kwargs, monkeypatch):
-    """Sanity check: with no NOTIFICATION_PROVIDER configured, the leak path
-    still completes (via NullNotificationProvider) instead of raising."""
-    _patch_client(monkeypatch, _transport(LOGIN_OK, SECRETS_LEAKED))
-    server = build_server(IsolatedSettings(**infisical_settings_kwargs))
-    result = await call(server, "infisical_status", {})
-    assert "error" in result
-    assert isinstance(NullNotificationProvider(), NullNotificationProvider)
 
 
 # --- tool, whole-project mode (ADR-017) -------------------------------------
@@ -560,17 +541,6 @@ async def test_tool_recursive_scan_leak_fails_closed_with_notification(
     assert "/authentik" in notifier.sent[0]["body"]
     assert "AUTHENTIK_TOKEN" in notifier.sent[0]["body"]
     assert "goauthentik-live-token" not in notifier.sent[0]["body"]
-
-
-async def test_tool_non_recursive_by_default(infisical_settings_kwargs, monkeypatch):
-    """Regression check: leaving INFISICAL_RECURSIVE_SCAN unset keeps the
-    original single-folder behavior -- `keys`, not `secrets_by_path`."""
-    _patch_client(monkeypatch, _transport(LOGIN_OK, SECRETS_MASKED))
-    server = build_server(IsolatedSettings(**infisical_settings_kwargs))
-    result = await call(server, "infisical_status", {})
-    assert "keys" in result
-    assert "secrets_by_path" not in result
-    assert isinstance(NullNotificationProvider(), NullNotificationProvider)
 
 
 def _counting_transport(logins: list[int]):

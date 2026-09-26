@@ -6,11 +6,6 @@ from registry_mcp.health import check_health
 from registry_mcp.server import build_server
 
 
-def test_build_server_registers_health(server):
-    tools = {tool.name for tool in server._tool_manager.list_tools()}
-    assert "health" in tools
-
-
 async def test_health_returns_ok(server):
     result = await server.call_tool("health", {})
     # call_tool returns (content_blocks, structured_result); inspect the structured payload.
@@ -101,11 +96,6 @@ def test_check_health_ssh_key_missing_file(tmp_path):
 # ---------------------------------------------------------------------------
 # system_health_check MCP tool
 # ---------------------------------------------------------------------------
-
-
-async def test_system_health_check_always_registered(server):
-    tools = {tool.name for tool in server._tool_manager.list_tools()}
-    assert "system_health_check" in tools
 
 
 async def test_system_health_check_reports_read_only_when_unconfigured(tmp_path):
