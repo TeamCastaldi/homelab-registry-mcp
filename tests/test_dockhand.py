@@ -5,34 +5,45 @@ import pytest
 
 import registry_mcp.integrations.dockhand.tools as dockhand_tools
 from conftest import IsolatedSettings, tool_payload
+from http_fakes import strict_transport
 from registry_mcp.integrations.dockhand import DockhandClient, DockhandError
 from registry_mcp.server import build_server
 
+# Query-string routes are exact: a client that dropped a filter, or added
+# one nothing asked for, gets a 404 rather than the unfiltered list — closes
+# K3 (`list_containers` dropping its filters). `/api/environments/env1` etc.
+# have no query string of their own, so they're keyed with no `?`.
 ROUTES = {
-    "/api/environments": [{"id": "env1", "name": "homelab-docker"}],
-    "/api/environments/env1": {"id": "env1", "name": "homelab-docker"},
-    "/api/stacks": [{"id": "stack1", "name": "traefik-stack", "environment_id": "env1"}],
-    "/api/stacks/stack1": {"id": "stack1", "name": "traefik-stack", "environment_id": "env1"},
-    "/api/containers": [
+    "GET /api/environments": [{"id": "env1", "name": "homelab-docker"}],
+    "GET /api/environments/env1": {"id": "env1", "name": "homelab-docker"},
+    "GET /api/stacks": [{"id": "stack1", "name": "traefik-stack", "environment_id": "env1"}],
+    "GET /api/stacks/stack1": {"id": "stack1", "name": "traefik-stack", "environment_id": "env1"},
+    "GET /api/containers": [
         {"id": "c1", "name": "traefik", "stack_id": "stack1", "environment_id": "env1"}
     ],
-    "/api/containers/check-updates": [
+    # A distinct record from the bare route above: if `list_containers` ever
+    # dropped its filters, the request would fall back to matching the bare
+    # route instead and return "traefik", not "radarr" — that's what makes
+    # this catch a dropped filter rather than merely restate the bare case.
+    "GET /api/containers?environment_id=env1&stack_id=stack2": [
+        {"id": "c3", "name": "radarr", "stack_id": "stack2", "environment_id": "env1"}
+    ],
+    # A wrapped envelope, distinct again — exercises `_list`'s
+    # `results`/`data`/`items` unwrap (K2), which the bare list never touches.
+    "GET /api/containers?environment_id=env2": {
+        "results": [{"id": "c2", "name": "sonarr", "stack_id": "stack1", "environment_id": "env2"}]
+    },
+    "GET /api/containers/check-updates": [
         {"container_id": "c1", "current_tag": "v3.1", "latest_tag": "v3.2"}
     ],
-    "/api/vulnerabilities": [{"container_id": "c1", "cve": "CVE-2024-1234", "severity": "high"}],
+    "GET /api/vulnerabilities": [
+        {"container_id": "c1", "cve": "CVE-2024-1234", "severity": "high"}
+    ],
 }
 
 
 def _transport(routes, captured=None):
-    def handler(request: httpx.Request) -> httpx.Response:
-        if captured is not None:
-            captured.append(request)
-        body = routes.get(request.url.path)
-        if body is None:
-            return httpx.Response(404, json={"detail": "not found"})
-        return httpx.Response(200, json=body)
-
-    return httpx.MockTransport(handler)
+    return strict_transport(routes, captured=captured)
 
 
 # --- client ---------------------------------------------------------------
@@ -56,6 +67,29 @@ async def test_client_parses_endpoints():
     assert (await client.list_containers())[0]["name"] == "traefik"
     assert (await client.list_pending_updates())[0]["latest_tag"] == "v3.2"
     assert (await client.list_vulnerabilities())[0]["cve"] == "CVE-2024-1234"
+
+
+async def test_client_list_containers_filters_reach_the_request():
+    """K3: `list_containers` must actually send its filters, not drop them.
+    A dropped filter would fall back to the bare (unfiltered) route, which
+    returns a different record — not just a 404 — so this catches it."""
+    client = DockhandClient("http://d", "t", transport=_transport(ROUTES), backoff=0)
+    containers = await client.list_containers(environment_id="env1", stack_id="stack2")
+    assert containers[0]["name"] == "radarr"
+
+
+async def test_client_list_containers_unwraps_a_results_envelope():
+    """K2: a wrapped `{"results": [...]}` envelope must unwrap the same as a
+    bare array — the plain-list route in ROUTES never exercises this."""
+    client = DockhandClient("http://d", "t", transport=_transport(ROUTES), backoff=0)
+    containers = await client.list_containers(environment_id="env2")
+    assert containers[0]["name"] == "sonarr"
+
+
+# K1 (the read-only invariant) needs no dedicated test: every client test in
+# this file now runs against `strict_transport`, which 405s on anything but
+# GET, so a client that started sending POST would fail every test here, not
+# just a hand-picked one.
 
 
 async def test_client_retries_then_succeeds():

@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
+import socket
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
 import pytest
+import uvicorn
+from mcp.server.fastmcp import FastMCP
 from mcp.types import CallToolResult, TextContent
 
 import registry_mcp.integrations.docs.tools as docs_tools
@@ -99,6 +103,65 @@ async def test_client_wraps_session_factory_failure():
     with pytest.raises(DocsMcpError) as excinfo:
         await client.get_homelab_docs("traefik", "3.0")
     assert excinfo.value.__cause__ is original
+
+
+class _CaptureAuthMiddleware:
+    """Records the `Authorization` header of every request the ASGI app
+    receives — the only way to observe what `_default_session_factory`
+    actually put on the wire, since it builds its own `streamablehttp_client`
+    with no hook for a test to intercept."""
+
+    def __init__(self, app: Any, captured: list[str | None]) -> None:
+        self.app = app
+        self.captured = captured
+
+    async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
+        if scope["type"] == "http":
+            headers = dict(scope.get("headers") or [])
+            value = headers.get(b"authorization")
+            self.captured.append(value.decode() if value is not None else None)
+        await self.app(scope, receive, send)
+
+
+async def test_default_session_factory_sends_bearer_header():
+    """M1: every other test in this file injects a fake `session_factory`,
+    so `DocsMcpClient._default_session_factory` — the real
+    `streamablehttp_client` + `ClientSession` path — has never actually run.
+    Stand up a real local MCP server and let the real factory talk to it."""
+    captured_auth: list[str | None] = []
+    fastmcp = FastMCP("docs-fake")
+
+    @fastmcp.tool(name="get_homelab_docs")
+    async def _get_homelab_docs(service_name: str, version: str, topic: str | None = None) -> str:
+        return f"docs for {service_name} {version}"
+
+    app = fastmcp.streamable_http_app()
+    app.add_middleware(_CaptureAuthMiddleware, captured=captured_auth)
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+
+    config = uvicorn.Config(app, fd=sock.fileno(), log_level="warning")
+    server = uvicorn.Server(config)
+    serve_task = asyncio.create_task(server.serve())
+    try:
+        for _ in range(200):  # up to ~2s
+            if server.started:
+                break
+            await asyncio.sleep(0.01)
+        assert server.started, "test server never started"
+
+        client = DocsMcpClient(f"http://127.0.0.1:{port}/mcp", "secret-token")
+        text = await client.get_homelab_docs("traefik", "3.0")
+        assert text == "docs for traefik 3.0"
+    finally:
+        server.should_exit = True
+        await serve_task
+
+    assert captured_auth
+    assert "Bearer secret-token" in captured_auth
 
 
 # --- tool ---------------------------------------------------------------

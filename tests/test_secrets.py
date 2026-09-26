@@ -105,10 +105,16 @@ class TestDotenvHelpers:
         assert _parse_dotenv(_serialize_dotenv(data)) == data
 
     def test_detect_format_dotenv_suffix(self, tmp_path: Path) -> None:
+        """A file named `.env` must be treated as dotenv on its name alone —
+        even when its content wouldn't trip the uppercase-KEY= heuristic
+        (`_is_dotenv_content`), which a real `.env` in the wild need not
+        satisfy. `Path(".env").suffix` is `""`, not `".env"`, so this must
+        not rely on a suffix check; regression coverage for a bug where the
+        suffix check alone let such a file fall through as raw text."""
         p = tmp_path / ".env"
-        result = _detect_format(p, "KEY=val\n")
+        result = _detect_format(p, "db_password=x\nport=1\n")
         assert isinstance(result, dict)
-        assert result == {"KEY": "val"}
+        assert result == {"db_password": "x", "port": "1"}
 
     def test_detect_format_raw_for_yaml(self, tmp_path: Path) -> None:
         p = tmp_path / "config.yaml"

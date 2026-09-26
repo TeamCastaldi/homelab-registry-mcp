@@ -5,33 +5,33 @@ import pytest
 
 import registry_mcp.integrations.traefik.tools as traefik_tools
 from conftest import IsolatedSettings, tool_payload
+from http_fakes import strict_transport
 from registry_mcp.integrations.traefik import TraefikClient, TraefikError
 from registry_mcp.server import build_server
 
 ROUTES = {
-    "/api/overview": {"http": {"routers": {"total": 2}}},
-    "/api/http/routers": [
+    "GET /api/overview": {"http": {"routers": {"total": 2}}},
+    "GET /api/http/routers": [
         {"name": "web@docker", "status": "enabled", "middlewares": ["authentik@docker"]},
         {"name": "api@docker", "status": "enabled", "middlewares": []},
     ],
-    "/api/http/routers/web@docker": {
+    # Distinct from the http routers above: proves `protocol` actually
+    # reaches the request path (R1) rather than being ignored in favor of
+    # the "http" default — a dropped protocol would 404 here, not silently
+    # match the http route.
+    "GET /api/tcp/routers": [{"name": "postgres@docker", "status": "enabled", "middlewares": []}],
+    "GET /api/http/routers/web@docker": {
         "name": "web@docker",
         "status": "enabled",
         "middlewares": ["authentik@docker"],
     },
-    "/api/http/middlewares": [{"name": "authentik@docker"}],
-    "/api/rawdata": {"tls": {"certificates": [{"domain": "example.lan"}]}},
+    "GET /api/http/middlewares": [{"name": "authentik@docker"}],
+    "GET /api/rawdata": {"tls": {"certificates": [{"domain": "example.lan"}]}},
 }
 
 
 def _transport(routes):
-    def handler(request: httpx.Request) -> httpx.Response:
-        body = routes.get(request.url.path)
-        if body is None:
-            return httpx.Response(404, json={"detail": "not found"})
-        return httpx.Response(200, json=body)
-
-    return httpx.MockTransport(handler)
+    return strict_transport(routes)
 
 
 # --- client ---------------------------------------------------------------
@@ -43,6 +43,15 @@ async def test_client_parses_endpoints():
     assert {r["name"] for r in routers} == {"web@docker", "api@docker"}
     assert (await client.get_router("web@docker"))["status"] == "enabled"
     assert "http" in await client.overview()
+
+
+async def test_client_list_routers_protocol_reaches_the_request():
+    """R1: `list_routers(protocol=...)` must reach the request path, not
+    silently stay on "http" — the tcp route returns a distinct record, so a
+    dropped protocol argument gets a 404 or the wrong routers, not a pass."""
+    client = TraefikClient("http://t", transport=_transport(ROUTES), backoff=0)
+    routers = await client.list_routers(protocol="tcp")
+    assert {r["name"] for r in routers} == {"postgres@docker"}
 
 
 async def test_client_retries_then_succeeds():

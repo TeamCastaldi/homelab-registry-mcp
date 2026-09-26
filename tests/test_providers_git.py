@@ -13,13 +13,22 @@ REPO = "nathan/homelab"
 
 
 class FakeGitea:
-    """Minimal in-memory Gitea API over an httpx MockTransport."""
+    """Minimal in-memory Gitea API over an httpx MockTransport.
+
+    Enforces two invariants a path-only fake would miss (GP3, GP4): every
+    request must carry the token's real `Authorization: token <token>`
+    header — closed structurally here rather than by one dedicated test, the
+    same way every test in this class doubles as read-only-invariant
+    coverage — and `GET .../pulls` respects a `state` filter instead of
+    always returning every PR regardless of what was asked for.
+    """
 
     def __init__(
         self,
         files: dict[str, str] | None = None,
         comments: dict[int, list] | None = None,
         truncated: bool = False,
+        token: str = "tok",
     ):
         self.files = dict(files or {})
         self.branches: list[dict] = []
@@ -29,12 +38,15 @@ class FakeGitea:
         self.labels = [{"id": 7, "name": "homelab-registry-mcp"}]
         self.comments: dict[int, list[dict]] = dict(comments or {})
         self.truncated = truncated
+        self._token = token
         self._next_pr = 41
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self._handle)
 
     def _handle(self, request: httpx.Request) -> httpx.Response:
+        if request.headers.get("Authorization") != f"token {self._token}":
+            return httpx.Response(401, json={"message": "missing or wrong auth header"})
         path = request.url.path
         method = request.method
         if method == "GET" and "/git/trees/" in path:
@@ -83,12 +95,25 @@ class FakeGitea:
                 "html_url": f"https://git.test/{REPO}/pulls/{self._next_pr}",
                 "title": body["title"],
                 "labels": [{"name": "homelab-registry-mcp"}] if body.get("labels") else [],
+                "state": "open",
             }
             self.pulls.append(pr)
             return httpx.Response(201, json=pr)
         if path.endswith("/pulls") and method == "GET":
-            return httpx.Response(200, json=[p for p in self.pulls])
+            # A real Gitea filters server-side by `state`; a fake that always
+            # returned every PR would hide `list_open_prs` dropping its own
+            # `state=open` param (GP3).
+            state = request.url.params.get("state")
+            matching = [p for p in self.pulls if state is None or p.get("state") == state]
+            return httpx.Response(200, json=matching)
         if "/pulls/" in path and method == "PATCH":
+            body = _json(request)
+            if body != {"state": "closed"}:
+                return httpx.Response(400, json={"message": f"unexpected PATCH body {body}"})
+            number = int(path.rsplit("/pulls/", 1)[1])
+            for pr in self.pulls:
+                if pr["number"] == number:
+                    pr["state"] = "closed"
             return httpx.Response(200, json={"state": "closed"})
         if "/issues/" in path and path.endswith("/comments") and method == "GET":
             number = int(path.split("/issues/", 1)[1].split("/comments")[0])
@@ -192,6 +217,37 @@ async def test_list_open_prs_filters_by_label():
     assert none == []
 
 
+async def test_list_open_prs_excludes_closed_prs():
+    """GP3: `list_open_prs` must actually send `state=open` — the fake only
+    excludes a closed PR when that param reaches the request; a client that
+    dropped it would get every PR back, closed ones included."""
+    fake = FakeGitea()
+    opened = await _provider(fake).open_pr(
+        REPO, "A", "b", "patch/a", "main", "homelab-registry-mcp"
+    )
+    await _provider(fake).close_pr(REPO, opened.number)
+    matching = await _provider(fake).list_open_prs(REPO, label="homelab-registry-mcp")
+    assert matching == []
+
+
+async def test_close_pr_sends_closed_state():
+    """GP2: Gitea had no close_pr test at all — this pins the request body,
+    not just that the call completes without raising."""
+    fake = FakeGitea()
+    opened = await _provider(fake).open_pr(REPO, "T", "B", "patch/x", "main")
+    await _provider(fake).close_pr(REPO, opened.number)
+    assert fake.pulls[-1]["state"] == "closed"
+
+
+async def test_close_pr_error_raises():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"message": "not found"})
+
+    provider = GiteaGitProvider("https://git.test", "tok", transport=httpx.MockTransport(handler))
+    with pytest.raises(GitError):
+        await provider.close_pr(REPO, 999)
+
+
 async def test_http_error_status_raises_giterror():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(403, json={"message": "forbidden"})
@@ -268,6 +324,7 @@ class FakeGitHub:
         self.labels_added: list[dict] = []
         self.comments: dict[int, list[dict]] = dict(comments or {})
         self.tree_requests: list[str] = []
+        self.patches: list[dict] = []
         self.truncated = truncated
         self._next_pr = 41
 
@@ -334,6 +391,7 @@ class FakeGitHub:
         if path.endswith("/pulls") and method == "GET":
             return httpx.Response(200, json=list(self.pulls))
         if "/pulls/" in path and method == "PATCH":
+            self.patches.append(_json(request))
             return httpx.Response(200, json={"state": "closed"})
         if "/issues/" in path and path.endswith("/comments") and method == "GET":
             number = int(path.split("/issues/", 1)[1].split("/comments")[0])
@@ -418,10 +476,12 @@ async def test_github_list_open_prs_filters_by_label():
 
 
 async def test_github_close_pr():
+    """GP1: close_pr sending the wrong state (e.g. re-opening instead of
+    closing) used to pass, since nothing checked the PATCH body it sent."""
     fake = FakeGitHub()
     opened = await _gh(fake).open_pr(REPO, "T", "B", "patch/x", "main")
-    # FakeGitHub returns 200 for the PATCH; close must complete without raising.
     await _gh(fake).close_pr(REPO, opened.number)
+    assert fake.patches[-1] == {"state": "closed"}
 
 
 async def test_github_close_pr_error_raises():

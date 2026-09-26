@@ -7,6 +7,7 @@ import pytest
 
 import registry_mcp.integrations.authentik.tools as authentik_tools
 from conftest import IsolatedSettings, tool_payload
+from http_fakes import strict_transport
 from registry_mcp.integrations.authentik import AuthentikClient, AuthentikError
 from registry_mcp.server import build_server
 
@@ -17,22 +18,28 @@ def _paginated(results):
     return {"pagination": {"count": len(results)}, "results": results}
 
 
+# `applications/` is keyed with its query string: `list_applications` always
+# sends `superuser_full_list=true` (U1) so the service account sees every
+# application, not just ones it has per-user access to — a client that
+# dropped that param would 404 here instead of matching a looser route.
 ROUTES = {
-    "/api/v3/core/applications/": _paginated(
+    "GET /api/v3/core/applications/?superuser_full_list=true": _paginated(
         [{"slug": "vaultwarden", "name": "Vaultwarden", "provider": 1}]
     ),
-    "/api/v3/core/applications/vaultwarden/": {
+    "GET /api/v3/core/applications/vaultwarden/": {
         "slug": "vaultwarden",
         "name": "Vaultwarden",
         "provider": 1,
     },
-    "/api/v3/providers/all/": _paginated([{"pk": 1, "name": "vaultwarden-proxy"}]),
-    "/api/v3/outposts/instances/": _paginated([{"pk": "out-1", "name": "embedded-outpost"}]),
-    "/api/v3/outposts/instances/out-1/health/": [{"version": "2024.1", "version_outdated": False}],
-    "/api/v3/policies/all/": _paginated([{"pk": "p1", "name": "deny-after-hours"}]),
-    "/api/v3/core/users/": _paginated([{"pk": 7, "username": "nathan"}]),
-    "/api/v3/core/groups/": _paginated([{"pk": "g1", "name": "admins"}]),
-    "/api/v3/events/events/": _paginated(
+    "GET /api/v3/providers/all/": _paginated([{"pk": 1, "name": "vaultwarden-proxy"}]),
+    "GET /api/v3/outposts/instances/": _paginated([{"pk": "out-1", "name": "embedded-outpost"}]),
+    "GET /api/v3/outposts/instances/out-1/health/": [
+        {"version": "2024.1", "version_outdated": False}
+    ],
+    "GET /api/v3/policies/all/": _paginated([{"pk": "p1", "name": "deny-after-hours"}]),
+    "GET /api/v3/core/users/": _paginated([{"pk": 7, "username": "nathan"}]),
+    "GET /api/v3/core/groups/": _paginated([{"pk": "g1", "name": "admins"}]),
+    "GET /api/v3/events/events/?ordering=-created&page_size=100": _paginated(
         [
             {"action": "login", "created": _NOW.isoformat()},
             {"action": "login_failed", "created": (_NOW - timedelta(days=3)).isoformat()},
@@ -44,15 +51,7 @@ BASE = "https://auth.test/api/v3"
 
 
 def _transport(routes, captured=None):
-    def handler(request: httpx.Request) -> httpx.Response:
-        if captured is not None:
-            captured.append(request)
-        body = routes.get(request.url.path)
-        if body is None:
-            return httpx.Response(404, json={"detail": "not found"})
-        return httpx.Response(200, json=body)
-
-    return httpx.MockTransport(handler)
+    return strict_transport(routes, captured=captured)
 
 
 # --- client ---------------------------------------------------------------
@@ -152,7 +151,7 @@ async def test_tool_outpost_status_missing(authentik_server):
 async def test_tool_outpost_status_health_failure_surfaces_top_level_error(tmp_path, monkeypatch):
     # Outpost exists, but its health endpoint 500s: the error must surface at top level.
     routes = dict(ROUTES)
-    del routes["/api/v3/outposts/instances/out-1/health/"]  # -> 404, retried then errors
+    del routes["GET /api/v3/outposts/instances/out-1/health/"]  # -> 404, retried then errors
     transport = _transport(routes)
     real = authentik_tools.AuthentikClient
 
