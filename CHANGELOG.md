@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.10.2](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.10.1...v1.10.2) (2026-09-26)
+
+
+### Documentation
+
+* **tests:** add test-suite audit and remediation plan ([07d2564](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/07d256438a24a886bf5fdcadf1c80f992660b509))
+* **tests:** add test-suite audit and remediation plan ([5cbdbe0](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/5cbdbe0c183ea869bfcdb7545e1c6ee9001010e8))
+
 ## [1.10.1](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.10.0...v1.10.1) (2026-09-25)
 
 
