@@ -7,6 +7,9 @@ the real `SmtpNotificationProvider` into a fake `smtplib.SMTP`, and the links a
 test follows are read out of that email, the way a person would get them.
 """
 
+import asyncio
+import base64
+import functools
 import hashlib
 import hmac
 import html
@@ -21,7 +24,10 @@ from sqlmodel import Session, select
 
 import registry_mcp.patching.executor as executor_module
 import registry_mcp.server as server_module
+import registry_mcp.webhooks.patchmon as patchmon_module
 from conftest import IsolatedSettings
+from http_fakes import strict_transport
+from registry_mcp.integrations.patchmon import PatchmonClient
 from registry_mcp.models import PatchApproval, PatchApprovalStatus
 from registry_mcp.models.service import utcnow
 from registry_mcp.patching import PatchApprovalStore
@@ -31,6 +37,14 @@ WEBHOOK_PATH = "/webhooks/patchmon"
 SECRET = "patchmon-signing-secret"
 BASE_URL = "https://registry.test"
 HOST_ID = "0b5f2a8e-1c2d-4e5f-8a9b-0c1d2e3f4a5b"
+# The PatchMon Integration API, off in `_settings` unless a test passes these.
+API = dict(
+    patchmon_api_url="https://patchmon.test",
+    patchmon_api_key="patchmon_ae_key",
+    patchmon_api_secret="api-secret",
+)
+API_AUTH = ("Authorization", "Basic " + base64.b64encode(b"patchmon_ae_key:api-secret").decode())
+INFO_ROUTE = f"GET /api/v1/api/hosts/{HOST_ID}/info"
 
 
 # --- fixtures and helpers ---
@@ -96,6 +110,31 @@ def ansible(monkeypatch):
     fake = FakeAnsible()
     monkeypatch.setattr(executor_module, "_run", fake)
     return fake
+
+
+class PatchmonApi:
+    """PatchMon's scoped Integration API: GET only, HTTP Basic required."""
+
+    def __init__(self):
+        self.routes = {
+            INFO_ROUTE: {"id": HOST_ID, "hostname": "pi-01", "friendly_name": "Living Room Pi"}
+        }
+        self.requests: list[httpx.Request] = []
+
+    def paths(self):
+        return [request.url.path for request in self.requests]
+
+
+@pytest.fixture
+def patchmon_api(monkeypatch):
+    api = PatchmonApi()
+    transport = strict_transport(api.routes, captured=api.requests, auth_header=API_AUTH)
+    monkeypatch.setattr(
+        server_module,
+        "build_patchmon_client",
+        functools.partial(server_module.build_patchmon_client, transport=transport),
+    )
+    return api
 
 
 def _settings(tmp_path, **overrides):
@@ -446,6 +485,102 @@ async def test_friendly_host_name_is_never_guessed_into_an_inventory_name(tmp_pa
         response = await _deliver(client, _native_payload(host_name="Living Room Pi"))
     assert response.status_code == 200
     assert "not a plain inventory host name" in response.json()["ignored"]
+    assert FakeSMTP.sent == []
+
+
+# --- naming the host by PatchMon's record for its id ---
+
+
+async def test_a_friendly_name_is_resolved_through_patchmons_record_for_the_host_id(
+    tmp_path, patchmon_api, ansible
+):
+    settings = _settings(tmp_path, **API)
+    async with _client(build_server(settings)) as client:
+        response = await _deliver(client, _native_payload(host_name="Living Room Pi"))
+        approve, _ = _links(FakeSMTP.sent[-1])
+        await client.post(_path(approve), data={"token": _token(approve)})
+
+    assert response.status_code == 202
+    assert f"/api/v1/api/hosts/{HOST_ID}/info" in patchmon_api.paths()
+    approval = _only_approval(settings)
+    assert approval.target_host == "pi-01"
+    assert approval.patchmon_host_id == HOST_ID
+    assert "Living Room Pi" in approval.summary
+    assert FakeSMTP.sent[0]["Subject"].endswith(" on pi-01")
+    cmd = ansible.playbook_runs[0]
+    assert cmd[cmd.index("--limit") + 1] == "pi-01"
+
+
+async def test_a_plain_host_name_is_used_as_sent_and_never_looked_up(tmp_path, patchmon_api):
+    """PatchMon's hostname for the id is pi-01; the alert says pi-02. An alert
+    that already names an inventory host must keep naming it."""
+    settings = _settings(tmp_path, **API)
+    async with _client(build_server(settings)) as client:
+        response = await _deliver(client, _native_payload(host_name="pi-02"))
+
+    assert response.status_code == 202
+    assert _only_approval(settings).target_host == "pi-02"
+    assert not any(path.endswith("/info") for path in patchmon_api.paths())
+
+
+@pytest.mark.parametrize(
+    ("answer", "reason"),
+    [
+        (lambda request: httpx.Response(404, json={"error": "Host not found"}), "failed"),
+        (lambda request: httpx.Response(500, json={"error": "boom"}), "failed"),
+        ({"id": HOST_ID, "hostname": ""}, "no hostname on record"),
+        ({"id": HOST_ID, "hostname": "Living Room Pi"}, "is not one either"),
+        ({"id": HOST_ID, "hostname": "all,pi-02"}, "is not one either"),
+        (
+            {"id": "11111111-2222-4333-8444-555555555555", "hostname": "pi-01"},
+            "a host other than",
+        ),
+    ],
+    ids=["unknown-host", "server-error", "no-hostname", "friendly", "pattern", "other-host"],
+)
+async def test_a_lookup_that_cannot_name_the_host_exactly_is_acknowledged_not_mailed(
+    tmp_path, patchmon_api, answer, reason
+):
+    patchmon_api.routes[INFO_ROUTE] = answer
+    settings = _settings(tmp_path, **API)
+    async with _client(build_server(settings)) as client:
+        response = await _deliver(client, _native_payload(host_name="Living Room Pi"))
+
+    assert response.status_code == 200
+    ignored = response.json()["ignored"]
+    assert "not a plain inventory host name" in ignored
+    assert reason in ignored
+    assert FakeSMTP.sent == []
+
+
+async def test_an_alert_without_a_host_id_is_never_looked_up(tmp_path, patchmon_api):
+    payload = _native_payload(host_name="Living Room Pi")
+    del payload["reference"]
+    del payload["metadata"]["host_id"]
+    async with _client(build_server(_settings(tmp_path, **API))) as client:
+        response = await _deliver(client, payload)
+
+    assert response.status_code == 200
+    assert "not a plain inventory host name" in response.json()["ignored"]
+    assert patchmon_api.requests == []
+
+
+async def test_a_slow_lookup_is_cut_off_inside_patchmons_delivery_timeout(
+    tmp_path, patchmon_api, monkeypatch
+):
+    """PatchMon abandons a delivery after 30s; the lookup must give up first."""
+
+    async def stalls(self, host_id):
+        await asyncio.sleep(2)
+        return {"id": host_id, "hostname": "pi-01"}
+
+    monkeypatch.setattr(PatchmonClient, "get_host_info", stalls)
+    monkeypatch.setattr(patchmon_module, "_LOOKUP_BUDGET_SECONDS", 0.05)
+    async with _client(build_server(_settings(tmp_path, **API))) as client:
+        response = await _deliver(client, _native_payload(host_name="Living Room Pi"))
+
+    assert response.status_code == 200
+    assert "timed out" in response.json()["ignored"]
     assert FakeSMTP.sent == []
 
 

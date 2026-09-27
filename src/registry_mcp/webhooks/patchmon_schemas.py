@@ -8,7 +8,10 @@
   read from its `server-source-code/internal/queue/notification_worker.go`. Its
   threshold alerts (`host_security_updates_exceeded`,
   `host_pending_updates_exceeded`) name the host in `metadata.host_name` and
-  PatchMon's own id for it in `metadata.host_id`.
+  PatchMon's own id for it in `metadata.host_id`. That name is PatchMon's
+  display name: the friendly name when one is set, which can hold spaces. Such
+  an alert is resolvable by its id instead (`IgnoredAlert.lookup_host_id`), and
+  `normalize()` takes the hostname the webhook looked up.
 
 Every value that can reach the Ansible playbook (host, service, versions, event)
 is held to a character allowlist here, at the edge: no spaces, no pattern
@@ -62,10 +65,15 @@ class PatchAlert:
 
 @dataclass(frozen=True)
 class IgnoredAlert:
-    """A well-formed alert that can't become an approval, and why."""
+    """A well-formed alert that can't become an approval, and why.
+
+    `lookup_host_id` is set when the only problem is the host's name and the
+    alert carries PatchMon's id for it: looking the id up could still name the
+    host exactly."""
 
     event: str
     reason: str
+    lookup_host_id: str | None = None
 
 
 def _host_id(value: object) -> str | None:
@@ -128,21 +136,46 @@ class PatchmonNativeAlert(BaseModel):
     reference: PatchmonReference | None = None
     metadata: dict[str, Any] = {}
 
-    def normalize(self) -> PatchAlert | IgnoredAlert:
-        host_name = str(self.metadata.get("host_name") or "").strip()
-        if not host_name:
-            return IgnoredAlert(self.event_type, "alert names no host (metadata.host_name)")
-        if not _NAME_RE.match(host_name):
-            # PatchMon sends a host's friendly name when it has one, and that
-            # can hold spaces. Patching the wrong host is worse than asking the
-            # operator to rename it, so this is never guessed at.
-            return IgnoredAlert(
-                self.event_type,
-                f"host name {host_name!r} is not a plain inventory host name",
-            )
+    @property
+    def host_id(self) -> str | None:
+        """PatchMon's UUID for the host: `metadata.host_id`, else a host
+        `reference.id`."""
         host_id = _host_id(self.metadata.get("host_id"))
         if host_id is None and self.reference is not None and self.reference.type == "host":
             host_id = _host_id(self.reference.id)
+        return host_id
+
+    def normalize(self, resolved_hostname: str | None = None) -> PatchAlert | IgnoredAlert:
+        """The alert as an approval, or why it can't be one.
+
+        `resolved_hostname` is the `hostname` PatchMon's API holds for this
+        alert's host id. It is used only when `metadata.host_name` isn't a plain
+        inventory name, so an alert that works by its own name never changes
+        target, and it is held to the same allowlist.
+        """
+        host_name = str(self.metadata.get("host_name") or "").strip()
+        host_id = self.host_id
+        if not host_name and not host_id:
+            return IgnoredAlert(self.event_type, "alert names no host (metadata.host_name)")
+        if not _NAME_RE.match(host_name):
+            # PatchMon sends a host's friendly name when it has one, and that
+            # can hold spaces. It is never guessed into an inventory name; only
+            # PatchMon's own record for the host id can stand in for it.
+            reason = (
+                f"host name {host_name!r} is not a plain inventory host name"
+                if host_name
+                else "alert names no host (metadata.host_name)"
+            )
+            resolved = (resolved_hostname or "").strip()
+            if not resolved:
+                return IgnoredAlert(self.event_type, reason, lookup_host_id=host_id)
+            if not _NAME_RE.match(resolved):
+                return IgnoredAlert(
+                    self.event_type,
+                    f"{reason}, and PatchMon's hostname for host {host_id} ({resolved!r}) "
+                    "is not one either",
+                )
+            host_name = resolved
         return PatchAlert(
             event=self.event_type,
             target_host=host_name,

@@ -30,6 +30,7 @@ from registry_mcp.integrations.authentik import register_authentik_tools
 from registry_mcp.integrations.dockhand import register_dockhand_tools
 from registry_mcp.integrations.docs import register_docs_tools
 from registry_mcp.integrations.infisical import register_infisical_tools
+from registry_mcp.integrations.patchmon import build_patchmon_client
 from registry_mcp.integrations.traefik import register_traefik_tools
 from registry_mcp.inventory import InventoryGateStore
 from registry_mcp.logging import configure_logging, get_logger, install_tool_call_logging
@@ -305,6 +306,7 @@ def build_app(settings: Settings | None = None) -> tuple[FastMCP, Runtime]:
         build_notification_provider(settings),
         build_patch_executor(settings),
         read_only=read_only,
+        patchmon=build_patchmon_client(settings),
     )
     register_intake_tools(mcp, settings, reasoner)
     register_service_deploy_tools(
