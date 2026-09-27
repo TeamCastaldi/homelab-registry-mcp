@@ -41,6 +41,7 @@ from registry_mcp.config import Settings, reveal
 from registry_mcp.logging import get_logger
 from registry_mcp.proposal import ProposalEngine
 from registry_mcp.registry import RegistryStore
+from registry_mcp.webhooks.common import read_capped, validation_detail
 from registry_mcp.webhooks.schemas import (
     AlertKind,
     DockhandGenericAlert,
@@ -52,41 +53,6 @@ _log = get_logger("webhooks.dockhand")
 
 # Cap on a raw body echoed into the log by DOCKHAND_WEBHOOK_LOG_RAW_PAYLOAD.
 _RAW_PAYLOAD_LOG_CHARS = 2000
-
-
-async def _read_capped(request: Request, limit: int) -> bytes | None:
-    """The request body, or None as soon as it passes `limit` bytes.
-
-    Reads the stream chunk by chunk and stops at the cap, so a body with no
-    Content-Length (chunked) or a false one is never buffered in full first.
-    """
-    chunks: list[bytes] = []
-    size = 0
-    async for chunk in request.stream():
-        size += len(chunk)
-        if size > limit:
-            return None
-        chunks.append(chunk)
-    return b"".join(chunks)
-
-
-def _validation_detail(exc: ValidationError) -> list[dict[str, str]]:
-    """Project a ValidationError into JSON-serializable detail.
-
-    `ValidationError.errors()` can carry a `ctx` holding the original exception
-    object, which `JSONResponse` cannot encode — serializing it raw would turn
-    the 422 path into a 500.
-    """
-    detail = []
-    for err in exc.errors():
-        detail.append(
-            {
-                "loc": ".".join(str(part) for part in err.get("loc", ())),
-                "msg": str(err.get("msg", "")),
-                "type": str(err.get("type", "")),
-            }
-        )
-    return detail
 
 
 def _parse_alert(payload: Any, *, min_severity: str) -> tuple[NormalizedAlert | None, list[dict]]:
@@ -104,7 +70,7 @@ def _parse_alert(payload: Any, *, min_severity: str) -> tuple[NormalizedAlert | 
         try:
             parsed = model.model_validate(payload)
         except ValidationError as exc:
-            errors.extend(_validation_detail(exc))
+            errors.extend(validation_detail(exc))
             continue
         return parsed.normalize(min_severity=min_severity), []
     return None, errors
@@ -194,7 +160,7 @@ def register_webhook_routes(
 
             # Enforced against the real body as it streams in: Content-Length is
             # a claim, and a chunked request may not send one at all.
-            raw = await _read_capped(request, max_body)
+            raw = await read_capped(request, max_body)
             if raw is None:
                 return JSONResponse({"error": "payload too large"}, status_code=413)
 
