@@ -7,7 +7,6 @@ the real `SmtpNotificationProvider` into a fake `smtplib.SMTP`, and the links a
 test follows are read out of that email, the way a person would get them.
 """
 
-import functools
 import hashlib
 import hmac
 import html
@@ -18,13 +17,11 @@ from datetime import timedelta
 
 import httpx
 import pytest
-import structlog.testing
 from sqlmodel import Session, select
 
 import registry_mcp.patching.executor as executor_module
 import registry_mcp.server as server_module
 from conftest import IsolatedSettings
-from http_fakes import strict_transport
 from registry_mcp.models import PatchApproval, PatchApprovalStatus
 from registry_mcp.models.service import utcnow
 from registry_mcp.patching import PatchApprovalStore
@@ -100,33 +97,6 @@ def ansible(monkeypatch):
     fake = FakeAnsible()
     monkeypatch.setattr(executor_module, "_run", fake)
     return fake
-
-
-class PatchmonTrigger:
-    """PatchMon's trigger endpoint: POST only, bearer token required."""
-
-    def __init__(self, status=200):
-        self.status = status
-        self.requests: list[httpx.Request] = []
-
-    def transport(self):
-        return strict_transport(
-            {"POST /api/v1/patching/trigger": lambda r: httpx.Response(self.status, json={})},
-            captured=self.requests,
-            allowed_methods=("POST",),
-            auth_header=("Authorization", "Bearer pm-token"),
-        )
-
-
-@pytest.fixture
-def patchmon(monkeypatch):
-    trigger = PatchmonTrigger()
-    monkeypatch.setattr(
-        server_module,
-        "build_patch_executor",
-        functools.partial(server_module.build_patch_executor, transport=trigger.transport()),
-    )
-    return trigger
 
 
 def _settings(tmp_path, **overrides):
@@ -251,7 +221,7 @@ async def _intake(client, **payload):
         {"patchmon_approval_base_url": "registry.test"},  # no scheme
         {"notification_provider": "ntfy", "notification_url": "https://ntfy.test"},
         {"notification_provider": "smtp", "notification_to_email": None},
-        {"patchmon_callback_url": None, "patchmon_ansible_playbook": None},
+        {"patchmon_ansible_playbook": None},
     ],
     ids=[
         "disabled",
@@ -415,7 +385,7 @@ async def test_patch_alert_emails_single_use_approve_and_cancel_links(tmp_path):
     assert response.status_code == 202
     body = response.json()
     assert body["status"] == "pending_approval"
-    assert "patchmon.test" in body["execution"]
+    assert body["execution"] == "the Ansible playbook patch.yml against pi-01"
 
     assert len(FakeSMTP.sent) == 1
     message = FakeSMTP.sent[0]
@@ -499,7 +469,7 @@ async def test_undeliverable_email_is_502_and_a_retry_starts_fresh(tmp_path):
 # --- the links: GET shows, POST acts, once ---
 
 
-async def test_opening_the_approve_link_only_shows_a_confirmation(tmp_path, ansible, patchmon):
+async def test_opening_the_approve_link_only_shows_a_confirmation(tmp_path, ansible):
     settings = _settings(tmp_path)
     async with _client(build_server(settings)) as client:
         approve, _ = await _intake(client)
@@ -515,10 +485,10 @@ async def test_opening_the_approve_link_only_shows_a_confirmation(tmp_path, ansi
     assert page.headers["x-frame-options"] == "DENY"
     assert "frame-ancestors 'none'" in page.headers["content-security-policy"]
     assert _only_approval(settings).status == PatchApprovalStatus.pending
-    assert patchmon.requests == [] and ansible.calls == []
+    assert ansible.calls == []
 
 
-async def test_confirming_approve_triggers_patchmon_and_reports_back(tmp_path, ansible, patchmon):
+async def test_confirming_approve_runs_the_playbook_and_reports_back(tmp_path, ansible):
     settings = _settings(tmp_path)
     async with _client(build_server(settings)) as client:
         approve, _ = await _intake(client)
@@ -526,19 +496,24 @@ async def test_confirming_approve_triggers_patchmon_and_reports_back(tmp_path, a
 
     assert response.status_code == 200
     assert "Patch approved" in response.text
-    assert len(patchmon.requests) == 1
-    sent = json.loads(patchmon.requests[0].content)
-    assert sent["target_host"] == "pi-01" and sent["target_version"] == "2024.2.1"
-    assert ansible.calls == []
+    assert len(ansible.playbook_runs) == 1
+    cmd = ansible.playbook_runs[0]
+    assert cmd[cmd.index("--limit") + 1] == "pi-01"
+    assert cmd[-1] == str(tmp_path / "patch.yml")
+    extra = json.loads(cmd[cmd.index("-e") + 1])
+    assert extra["patchmon_target_version"] == "2024.2.1"
 
     approval = _only_approval(settings)
     assert approval.status == PatchApprovalStatus.executed
-    assert approval.executed_via == "patchmon"
+    assert approval.executed_via == "ansible"
     result_email = FakeSMTP.sent[-1]
     assert result_email["Subject"] == "Patch completed: authentik on pi-01"
+    result_plain = result_email.get_body(preferencelist=("plain",)).get_content()
+    assert "Executed via: ansible" in result_plain
+    assert "PLAY RECAP" in result_plain
 
 
-async def test_a_used_approve_link_does_nothing_the_second_time(tmp_path, ansible, patchmon):
+async def test_a_used_approve_link_does_nothing_the_second_time(tmp_path, ansible):
     settings = _settings(tmp_path)
     async with _client(build_server(settings)) as client:
         approve, _ = await _intake(client)
@@ -549,10 +524,10 @@ async def test_a_used_approve_link_does_nothing_the_second_time(tmp_path, ansibl
     assert reused.status_code == reopened.status_code == 409
     assert "already used" in reused.text
     assert "No further action was taken" in reused.text
-    assert len(patchmon.requests) == 1
+    assert len(ansible.playbook_runs) == 1
 
 
-async def test_an_expired_link_shows_a_clean_message_and_runs_nothing(tmp_path, ansible, patchmon):
+async def test_an_expired_link_shows_a_clean_message_and_runs_nothing(tmp_path, ansible):
     settings = _settings(tmp_path)
     async with _client(build_server(settings)) as client:
         approve, _ = await _intake(client)
@@ -569,11 +544,11 @@ async def test_an_expired_link_shows_a_clean_message_and_runs_nothing(tmp_path, 
     assert "expired" in confirmed.text
     assert "No action was taken" in confirmed.text
     assert "Traceback" not in confirmed.text
-    assert patchmon.requests == [] and ansible.calls == []
+    assert ansible.calls == []
     assert _only_approval(settings).status == PatchApprovalStatus.expired
 
 
-async def test_cancel_closes_the_request_and_disarms_approve(tmp_path, ansible, patchmon):
+async def test_cancel_closes_the_request_and_disarms_approve(tmp_path, ansible):
     settings = _settings(tmp_path)
     async with _client(build_server(settings)) as client:
         approve, cancel = await _intake(client)
@@ -584,14 +559,12 @@ async def test_cancel_closes_the_request_and_disarms_approve(tmp_path, ansible, 
     assert "Request cancelled" in cancelled.text
     assert late.status_code == 409
     assert "cancelled" in late.text
-    assert patchmon.requests == [] and ansible.calls == []
+    assert ansible.calls == []
     assert _only_approval(settings).status == PatchApprovalStatus.cancelled
 
 
 @pytest.mark.parametrize("method", ["GET", "POST"])
-async def test_unknown_or_cross_action_token_is_404_and_harmless(
-    tmp_path, ansible, patchmon, method
-):
+async def test_unknown_or_cross_action_token_is_404_and_harmless(tmp_path, ansible, method):
     async with _client(build_server(_settings(tmp_path))) as client:
         _, cancel = await _intake(client)
         # A cancel token presented at the approve route is not an approval.
@@ -602,67 +575,23 @@ async def test_unknown_or_cross_action_token_is_404_and_harmless(
 
     assert cross.status_code == unknown.status_code == 404
     assert "No action was taken" in unknown.text
-    assert patchmon.requests == [] and ansible.calls == []
+    assert ansible.calls == []
 
 
-async def test_token_in_the_query_string_alone_can_confirm(tmp_path, ansible, patchmon):
+async def test_token_in_the_query_string_alone_can_confirm(tmp_path, ansible):
     """The form posts back to the URL it came from, so the token rides along
     in the query even if a client drops the form body."""
     async with _client(build_server(_settings(tmp_path))) as client:
         approve, _ = await _intake(client)
         response = await client.post(_path(approve))
     assert response.status_code == 200
-    assert len(patchmon.requests) == 1
-
-
-# --- execution fallback, end to end ---
-
-
-async def test_unreachable_patchmon_falls_back_to_ansible_with_a_logged_reason(
-    tmp_path, ansible, monkeypatch
-):
-    def refuse(request):
-        raise httpx.ConnectError("connection refused", request=request)
-
-    monkeypatch.setattr(
-        server_module,
-        "build_patch_executor",
-        functools.partial(
-            server_module.build_patch_executor, transport=httpx.MockTransport(refuse)
-        ),
-    )
-    settings = _settings(tmp_path)
-    with structlog.testing.capture_logs() as logs:
-        async with _client(build_server(settings)) as client:
-            approve, _ = await _intake(client)
-            await client.post(_path(approve), data={"token": _token(approve)})
-
     assert len(ansible.playbook_runs) == 1
-    cmd = ansible.playbook_runs[0]
-    assert cmd[cmd.index("--limit") + 1] == "pi-01"
-    approval = _only_approval(settings)
-    assert approval.status == PatchApprovalStatus.executed
-    assert approval.executed_via == "ansible"
-    fallback = [e for e in logs if e.get("event") == "patch_execution_fallback_ansible"]
-    assert len(fallback) == 1
-    assert "unreachable" in fallback[0]["reason"]
-    result_plain = FakeSMTP.sent[-1].get_body(preferencelist=("plain",)).get_content()
-    assert "Ansible fallback reason: PatchMon callback failed: unreachable" in result_plain
 
 
-async def test_without_a_callback_url_approval_runs_the_playbook(tmp_path, ansible, patchmon):
-    settings = _settings(tmp_path, patchmon_callback_url=None)
-    async with _client(build_server(settings)) as client:
-        approve, _ = await _intake(client)
-        await client.post(_path(approve), data={"token": _token(approve)})
-
-    assert patchmon.requests == []
-    assert len(ansible.playbook_runs) == 1
-    assert _only_approval(settings).executed_via == "ansible"
+# --- execution outcome, end to end ---
 
 
-async def test_failed_patch_is_recorded_and_reported(tmp_path, monkeypatch, patchmon):
-    patchmon.status = 500
+async def test_failed_patch_is_recorded_and_reported(tmp_path, monkeypatch):
     failing = FakeAnsible(rc=2)
     monkeypatch.setattr(executor_module, "_run", failing)
     settings = _settings(tmp_path)
@@ -676,7 +605,7 @@ async def test_failed_patch_is_recorded_and_reported(tmp_path, monkeypatch, patc
     assert FakeSMTP.sent[-1]["Subject"] == "Patch FAILED: authentik on pi-01"
 
 
-async def test_read_only_server_shows_links_but_never_acts(tmp_path, ansible, patchmon):
+async def test_read_only_server_shows_links_but_never_acts(tmp_path, ansible):
     healthy = _settings(tmp_path)
     async with _client(build_server(healthy)) as client:
         approve, _ = await _intake(client)
@@ -689,4 +618,4 @@ async def test_read_only_server_shows_links_but_never_acts(tmp_path, ansible, pa
     assert opened.status_code == confirmed.status_code == 503
     assert "read-only" in confirmed.text
     assert _only_approval(healthy).status == PatchApprovalStatus.pending
-    assert patchmon.requests == [] and ansible.calls == []
+    assert ansible.calls == []
