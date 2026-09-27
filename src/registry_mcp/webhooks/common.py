@@ -2,8 +2,24 @@
 
 from __future__ import annotations
 
+import re
+
 from pydantic import ValidationError
 from starlette.requests import Request
+
+# C0/C1 controls (line breaks included), Unicode line/paragraph separators, and
+# the bidirectional marks and overrides that can make text display out of order.
+_UNSAFE_TEXT_RE = re.compile(
+    r"[\x00-\x1f\x7f-\x9f\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]"
+)
+
+
+def one_line(value: object, limit: int) -> str:
+    """Sender-supplied text as a single display-safe line of at most `limit`
+    characters. Anything that could break a line, and so forge one (a second
+    "Approve:" link in a plain-text email), becomes a space."""
+    text = " ".join(_UNSAFE_TEXT_RE.sub(" ", "" if value is None else str(value)).split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 async def read_capped(request: Request, limit: int) -> bytes | None:

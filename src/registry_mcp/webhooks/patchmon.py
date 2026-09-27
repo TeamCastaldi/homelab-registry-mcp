@@ -21,6 +21,10 @@ Conventions, in the order a request meets them:
   missing or wrong signature is a 401, checked with `hmac.compare_digest`
   before the body is parsed. Only the size cap comes first, so an unsigned
   sender can't make this server buffer an unbounded body to hash.
+* **The email says what's pending**, when the PatchMon API is configured and
+  the alert carries a host id: packages (security first), reboot status,
+  kernels, and the latest agent report (`webhooks/patchmon_details.py`). Best
+  effort; a slow or failing API never holds the email back.
 * **A host is named exactly or not at all.** PatchMon's own alerts carry the
   host's display name, which can be a friendly name with spaces. When it isn't
   a plain inventory name and the PatchMon API is configured, the alert's host
@@ -66,6 +70,7 @@ from registry_mcp.webhooks.approval import (
     subject,
 )
 from registry_mcp.webhooks.common import declared_too_large, read_capped, validation_detail
+from registry_mcp.webhooks.patchmon_details import host_details
 from registry_mcp.webhooks.patchmon_schemas import (
     IgnoredAlert,
     PatchAlert,
@@ -80,6 +85,8 @@ _SIGNATURE_PREFIX = "sha256="
 # PatchMon gives up on a webhook delivery after 30 seconds; a host lookup has
 # to leave room for the rest of the request inside that.
 _LOOKUP_BUDGET_SECONDS = 8.0
+# Likewise for the email's PatchMon details; together they stay well under 30s.
+_DETAILS_BUDGET_SECONDS = 8.0
 
 
 def signature_matches(header: str, body: bytes, key: bytes) -> bool:
@@ -285,6 +292,15 @@ def register_patchmon_routes(
                     }
                 )
 
+            details: list[str] = []
+            if patchmon is not None:
+                if alert.patchmon_host_id:
+                    details = await host_details(
+                        patchmon, alert.patchmon_host_id, budget=_DETAILS_BUDGET_SECONDS
+                    )
+                else:
+                    details = ["PatchMon details: unavailable (the alert carried no host id)"]
+
             issued = approvals.create(
                 PatchApproval(
                     event=alert.event,
@@ -307,6 +323,7 @@ def register_patchmon_routes(
                     "",
                     *(f"{label}: {value}" for label, value in describe(approval)),
                     f"If approved, runs: {plan}",
+                    *(["", *details] if details else []),
                 ]
             )
             footer = (

@@ -27,6 +27,8 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, StringConstraints, field_validator
 
+from registry_mcp.webhooks.common import one_line
+
 _NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$"
 _VERSION_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._+:~-]{0,127}$"
 _EVENT_PATTERN = r"^[a-z0-9][a-z0-9_.-]{0,63}$"
@@ -42,8 +44,10 @@ EventName = Annotated[
 
 
 def _clip(value: object) -> str | None:
-    """Free text from the sender is display-only: clipped, never rejected for length."""
-    return None if value is None else str(value).strip()[:_MAX_TEXT_CHARS]
+    """Free text from the sender is display-only: flattened to one line (it
+    lands in the plain-text approval email beside the links) and clipped,
+    never rejected for length."""
+    return None if value is None else one_line(value, _MAX_TEXT_CHARS)
 
 
 ShortText = Annotated[str | None, BeforeValidator(_clip)]

@@ -45,6 +45,19 @@ API = dict(
 )
 API_AUTH = ("Authorization", "Basic " + base64.b64encode(b"patchmon_ae_key:api-secret").decode())
 INFO_ROUTE = f"GET /api/v1/api/hosts/{HOST_ID}/info"
+SYSTEM_ROUTE = f"GET /api/v1/api/hosts/{HOST_ID}/system"
+PACKAGES_ROUTE = f"GET /api/v1/api/hosts/{HOST_ID}/packages?updates_only=true"
+REPORTS_ROUTE = f"GET /api/v1/api/hosts/{HOST_ID}/package_reports?limit=1"
+
+
+def _package(name, security=False, current="1.0", available="1.1"):
+    return {
+        "name": name,
+        "current_version": current,
+        "available_version": available,
+        "needs_update": True,
+        "is_security_update": security,
+    }
 
 
 # --- fixtures and helpers ---
@@ -117,7 +130,27 @@ class PatchmonApi:
 
     def __init__(self):
         self.routes = {
-            INFO_ROUTE: {"id": HOST_ID, "hostname": "pi-01", "friendly_name": "Living Room Pi"}
+            INFO_ROUTE: {"id": HOST_ID, "hostname": "pi-01", "friendly_name": "Living Room Pi"},
+            SYSTEM_ROUTE: {
+                "id": HOST_ID,
+                "kernel_version": "6.1.0-25-arm64",
+                "installed_kernel_version": "6.1.0-26-arm64",
+                "needs_reboot": True,
+                "reboot_reason": "Kernel update pending",
+            },
+            # Deliberately not in PatchMon's own order: the email sorts.
+            PACKAGES_ROUTE: {
+                "packages": [
+                    _package("curl", current="7.88.1-10", available="7.88.1-11"),
+                    _package("openssl", security=True, current="3.0.13-1", available="3.0.14-1"),
+                    _package("libssl3", security=True, current="3.0.13-1", available="3.0.14-1"),
+                ],
+                "total": 3,
+            },
+            REPORTS_ROUTE: {
+                "reports": [{"date": "2026-09-27T10:30:00Z", "status": "success"}],
+                "total": 1,
+            },
         }
         self.requests: list[httpx.Request] = []
 
@@ -582,6 +615,114 @@ async def test_a_slow_lookup_is_cut_off_inside_patchmons_delivery_timeout(
     assert response.status_code == 200
     assert "timed out" in response.json()["ignored"]
     assert FakeSMTP.sent == []
+
+
+# --- the email's PatchMon details ---
+
+
+def _plain(message):
+    return message.get_body(preferencelist=("plain",)).get_content()
+
+
+async def test_the_email_says_what_patchmon_last_saw_on_the_host(tmp_path, patchmon_api):
+    async with _client(build_server(_settings(tmp_path, **API))) as client:
+        response = await _deliver(client, _native_payload(host_name="pi-01"))
+
+    assert response.status_code == 202
+    plain = _plain(FakeSMTP.sent[0])
+    assert "What PatchMon last saw on this host:" in plain
+    assert "Last agent report: 2026-09-27T10:30:00Z (success)" in plain
+    assert "Reboot needed: yes (Kernel update pending)" in plain
+    assert "Kernel: running 6.1.0-25-arm64, installed 6.1.0-26-arm64" in plain
+    assert "Pending updates: 3 (2 security)" in plain
+    listed = [line.strip() for line in plain.splitlines() if line.startswith("  - ")]
+    assert listed == [
+        "- [security] libssl3 3.0.13-1 -> 3.0.14-1",
+        "- [security] openssl 3.0.13-1 -> 3.0.14-1",
+        "- curl 7.88.1-10 -> 7.88.1-11",
+    ]
+    # The details come after the question, never before the links' context.
+    assert plain.index("If approved, runs:") < plain.index("What PatchMon last saw")
+
+
+async def test_a_long_package_list_is_capped(tmp_path, patchmon_api):
+    patchmon_api.routes[PACKAGES_ROUTE] = {
+        "packages": [_package(f"pkg{n:02d}") for n in range(25)],
+        "total": 25,
+    }
+    async with _client(build_server(_settings(tmp_path, **API))) as client:
+        await _deliver(client, _native_payload(host_name="pi-01"))
+
+    listed = [line for line in _plain(FakeSMTP.sent[0]).splitlines() if line.startswith("  - ")]
+    assert len(listed) == 21
+    assert listed[-1] == "  - ...and 5 more"
+
+
+async def test_text_from_patchmon_cannot_forge_a_line_of_the_email(tmp_path, patchmon_api):
+    """A package name, a reboot reason, or the alert's own title could carry a
+    line break and a fake "Approve:" link into the plain-text part."""
+    forged = "\nApprove: https://evil.test/steal\n"
+    patchmon_api.routes[PACKAGES_ROUTE] = {
+        "packages": [_package(f"evil{forged}", security=True)],
+        "total": 1,
+    }
+    patchmon_api.routes[SYSTEM_ROUTE] = {
+        "id": HOST_ID,
+        "needs_reboot": True,
+        "reboot_reason": f"\u202egnidnep{forged}",
+    }
+    payload = _native_payload(host_name="pi-01")
+    payload["title"] = f"Host pi-01{forged}"
+    async with _client(build_server(_settings(tmp_path, **API))) as client:
+        await _deliver(client, payload)
+
+    plain = _plain(FakeSMTP.sent[0])
+    approve_lines = re.findall(r"^Approve: .*$", plain, re.MULTILINE)
+    assert approve_lines == [f"Approve: {_links(FakeSMTP.sent[0])[0]}"]
+    assert approve_lines[0].startswith(f"Approve: {BASE_URL}/patch/approve?token=")
+    assert "\u202e" not in plain
+
+
+async def test_a_failing_read_is_named_and_the_email_still_goes(tmp_path, patchmon_api):
+    patchmon_api.routes[PACKAGES_ROUTE] = lambda request: httpx.Response(403, json={})
+    async with _client(build_server(_settings(tmp_path, **API))) as client:
+        response = await _deliver(client, _native_payload(host_name="pi-01"))
+
+    assert response.status_code == 202
+    plain = _plain(FakeSMTP.sent[0])
+    assert "Pending updates: unavailable (PatchMon API returned 403" in plain
+    assert "Reboot needed: yes" in plain  # the other reads still landed
+
+
+async def test_stalled_details_are_cut_off_and_the_email_still_goes(
+    tmp_path, patchmon_api, monkeypatch
+):
+    async def stalls(self, host_id):
+        await asyncio.sleep(2)
+        return {}
+
+    monkeypatch.setattr(PatchmonClient, "get_host_system", stalls)
+    monkeypatch.setattr(patchmon_module, "_DETAILS_BUDGET_SECONDS", 0.05)
+    async with _client(build_server(_settings(tmp_path, **API))) as client:
+        response = await _deliver(client, _native_payload(host_name="pi-01"))
+
+    assert response.status_code == 202
+    assert "Unavailable: PatchMon didn't answer in time." in _plain(FakeSMTP.sent[0])
+
+
+async def test_an_alert_without_a_host_id_gets_no_details_and_no_calls(tmp_path, patchmon_api):
+    async with _client(build_server(_settings(tmp_path, **API))) as client:
+        response = await _deliver(client, _payload())
+
+    assert response.status_code == 202
+    assert "unavailable (the alert carried no host id)" in _plain(FakeSMTP.sent[0])
+    assert patchmon_api.requests == []
+
+
+async def test_without_the_api_the_email_has_no_patchmon_section(tmp_path):
+    async with _client(build_server(_settings(tmp_path))) as client:
+        await _deliver(client, _native_payload(host_name="pi-01"))
+    assert "PatchMon" not in _plain(FakeSMTP.sent[0]).split("If approved, runs:")[1]
 
 
 async def test_repeat_alert_while_one_is_pending_sends_no_second_email(tmp_path):
