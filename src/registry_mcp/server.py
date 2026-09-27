@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import anyio
+import httpx
 import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from mcp.server.fastmcp import FastMCP
@@ -18,7 +19,7 @@ from starlette.applications import Starlette
 
 from registry_mcp import __version__
 from registry_mcp.adoption import AdoptionDraftStore
-from registry_mcp.config import Settings, get_settings
+from registry_mcp.config import Settings, get_settings, reveal
 from registry_mcp.config_report import build_report, process_environ
 from registry_mcp.deletion import DeletionGateStore
 from registry_mcp.discovery.engine import DiscoveryEngine, build_sources
@@ -35,6 +36,7 @@ from registry_mcp.inventory import InventoryGateStore
 from registry_mcp.logging import configure_logging, get_logger, install_tool_call_logging
 from registry_mcp.normalization import NormalizationEngine, NormalizationGenerator, schedule_trigger
 from registry_mcp.normalization.rules import network_names
+from registry_mcp.patching import PatchApprovalStore, PatchExecutor
 from registry_mcp.proposal import AdoptionGenerator, PatchGenerator, ProposalEngine, ProposalStore
 from registry_mcp.providers.git import GitProvider, build_git_provider
 from registry_mcp.providers.notification import build_notification_provider
@@ -53,7 +55,7 @@ from registry_mcp.tools import (
     register_secrets_tools,
     register_service_deploy_tools,
 )
-from registry_mcp.webhooks import register_webhook_routes
+from registry_mcp.webhooks import register_patchmon_routes, register_webhook_routes
 
 # Tools that only touch this server's own state: its SQLite DB, the local
 # homelab clone (secrets_*), and the Ansible inventory file. Every other tool
@@ -124,7 +126,8 @@ def build_transport_security(settings: Settings) -> TransportSecuritySettings:
     FastMCP only enables it on its own for a 127.0.0.1/localhost bind, so the
     default 0.0.0.0 bind otherwise accepts any Host and Origin — letting a
     browser page on the LAN drive every tool via DNS rebinding. Custom routes
-    (the Dockhand webhook) sit outside this check and keep their own auth.
+    (the Dockhand and Patchmon webhooks, the patch approval links) sit outside
+    this check and keep their own auth.
     """
     return TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
@@ -188,6 +191,24 @@ def build_normalization_engine(
     )
 
 
+def build_patch_executor(
+    settings: Settings, *, transport: httpx.AsyncBaseTransport | None = None
+) -> PatchExecutor:
+    """The Patchmon approval executor: PatchMon's trigger API, then the
+    operator's playbook over the same Ansible plumbing hardware-discover-now uses."""
+    return PatchExecutor(
+        callback_url=settings.patchmon_callback_url,
+        api_token=reveal(settings.patchmon_api_token),
+        callback_timeout_seconds=settings.patchmon_callback_timeout_seconds,
+        playbook=settings.patchmon_ansible_playbook,
+        ansible_cfg_path=settings.ansible_cfg_path,
+        ssh_key_path=settings.ssh_key_path,
+        ssh_user=settings.ssh_default_user,
+        ansible_timeout_seconds=settings.patchmon_ansible_timeout_seconds,
+        transport=transport,
+    )
+
+
 def build_server(settings: Settings | None = None) -> FastMCP:
     """Construct the FastMCP server and register its tools."""
     return build_app(settings)[0]
@@ -225,6 +246,8 @@ def build_app(settings: Settings | None = None) -> tuple[FastMCP, Runtime]:
     deletion_gate.purge_expired()
     inventory_gate = InventoryGateStore(store.engine)
     inventory_gate.purge_expired()
+    patch_approvals = PatchApprovalStore(store.engine)
+    patch_approvals.purge_expired()
     adoption_generator = AdoptionGenerator(
         reasoner, threshold=settings.proposal_confidence_threshold
     )
@@ -282,6 +305,14 @@ def build_app(settings: Settings | None = None) -> tuple[FastMCP, Runtime]:
         read_only=read_only,
     )
     register_webhook_routes(mcp, settings, store, proposal_engine, read_only=read_only)
+    register_patchmon_routes(
+        mcp,
+        settings,
+        patch_approvals,
+        build_notification_provider(settings),
+        build_patch_executor(settings),
+        read_only=read_only,
+    )
     register_intake_tools(mcp, settings, reasoner)
     register_service_deploy_tools(
         mcp,

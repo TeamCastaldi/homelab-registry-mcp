@@ -152,11 +152,14 @@ def test_settings_for_a_feature_that_is_off_are_listed():
 def test_a_shared_setting_is_unused_only_when_every_feature_reading_it_is_off():
     unused = report(ssh_default_user="admin")["for_features_off"]
     assert unused == [
-        {"key": "SSH_DEFAULT_USER", "features_off": ["Brownfield adoption", "Hardware discovery"]}
+        {
+            "key": "SSH_DEFAULT_USER",
+            "features_off": ["Brownfield adoption", "Patchmon webhook", "Hardware discovery"],
+        }
     ]
-    assert "SSH_DEFAULT_USER: Brownfield adoption and Hardware discovery are off" in (
-        config_report.render_text(report(ssh_default_user="admin"))
-    )
+    assert (
+        "SSH_DEFAULT_USER: Brownfield adoption, Patchmon webhook and Hardware discovery are off"
+    ) in (config_report.render_text(report(ssh_default_user="admin")))
     in_use = report(ssh_default_user="admin", ansible_cfg_path="/a.cfg", ssh_key_path="/k")
     assert in_use["for_features_off"] == []
 

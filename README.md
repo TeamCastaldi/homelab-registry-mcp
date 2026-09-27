@@ -60,6 +60,10 @@ query and act on.
 - Accepts Dockhand's outbound update and CVE alerts via a webhook and turns
   them into staged pull requests through the same review-gated flow — see
   ADR-010.
+- Accepts PatchMon's signed pending-patch alerts and emails you Approve/Cancel
+  buttons: approving (and confirming) runs the patch through PatchMon's API, or
+  your own Ansible playbook against that one host if PatchMon can't — see
+  ADR-020.
 
 ## How to run
 
@@ -157,11 +161,13 @@ In Claude Desktop, add an MCP server with the same URL under Settings.
 - [docs/ADRs/ADR-017-Infisical-Whole-Project-Visibility.md](docs/ADRs/ADR-017-Infisical-Whole-Project-Visibility.md) — extends ADR-016 to an opt-in whole-project recursive scan across every service's Infisical folder, still never a value
 - [docs/ADRs/ADR-018-Repo-Intake-For-Conversational-Deploy.md](docs/ADRs/ADR-018-Repo-Intake-For-Conversational-Deploy.md) — Phase 1 of the conversational deploy plan: a read-only `service-intake-repo` tool that shallow-clones a foreign repo and extracts its runtime requirements, off by default via `SERVICE_DEPLOY_ENABLED`
 - [docs/ADRs/ADR-019-Compose-Generation-For-Conversational-Deploy.md](docs/ADRs/ADR-019-Compose-Generation-For-Conversational-Deploy.md) — Phase 2 of the conversational deploy plan: a read-only `service-deploy-generate-compose` tool that drafts a homelab-conformant compose file from intake, confidence-gated with no fallback and canonicalized by the normalization formatter
+- [docs/ADRs/ADR-020-Patchmon-Webhook-Email-Approval.md](docs/ADRs/ADR-020-Patchmon-Webhook-Email-Approval.md) — PatchMon alerts arrive HMAC-verified at `POST /webhooks/patchmon` and become emailed, single-use Approve/Cancel links; an approval runs PatchMon's trigger API first and an operator playbook second
 - [docs/SOPs/SOP-001-Deploy-New-Service.md](docs/SOPs/SOP-001-Deploy-New-Service.md) — runbook for deploying a new service to an onboarded node
 - [docs/SOPs/SOP-002-Connect-Dockhand-Webhook.md](docs/SOPs/SOP-002-Connect-Dockhand-Webhook.md) — runbook for pointing Dockhand at the update webhook
 - [docs/SOPs/SOP-003-Enable-Service-Reset-Action.md](docs/SOPs/SOP-003-Enable-Service-Reset-Action.md) — draft: runbook for standing up the not-yet-implemented service reset action (companion to ADR-014)
 - [docs/SOPs/SOP-004-Verify-Ansible-Control-Plane-Plumbing.md](docs/SOPs/SOP-004-Verify-Ansible-Control-Plane-Plumbing.md) — runbook for verifying `ANSIBLE_CFG_PATH`/`SSH_KEY_PATH`-driven Ansible execution actually works end-to-end
 - [docs/SOPs/SOP-005-Connect-Infisical-Machine-Identity.md](docs/SOPs/SOP-005-Connect-Infisical-Machine-Identity.md) — runbook for creating the Infisical Machine Identity `infisical_status` authenticates with
+- [docs/SOPs/SOP-007-Connect-Patchmon-Webhook.md](docs/SOPs/SOP-007-Connect-Patchmon-Webhook.md) — runbook for pointing PatchMon at the email-approval webhook
 - [docs/plans/phase-d.md](docs/plans/phase-d.md) — historical: migration from workload node to a dedicated control-plane node. The migration itself is complete; its Traefik static-backend routing model is superseded by ADR-006/ADR-007, which co-locate Traefik on the same node behind standard Docker labels
 - [docs/plans/2026-09-test-suite-audit.md](docs/plans/2026-09-test-suite-audit.md) — test-suite audit (2026-09-25): a KEEP/REWRITE verdict for every test file, the mutation probes behind each claim, and a prioritized remediation plan; the per-file JSON verdicts are in the companion `2026-09-test-suite-audit-verdicts.jsonl`. Tiers 1–3 complete; Tier 4 superseded by the plan below
 - [docs/plans/2026-09-mutation-testing-remediation.md](docs/plans/2026-09-mutation-testing-remediation.md) — phased plan for the 4,226 surviving mutants a full `mutmut` run found across 67 files, ordered by risk and density starting with the write path (`proposal/engine.py`, `gitcrypt.py`, the Git providers). Not started

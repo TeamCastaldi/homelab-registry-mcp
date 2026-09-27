@@ -31,6 +31,10 @@ from registry_mcp.models.inventory import (
     PendingInventoryWrite,
     PendingInventoryWriteStatus,
 )
+from registry_mcp.models.patch_approval import (
+    PatchApproval,
+    PatchApprovalStatus,
+)
 from registry_mcp.models.proposal import (
     FindingType,
     Proposal,
@@ -62,6 +66,8 @@ __all__ = [
     "HardwareNode",
     "NodeRole",
     "NodeStatus",
+    "PatchApproval",
+    "PatchApprovalStatus",
     "PendingDeletion",
     "PendingDeletionStatus",
     "PendingInventoryWrite",

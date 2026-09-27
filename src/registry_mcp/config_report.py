@@ -215,6 +215,28 @@ _FEATURES = (
         ),
     ),
     _Feature(
+        "Patchmon webhook",
+        lambda s: s.patchmon_webhook_enabled,
+        (
+            "patchmon_webhook_secret",
+            "patchmon_approval_base_url",
+            "notification_smtp_host",
+            "notification_from_email",
+            "notification_to_email",
+            "patchmon_callback_url|patchmon_ansible_playbook",
+        ),
+        (
+            "patchmon_webhook_path",
+            "patchmon_webhook_max_body_bytes",
+            "patchmon_webhook_events",
+            "patchmon_approval_ttl_minutes",
+            "patchmon_api_token",
+            "patchmon_callback_timeout_seconds",
+            "patchmon_ansible_timeout_seconds",
+            "ssh_default_user",
+        ),
+    ),
+    _Feature(
         "Hardware discovery",
         lambda s: bool(s.ansible_cfg_path or s.ssh_key_path),
         ("ansible_cfg_path", "ssh_key_path"),
@@ -272,6 +294,11 @@ def _warnings(settings: Settings, environ: Mapping[str, str]) -> list[str]:
     ):
         warnings.append(
             "Reasoning layer (DSPy) is on, but neither DSPY_API_KEY nor ANTHROPIC_API_KEY is set"
+        )
+    if settings.patchmon_webhook_enabled and settings.notification_provider != "smtp":
+        warnings.append(
+            "Patchmon webhook is on, but NOTIFICATION_PROVIDER is not smtp: approval links "
+            "are sent by email only, so its routes stay unregistered"
         )
     for setting, why in _NO_EFFECT.items():
         if setting in settings.model_fields_set:

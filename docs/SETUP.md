@@ -220,6 +220,30 @@ header-carrying URL is actually honored, with Dockhand pointed at that
 sidecar instead. SOP-002 walks through deploying and wiring it up; see
 [ADR-010](ADRs/ADR-010-Dockhand-Update-Webhook.md) for why.
 
+## Connecting PatchMon
+
+If you run [PatchMon](https://github.com/PatchMon/PatchMon), its pending-patch
+alerts can arrive as an email with **Approve** and **Cancel** buttons. Approving,
+then confirming the page the link opens, runs the patch through PatchMon's own
+API, or through your Ansible playbook against that one host if PatchMon can't.
+Off by default.
+
+The full procedure is
+[SOP-007](SOPs/SOP-007-Connect-Patchmon-Webhook.md). The short version:
+
+```bash
+PATCHMON_WEBHOOK_ENABLED=true
+PATCHMON_WEBHOOK_SECRET=<the signing secret set on PatchMon's webhook destination>
+PATCHMON_APPROVAL_BASE_URL=https://registry-mcp.example.com
+PATCHMON_CALLBACK_URL=https://patchmon.example.com/api/v1/patching/trigger   # and/or:
+PATCHMON_ANSIBLE_PLAYBOOK=/opt/homelab/ansible/playbooks/patch-host.yml
+```
+
+It needs `NOTIFICATION_PROVIDER=smtp`: the links are sent by email only. Route
+`/webhooks/patchmon`, `/patch/approve`, and `/patch/cancel` through Traefik
+*without* ForwardAuth. See
+[ADR-020](ADRs/ADR-020-Patchmon-Webhook-Email-Approval.md) for the design.
+
 ## Troubleshooting
 
 - **Not sure which settings are missing, mistyped, or no longer needed?** Ask
@@ -275,3 +299,5 @@ sidecar instead. SOP-002 walks through deploying and wiring it up; see
   design rationale for the Dockhand update webhook
 - [docs/SOPs/SOP-002-Connect-Dockhand-Webhook.md](SOPs/SOP-002-Connect-Dockhand-Webhook.md) —
   step-by-step runbook for wiring Dockhand up
+- [docs/SOPs/SOP-007-Connect-Patchmon-Webhook.md](SOPs/SOP-007-Connect-Patchmon-Webhook.md) —
+  step-by-step runbook for PatchMon's email-approval webhook
