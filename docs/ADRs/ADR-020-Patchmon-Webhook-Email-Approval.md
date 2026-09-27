@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Accepted |
+| **Status** | Accepted; [amended 2026-09-27](#amendment-2026-09-27-ansible-only-patchmon-read-only): Ansible is the only execution path, and PatchMon is read-only again |
 | **Related** | [ADR-010](ADR-010-Dockhand-Update-Webhook.md) (the first inbound webhook, whose fail-closed shape this copies); [ADR-014](ADR-014-Service-State-Reset-Action-Tool.md) (draft: the first sketch of a human-confirmed live action); [SOP-007](../SOPs/SOP-007-Connect-Patchmon-Webhook.md) (setup) |
 | **Date** | 2026-09-27 |
 
@@ -54,14 +54,16 @@ bearer auth.
 - **Two payload shapes.** `PatchmonWebhookSchema` is the flat
   `{event, service, target_host, current_version, target_version, patchmon_callback_url}`
   shape. `PatchmonNativeAlert` is PatchMon's own generic body. Both normalize to
-  one `PatchAlert`.
+  one `PatchAlert`. *(Amended: `patchmon_callback_url` is now ignored if sent.)*
 - **An allowlist at the edge.** Host, service, version, and event values are
   held to a character allowlist in the schema: no spaces, no Ansible pattern
   characters (`,:!&*`), no leading `-`, no `{`/`}`. Nothing that reaches
   `--limit` or the playbook's extra-vars can widen the target or carry a Jinja
   template. PatchMon sends a host's *friendly* name when it has one. A name that
   fails the allowlist is acknowledged (200, `ignored`), never mapped to a guessed
-  inventory name.
+  inventory name. *(Amended: with the PatchMon API configured, the alert's
+  `host_id` is looked up and PatchMon's recorded `hostname` stands in, under the
+  same allowlist. That is a lookup, not a guess.)*
 - **Response conventions follow ADR-010.** An event not in
   `PATCHMON_WEBHOOK_EVENTS`, an unusable host name, or an alert that already has
   a pending approval gets a 200, so PatchMon doesn't retry a condition that
@@ -100,6 +102,11 @@ bearer auth.
 
 ### 3. Execution: PatchMon first, the operator's playbook second
 
+> **Superseded by the [2026-09-27 amendment](#amendment-2026-09-27-ansible-only-patchmon-read-only).**
+> Step 1 (the PatchMon callback) never worked for longer than a login session and
+> was removed; step 2's playbook run is now the only path, with the same one-host
+> check. Kept below as the original decision.
+
 `patching/executor.py`, reached only from a confirmed Approve POST and run after
 the response is sent (a playbook can outlast a proxy's timeout). The operator
 gets a result email when it finishes.
@@ -130,7 +137,8 @@ The executor never raises. A crash in either path is recorded as `failed`.
 
 The routes register only when `PATCHMON_WEBHOOK_ENABLED=true` **and** a signing
 secret, `PATCHMON_APPROVAL_BASE_URL`, an SMTP provider, and at least one
-execution path (callback URL or playbook) are all present. Otherwise nothing is
+execution path (callback URL or playbook) are all present. *(Amended: the
+playbook, `PATCHMON_ANSIBLE_PLAYBOOK`, is now required.)* Otherwise nothing is
 mounted, and the refusal is logged as `patchmon_webhook_disabled` naming the
 missing setting. In read-only mode (the startup health check failed), the
 webhook answers 403 and the links show a 503 page without consuming the token.
@@ -147,7 +155,8 @@ Once the server comes back healthy, a still-unexpired link works.
 - **Upstream APIs are read-only** now has one exception: the PatchMon trigger
   callback, which is PatchMon's own API for exactly this action and runs only
   after a human confirms. Traefik, Authentik, Docker, and Dockhand are
-  unaffected.
+  unaffected. *(Withdrawn by the amendment: nothing here writes to PatchMon
+  any more, so the convention holds without exception.)*
 - **There is no browser-facing route on this port** is no longer true:
   `/patch/approve` and `/patch/cancel` are. Like `/webhooks/*`, they sit outside
   `/mcp`'s transport-security check and authenticate in-process, so they must
@@ -162,6 +171,8 @@ Once the server comes back healthy, a still-unexpired link works.
 - Execution prefers the tool that knows the host's packages (PatchMon), and
   falls back to the operator's own playbook when PatchMon can't be reached or
   lacks the API (its patch routes sit behind its Plus-tier `patching` module).
+  *(Superseded by the amendment. The module gate doesn't apply to a
+  self-hosted, single-context PatchMon; the session-only auth does.)*
 - Every property the design depends on (401 before parsing, GET never acts,
   single use, expiry, origin pinning, the one-host check, the fallback) has a
   test that was confirmed to fail when that property is removed.
@@ -176,19 +187,109 @@ Once the server comes back healthy, a still-unexpired link works.
   replay is deduped. After that, it can only produce another approval email,
   never a patch.
 - **A callback that times out may still have started a run on PatchMon's side.**
-  The fallback then runs too. The playbook should be safe to run against a host
+  *(Gone with the callback.)* The fallback then runs too. The playbook should be safe to run against a host
   that's already patching (package managers take a lock, so the second run
   fails rather than interleaving).
 - **An approval whose server stops mid-execution stays `approved`.** The
   outcome is lost. Execution runs as a background task, not a durable job queue.
 - PatchMon's `/patching/trigger` expects a user session token. A long-lived
   `PATCHMON_API_TOKEN` may not satisfy it on every PatchMon version. When it
-  doesn't, the call returns 401 and the fallback runs.
+  doesn't, the call returns 401 and the fallback runs. *(It never does; see the
+  amendment.)*
+
+## Amendment (2026-09-27): Ansible only, PatchMon read-only
+
+### What was found
+
+PatchMon's source (`server-source-code/internal/server/router.go`, read at
+commit `0557606`) mounts `POST /api/v1/patching/trigger` inside the router group
+guarded by `AuthWithSessionCheck`. That middleware accepts only a JWT *access*
+token bound to a login session, issued by `POST /api/v1/auth/login` for a
+username and password (and a 2FA code when it's on), and expiring after
+`JWT_EXPIRES_IN` (default `1h`). PatchMon has no long-lived token that reaches
+that route. Its Integration API credentials are checked by a different
+middleware (`ApiAuth`) that covers only `/api/v1/api/*`.
+
+So a static `PATCHMON_API_TOKEN` stopped working within the hour, and every
+approval after that took the Ansible fallback. The design was never validated
+against a live PatchMon, which is how this went unnoticed. Separately, the
+`patching` module gate (`RequireModule`) restricts only a multi-context (hosted)
+deployment; a self-hosted, single-context PatchMon allows every module.
+
+### Decision
+
+1. **The operator's playbook is the only execution path.** `patching/executor.py`
+   runs `PATCHMON_ANSIBLE_PLAYBOOK` exactly as §3 step 2 described: one inventory
+   host, confirmed by `ansible --list-hosts` to resolve to exactly itself, with
+   the alert as `patchmon_*` extra-vars. The playbook is required for the routes
+   to register. `PATCHMON_CALLBACK_URL`, `PATCHMON_API_TOKEN`, and
+   `PATCHMON_CALLBACK_TIMEOUT_SECONDS` are removed; `config_report` lists them as
+   retired, so a leftover key is reported as doing nothing. The flat payload's
+   `patchmon_callback_url` is ignored if sent, and `PatchApproval` no longer has
+   `payload_callback_url` (deployed databases keep the nullable column).
+
+   Keeping the trigger would have meant this server logging in as a PatchMon
+   user: storing a password with `can_manage_patching`, refreshing tokens, turning
+   2FA off for that account, and depending on an endpoint PatchMon doesn't offer
+   to integrations. A second path also carried the double-run hazard noted above.
+2. **PatchMon is read through its Integration API, and only read.**
+   `integrations/patchmon/client.py` uses an "API" credential (Settings →
+   Integrations) over HTTP Basic: `PATCHMON_API_URL`, `PATCHMON_API_KEY` (the
+   Token Key), and `PATCHMON_API_SECRET` (the Token Secret). It needs only the
+   `host:get` scope and has no method for the one write on that surface
+   (`DELETE /api/v1/api/hosts/{id}`). It checks a host id is a UUID before it
+   reaches a path, and follows no redirects. Optional; without it, the webhook
+   behaves as before. It's used for two things:
+   - **Naming a host.** A native alert's `host_name` is PatchMon's display name
+     (the friendly name when one is set). When that isn't a plain inventory name
+     and the alert carries `host_id`, `GET /api/v1/api/hosts/{id}/info` supplies
+     the recorded `hostname`, used only if the answer is for that id and passes
+     the same allowlist. An alert that already names an inventory host is never
+     looked up, so its target can't change.
+   - **Saying what's pending.** The approval email gains "What PatchMon last saw
+     on this host": pending packages (security first, capped at 20), whether a
+     reboot is needed and why, running and installed kernels, and the latest
+     agent report's time and status (`webhooks/patchmon_details.py`).
+
+   Each has an 8-second budget, together inside PatchMon's 30-second delivery
+   timeout. A failed or slow read is named in the email, which goes out anyway.
+3. **Text from PatchMon is flattened before it reaches the email.** Its API data
+   is written by agents, and the alert's own `title`/`message`/`severity` can
+   carry a host's display name. Control characters, line breaks, and
+   bidirectional overrides become spaces, and each value is clipped
+   (`webhooks/common.one_line`), so nothing can forge a line of the plain-text
+   part, such as a second `Approve:` link.
+
+### Conventions, as amended
+
+- **Upstream APIs are read-only** holds again without exception: PatchMon is
+  read, never written.
+- **The write path writes to Git only** keeps its one exception: an approved
+  patch runs the operator's playbook on exactly one inventory host.
+
+### Consequences
+
+- No PatchMon user credential is held, and there is one execution path to test
+  and reason about.
+- The approver sees what PatchMon thinks is pending before deciding. That list
+  is PatchMon's as of the host's last report; the playbook decides what it
+  actually installs.
+- PatchMon's own patch history doesn't show these runs. It sees their effect at
+  the host's next report. The approval row and result email still record each
+  run.
+- The operator maintains the playbook, and only hosts in their Ansible
+  inventory can be patched. PatchMon's Ansible dynamic inventory
+  (`patchmon.dynamic_inventory`) can supply those names; SOP-007 covers its
+  trade-offs.
 
 ## Open items
 
 - An MCP tool to list recent approvals and their outcomes (the rows already
   carry everything it would need).
+- Read-only `patchmon_*` MCP tools over the Integration API client (hosts with
+  patch state, a host's packages, reports, and agent queue), like Dockhand's.
+- Confirming after a run that PatchMon's pending counts actually dropped (the
+  agent reports on its own interval, so this needs a scheduled check).
 - Timestamped signatures, if PatchMon adds them.
 - ADR-014's reset action could reuse `PatchApprovalStore`'s token gate and the
   executor's one-host Ansible runner rather than building its own.
