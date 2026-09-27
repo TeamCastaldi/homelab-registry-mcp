@@ -1,5 +1,32 @@
 # Changelog
 
+## [2.0.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.11.0...v2.0.0) (2026-09-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* **config:** retire the PatchMon trigger settings
+* **patching:** run approved patches with Ansible only
+
+### Features
+
+* **patchmon:** read-only client for PatchMon's Integration API ([16d4966](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/16d49660817a1c3d6450f9b04a25e4de4913f674))
+* **webhooks:** name a Patchmon alert's host by PatchMon's record for its id ([7df4040](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/7df40407eda81c5758a39c8cd3f84ac244a8c278))
+* **webhooks:** say what's pending in the Patchmon approval email ([31738fc](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/31738fc2193592ac151f21b701633bb62e4bff10))
+
+
+### Documentation
+
+* **patchmon:** amend ADR-020 for Ansible-only execution and a read-only API ([feb3073](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/feb3073671a5ca53af4304b869050bd22b402bb4))
+* **session:** snapshot 2026-09-27 -- Patchmon Ansible-only + read-only API ([46470ee](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/46470eea7c1fe600b8ea91b0da4a6006aa953377))
+* **sop-007:** say the playbook needs passwordless sudo; safer example ([63548d6](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/63548d65550bdad7e60e049f375b9956631fdb71))
+
+
+### Code Refactoring
+
+* **config:** retire the PatchMon trigger settings ([e2daea7](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/e2daea7289cbeac218bf0f7cf1698e505a87c2b8))
+* **patching:** run approved patches with Ansible only ([1242c6a](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/1242c6a30c5fc3448f8b9fe446cc64b9e2d83018))
+
 ## [1.11.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.10.3...v1.11.0) (2026-09-27)
 
 
