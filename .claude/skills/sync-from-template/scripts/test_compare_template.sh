@@ -90,6 +90,97 @@ check "unversioned project reports unknown" "PROJECT_VERSION=unknown"
 clone_path="$(sed -n 's/^TEMP_CLONE=//p' <<<"$OUT" | head -n1)"
 [[ -n "$clone_path" && -d "$clone_path" ]] && rm -rf "$clone_path"
 
+# ------------------------------------------------------------ tooling paths
+#
+# The first fixture carries no tooling_paths.txt, which is every template ref
+# from before the list existed. Re-run against that state explicitly.
+OUT="$("$SUT" "$TEMPLATE" main "$PROJECT" .claude 2>&1)" || true
+check "no tooling list reports TOOLING_PATHS=none" "TOOLING_PATHS=none"
+clone_path="$(sed -n 's/^TEMP_CLONE=//p' <<<"$OUT" | head -n1)"
+[[ -n "$clone_path" && -d "$clone_path" ]] && rm -rf "$clone_path"
+
+# check_absent <name> <needle> — the output must NOT contain needle.
+check_absent() {
+  local name="$1" needle="$2"
+  if grep -qF "$needle" <<<"$OUT"; then
+    fail=$((fail + 1))
+    echo "FAIL: $name"
+    echo "  expected output not to contain: $needle"
+    echo "  got:"
+    indent "$OUT"
+  else
+    pass=$((pass + 1))
+  fi
+}
+
+# Now give the template scripts outside .claude/ and a list naming some of them.
+mkdir -p "$TEMPLATE/scripts"
+printf '#!/usr/bin/env bash\necho tool\n'   > "$TEMPLATE/scripts/tool.sh"
+printf 'template version\n'                 > "$TEMPLATE/scripts/drifted.sh"
+printf 'only the template needs this\n'     > "$TEMPLATE/scripts/template_only.sh"
+chmod +x "$TEMPLATE/scripts/tool.sh"
+mkdir -p "$TEMPLATE/.claude/skills/sync-from-template"
+cat > "$TEMPLATE/.claude/skills/sync-from-template/tooling_paths.txt" <<'EOF'
+# Files outside .claude/ that commands depend on.
+
+scripts/tool.sh
+   scripts/drifted.sh    # trailing comment and surrounding spaces
+scripts/ghost.sh
+.claude/skills/demo/SKILL.md
+EOF
+git -C "$TEMPLATE" add -A
+git -C "$TEMPLATE" \
+  -c user.email=test@example.invalid -c user.name=test \
+  commit --quiet -m "tooling"
+
+mkdir -p "$PROJECT/scripts"
+printf 'project version\n' > "$PROJECT/scripts/drifted.sh"
+
+OUT="$("$SUT" "$TEMPLATE" main "$PROJECT" .claude 2>&1)" || true
+clone_path="$(sed -n 's/^TEMP_CLONE=//p' <<<"$OUT" | head -n1)"
+
+check "listed file missing locally reports NEW"   "$(printf 'NEW\tscripts/tool.sh')"
+check "listed file that differs reports CHANGED"  "$(printf 'CHANGED\tscripts/drifted.sh')"
+check "emits TOOLING_PATHS, comments and spaces stripped" \
+  "TOOLING_PATHS=scripts/tool.sh scripts/drifted.sh scripts/ghost.sh"
+check_absent "an unlisted template file is never reported" "scripts/template_only.sh"
+check_absent "a listed path absent on both sides reports nothing" "	scripts/ghost.sh"
+
+# A listed path already inside a sync path must not be reported twice.
+dupes="$(grep -cF "$(printf '\t.claude/skills/demo/SKILL.md')" <<<"$OUT" || true)"
+if [[ "$dupes" == 1 ]]; then
+  pass=$((pass + 1))
+else
+  fail=$((fail + 1))
+  echo "FAIL: a listed path inside a sync path is reported once, got $dupes"
+fi
+
+# The caller copies from TEMP_CLONE, so the file must be there, whole, and
+# still executable — a script that lands without its mode fails when run as ./x.
+if [[ -x "$clone_path/scripts/tool.sh" ]] && cmp -s "$clone_path/scripts/tool.sh" "$TEMPLATE/scripts/tool.sh"; then
+  pass=$((pass + 1))
+else
+  fail=$((fail + 1))
+  echo "FAIL: listed file is written into TEMP_CLONE intact and executable"
+  find "$clone_path/scripts" -maxdepth 1 -type f -exec ls -l {} + 2>&1 | sed 's/^/    /'
+fi
+[[ -n "$clone_path" && -d "$clone_path" ]] && rm -rf "$clone_path"
+
+# A single file passed directly as a sync path. Cone-mode sparse checkout
+# rejected this outright with exit 128 before files were handled separately.
+OUT="$("$SUT" "$TEMPLATE" main "$PROJECT" scripts/template_only.sh 2>&1)"
+rc=$?
+if [[ "$rc" == 0 ]]; then
+  pass=$((pass + 1))
+else
+  fail=$((fail + 1))
+  echo "FAIL: a single-file sync path exits 0, got $rc"
+  indent "$OUT"
+fi
+check "a single-file sync path is compared" "$(printf 'NEW\tscripts/template_only.sh')"
+clone_path="$(sed -n 's/^TEMP_CLONE=//p' <<<"$OUT" | head -n1)"
+[[ -n "$clone_path" && -d "$clone_path" ]] && rm -rf "$clone_path"
+
 # Too few arguments is a usage error.
 if "$SUT" only two 2>/dev/null; then
   fail=$((fail + 1))

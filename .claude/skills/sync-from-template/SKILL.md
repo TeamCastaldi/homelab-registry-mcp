@@ -1,6 +1,6 @@
 ---
 name: sync-from-template
-description: "Pulls the .claude folder (commands and skills) from Nathan's project-template repo into the current repo (a project scaffolded from that template), with a file-by-file diff and confirmation before anything is overwritten. Also reads any Major changelog entries between this project's version and the template's current one and, when they carry a Migration steps list, proposes the deletions and edits they call for -- one batch confirmation, never silent. Trigger this whenever Nathan says '/sync-from-template', asks to sync, pull, or update commands, skills, or tooling from the template, says the template has newer tooling than this repo, asks to catch up on a breaking template change, mentions migrating a repo to a new template version, asks to check this repo against project-template, or wants to catch up on template changes -- even if he does not name the skill. This is the mirror image of the /sync-template command, which audits a repo's internal consistency with itself. This skill instead reaches OUT from a downstream project repo back to the template to pull specific folders in. Do not use this for auditing a repo's own internal folder, README, or CLAUDE.md consistency -- that is a separate concern handled by the /sync-template command."
+description: "Pulls the .claude folder (commands and skills), plus the scripts outside it that they run, from Nathan's project-template repo into the current repo (a project scaffolded from that template), with a file-by-file diff and confirmation before anything is overwritten. Also reads any Major changelog entries between this project's version and the template's current one and, when they carry a Migration steps list, proposes the deletions and edits they call for -- one batch confirmation, never silent. Trigger this whenever Nathan says '/sync-from-template', asks to sync, pull, or update commands, skills, or tooling from the template, says the template has newer tooling than this repo, asks to catch up on a breaking template change, mentions migrating a repo to a new template version, asks to check this repo against project-template, or wants to catch up on template changes -- even if he does not name the skill. This is the mirror image of the /sync-template command, which audits a repo's internal consistency with itself. This skill instead reaches OUT from a downstream project repo back to the template to pull specific folders in. Do not use this for auditing a repo's own internal folder, README, or CLAUDE.md consistency -- that is a separate concern handled by the /sync-template command."
 ---
 
 # Sync from template
@@ -11,6 +11,13 @@ Reaches from the current repo (a project created from `project-template`) back t
 the template repo, and pulls its current `.claude` folder — commands and
 skills — in. Every file that differs is shown as a diff and held for confirmation before
 it touches anything on disk. Nothing is overwritten silently.
+
+Some of those commands run scripts that live outside `.claude/` — `/roadmap`
+runs `scripts/check_roadmap.sh`, `/sync-template` runs
+`scripts/validate_skills.sh`. The template lists exactly those files in
+[`tooling_paths.txt`](tooling_paths.txt), and they are offered alongside
+`.claude/` under the same diff-and-confirm rules. Nothing else outside
+`.claude/` is ever touched.
 
 It also reads the changelog gap between this project's `.template-version`
 and the template's current one. A breaking (Major) release can require more
@@ -85,6 +92,20 @@ The script's output gives you four buckets per file: `NEW`, `CHANGED`, `SAME`,
 copy lives) and `TEMPLATE_SHA=<short sha>` (the commit you're comparing
 against). Keep both of these -- you need them for the rest of the workflow.
 
+It also prints `TOOLING_PATHS=`: the files outside `sync_paths` that the
+template's `tooling_paths.txt` added to the comparison, or `none`. They land in
+the same four buckets, and are diffed and copied from `$TEMP_CLONE` exactly like
+a `.claude/` file. The list is read from the *template*, so it is always the
+template's current idea of what its commands need -- never add a path to
+`sync_paths` to get a script; add it to the template's list instead, and every
+downstream project picks it up.
+
+**No `TOOLING_PATHS=` line at all** means this project's own copy of
+`compare_template.sh` predates the list. This sync will offer the newer script
+as `CHANGED`; once it has been pulled, run step 1 again before reporting done,
+so the tooling files are offered in the same session rather than silently
+waiting for the next one. Say that is what you are doing.
+
 It also prints `TEMPLATE_VERSION` and `PROJECT_VERSION`, read from each side's
 `.template-version`. These turn the report from a raw file diff into a
 statement of how far behind this project is:
@@ -125,6 +146,7 @@ Comparing against project-template @ <template_ref> (commit <sha>)
 Version: <PROJECT_VERSION> -> <TEMPLATE_VERSION>
 
 🔧 Migration steps: [see below -- parsed from Major entries, or "none"]
+🧰 Tooling:          [TOOLING_PATHS, or "none" -- their status is in the rows below]
 ✅ Up to date:       [files marked SAME]
 🔄 Changed upstream: [files marked CHANGED]
 ➕ New in template:  [files marked NEW]
@@ -252,7 +274,7 @@ skill created a few minutes ago under `mktemp -d`, not anything of Nathan's.
 Once at least one file was applied, suggest (don't run) a commit:
 
 ```text
-chore(tooling): sync .claude from project-template@<short-sha>
+chore(tooling): sync .claude and tooling from project-template@<short-sha>
 ```
 
 When a version was stamped, name it instead -- it means more to a reader six
@@ -269,6 +291,10 @@ chore(tooling): sync tooling from project-template 1.4.0 -> 2.1.0
   `SYNC: PULL` confirmation for it.
 - Never touch a `LOCAL_ONLY` file. Ever. That's out of scope for this skill,
   not just gated behind a confirmation phrase.
+- Never pull a path outside `sync_paths` unless the template's
+  `tooling_paths.txt` names it. A script sitting next to a listed one is not
+  listed -- `scripts/` also holds files that only belong upstream, and
+  offering those would undo what `init-project` deliberately removed.
 - Never delete or edit anything as a "migration step" unless it's named,
   verbatim, in a `### Migration steps` list in `CHANGELOG.md`. A Major entry
   without that heading is shown as text, never turned into an action.
