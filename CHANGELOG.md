@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.10.3](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.10.2...v1.10.3) (2026-09-27)
+
+
+### Bug Fixes
+
+* apply ruff format to files synced from project-template ([6460690](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/646069074a494e2d65fb3c39f449153d9b91adcf))
+
+
+### Documentation
+
+* **session:** snapshot 2026-09-27 -- sync tooling from project-template ([a4bddf5](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/a4bddf5a6fbb2d83df59fd01ea721a778fba2e3c))
+
 ## [1.10.2](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.10.1...v1.10.2) (2026-09-27)
 
 
