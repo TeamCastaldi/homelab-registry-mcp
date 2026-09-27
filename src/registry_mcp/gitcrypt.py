@@ -211,7 +211,7 @@ def is_dotenv_content(content: str) -> bool:
 
 def detect_format(path: Path, content: str) -> dict[str, str] | str:
     """Return parsed dict for .env files, raw string for everything else."""
-    if path.suffix == ".env" or is_dotenv_content(content):
+    if path.suffix == ".env" or path.name == ".env" or is_dotenv_content(content):
         return parse_dotenv(content)
     return content
 

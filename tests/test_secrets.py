@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+import registry_mcp.gitcrypt as gitcrypt
 from conftest import IsolatedSettings
 from registry_mcp.config import Settings
 from registry_mcp.gitcrypt import (
@@ -105,10 +106,16 @@ class TestDotenvHelpers:
         assert _parse_dotenv(_serialize_dotenv(data)) == data
 
     def test_detect_format_dotenv_suffix(self, tmp_path: Path) -> None:
+        """A file named `.env` must be treated as dotenv on its name alone —
+        even when its content wouldn't trip the uppercase-KEY= heuristic
+        (`_is_dotenv_content`), which a real `.env` in the wild need not
+        satisfy. `Path(".env").suffix` is `""`, not `".env"`, so this must
+        not rely on a suffix check; regression coverage for a bug where the
+        suffix check alone let such a file fall through as raw text."""
         p = tmp_path / ".env"
-        result = _detect_format(p, "KEY=val\n")
+        result = _detect_format(p, "db_password=x\nport=1\n")
         assert isinstance(result, dict)
-        assert result == {"KEY": "val"}
+        assert result == {"db_password": "x", "port": "1"}
 
     def test_detect_format_raw_for_yaml(self, tmp_path: Path) -> None:
         p = tmp_path / "config.yaml"
@@ -417,6 +424,54 @@ class TestSecretsListKeys:
 # ---------------------------------------------------------------------------
 # Path and entry guards (registry_mcp.gitcrypt, shared with adoption)
 # ---------------------------------------------------------------------------
+
+
+class TestEnsureUnlocked:
+    """Every other test in this file mocks `_ensure_unlocked` (the
+    `tools.secrets` wrapper) entirely, so `gitcrypt.ensure_unlocked`'s own
+    temp key file write and cleanup never actually run anywhere else in the
+    suite [S4]. Runs the real function; only the `git-crypt` subprocess call
+    itself is faked, since the binary isn't installed in this environment."""
+
+    async def test_deletes_its_temp_key_file(self, tmp_path: Path, monkeypatch) -> None:
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".gitattributes").write_text("secret.env filter=git-crypt diff=git-crypt\n")
+        (repo / "secret.env").write_bytes(b"\x00GITCRYPT\x00" + b"\x00" * 16)
+
+        seen_paths: list[str] = []
+
+        async def fake_run(cmd, cwd):
+            key_path = cmd[-1]
+            seen_paths.append(key_path)
+            assert Path(key_path).exists(), "the temp key file must exist while unlock runs"
+            return 0, "", ""
+
+        monkeypatch.setattr(gitcrypt, "run", fake_run)
+        await gitcrypt.ensure_unlocked(repo, b"fake-key-bytes")
+
+        assert len(seen_paths) == 1
+        assert not Path(seen_paths[0]).exists(), "the temp key file must be deleted afterward"
+
+    async def test_deletes_its_temp_key_file_even_when_unlock_fails(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".gitattributes").write_text("secret.env filter=git-crypt diff=git-crypt\n")
+        (repo / "secret.env").write_bytes(b"\x00GITCRYPT\x00" + b"\x00" * 16)
+
+        seen_paths: list[str] = []
+
+        async def fake_run(cmd, cwd):
+            seen_paths.append(cmd[-1])
+            return 1, "", "wrong key"
+
+        monkeypatch.setattr(gitcrypt, "run", fake_run)
+        with pytest.raises(RuntimeError, match="wrong key"):
+            await gitcrypt.ensure_unlocked(repo, b"fake-key-bytes")
+
+        assert not Path(seen_paths[0]).exists()
 
 
 class TestGitcryptGuards:

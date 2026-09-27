@@ -63,3 +63,38 @@ uv run pytest --cov=src                  # with coverage (needs: uv add --dev py
 
 CI runs `ruff check`, `ruff format --check`, and `pytest -q` on every push — tests
 must pass before a PR is merged.
+
+## Mutation testing
+
+Passing tests prove nothing survived; they don't prove a test would actually
+*fail* if the code broke. `mutmut` (config in `pyproject.toml`'s `[tool.mutmut]`,
+`source_paths = ["src/registry_mcp"]`) automates the same check this project's
+audit did by hand: it generates small mutations of the source (flip a
+comparison, change a constant, drop an argument) and reruns the suite against
+each. A mutant no test catches is a real gap, or a mutant equivalent to the
+original (behaviorally identical, uncatchable by any test, and correctly
+reported as a survivor) — telling those apart still takes the same read-the-
+actual-diff-before-trusting-the-label discipline the 2026-09 audit needed;
+`docs/plans/2026-09-test-suite-audit.md`'s Tier 3 found three "safe to delete"
+calls that didn't survive a real mutation probe.
+
+```bash
+uv run mutmut run              # mutate everything under source_paths and test
+uv run mutmut results          # list every mutant's verdict
+uv run mutmut show <id>        # the exact diff for one mutant (id from `results`)
+```
+
+Scope a run to one file or glob while investigating, by temporarily adding
+`only_mutate = ["src/registry_mcp/<path>"]` under `[tool.mutmut]` — a scoped
+run's coverage/stats phase is cached and reused by a later wider run over the
+same tree, so narrowing down doesn't throw away that work. `mutants/` (the
+mutated source copy + cache `mutmut run` creates) is gitignored and safe to
+delete any time; it regenerates on the next run.
+
+One example already found this way, from a scoped run against
+`adoption/ssh.py`: no test calls `_ssh_base()` directly or inspects the
+constructed SSH command line, so a mutant that changes `"-i"` (identity file)
+to `"-I"` (not a real ssh flag) survives — that flag would break every real
+adoption SSH call in production while every one of the 862 tests stays green,
+because every adoption test mocks `inspect_container`/`read_remote_file`
+wholesale rather than exercising the command-building helpers underneath them.

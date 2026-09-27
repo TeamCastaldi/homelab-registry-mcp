@@ -14,6 +14,7 @@ uv run pytest                           # run all tests
 uv run pytest tests/test_linking.py -v  # run a specific test file
 uv run ruff check .                     # lint
 uv run ruff format .                    # format (line-length: 100)
+uv run mutmut run                       # mutation testing (src/registry_mcp; see tests/README.md)
 ```
 
 CI runs `ruff check`, `ruff format --check`, `pytest -q`, and `ansible-lint` (against `ansible/`) on every push.
@@ -722,23 +723,32 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
 
 ## Current Status
 
-- **Test suite audited (2026-09-25), remediation not started**: all 40 test files (845 tests)
-  reviewed file by file, each suspected flaw proven with a mutation probe in a throwaway
-  worktree (~160 probes; all 46 labelled controls caught). See
+- **Test suite audited (2026-09-25), Tiers 1–3 of the remediation plan complete**: all 40
+  test files (845 tests) reviewed file by file, each suspected flaw proven with a mutation
+  probe in a throwaway worktree (~160 probes; all 46 labelled controls caught). See
   `docs/plans/2026-09-test-suite-audit.md`, with per-file verdicts in
-  `docs/plans/2026-09-test-suite-audit-verdicts.jsonl`. 20 files KEEP, 20 REWRITE, none
-  redundant as a whole, and only 13 tests are dead weight. The real gap is under-assertion:
-  dozens of realistic breakages pass the entire suite. Mostly that is because the
-  Dockhand/Traefik/Authentik HTTP fakes route on path alone and the Git fakes ignore auth
-  headers, so a read-only client sending POST or a provider sending no token goes
-  unnoticed. Other causes: `"error" in result` checks satisfied by something else, read
-  tools tested only when empty, and settings-to-code wiring rarely asserted. Tier 1 of the
-  plan covers strict fakes, event-retention purge, proposal routing (a normalization PR
-  opened under the security label passes the suite today), and secret-handling paths.
-  One application defect was found and **not yet fixed**: `gitcrypt.detect_format` tests
-  `path.suffix == ".env"`, which is empty for a file named `.env`. Such a file is parsed only
-  when the uppercase-`KEY=` heuristic matches, so `secrets_decrypt` returns a `.env` with
-  lowercase keys as raw text.
+  `docs/plans/2026-09-test-suite-audit-verdicts.jsonl`. Tier 1 (strict HTTP/Git fakes,
+  event-retention purge tests, proposal-routing invariants, secret-handling paths) and Tier 2
+  (9 hollow-test rewrites) are done. Tier 3 (13 candidate test deletions) is done with a
+  twist: mutation-probing each candidate before deleting it caught 3 cases where the audit's
+  own "safe to delete" call was wrong — `test_traefik.py`, `test_secrets.py`, and one of
+  `test_adoption.py`'s two candidates each turned out to be the *only* test catching a real
+  regression, so those were kept; the other 10 were deleted. Suite is now 862 tests, all
+  green. The one application defect the audit found (`gitcrypt.detect_format` never matching
+  a file literally named `.env`, so `secrets_decrypt` returned it as raw text) was fixed in
+  Tier 1. Tier 4 (the hand-compiled coverage-gap list) is superseded by mutation testing —
+  see the next bullet.
+- **Mutation testing added, full-tree run complete, remediation not started**: `mutmut`
+  (`pyproject.toml`'s `[tool.mutmut]`, workflow in `tests/README.md`) mutates the source and
+  reruns the suite per mutation — a survivor means a real regression there would go
+  unnoticed. Full run against all of `src/registry_mcp/`: 11,462 mutants, 63% killed, 34%
+  (3,868) survived, 344 with zero covering test. 36 of 103 files are fully clean; the other
+  67 carry all 4,226 non-killed mutants, heavily concentrated (12 files account for over
+  half). Phased remediation plan, ordered by risk and mutant density, in
+  `docs/plans/2026-09-mutation-testing-remediation.md`: write-path core (`proposal/engine.py`,
+  `gitcrypt.py`, both Git providers, `proposal/generator.py`) first, then the DSPy reasoning
+  gate, normalization, core registry/server, discovery/hardware/webhooks, conversational
+  deploy/adoption, and a long tail of smaller files. Not started.
 - **Normalization made usable on a real, commented repo**: checked against the operator's 46
   compose files, 36 used to escalate to DSPy on every sweep (the formatter refused to reorder
   any block with a comment), so manual runs timed out and the weekly interval job, reset by

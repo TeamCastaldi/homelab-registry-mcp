@@ -173,6 +173,13 @@ stores would let one set of tests cover both.
 
 ### Tier 4: wiring and coverage gaps
 
+> **Superseded by [`2026-09-mutation-testing-remediation.md`](2026-09-mutation-testing-remediation.md).**
+> This list was compiled by hand, reading code against test files. A `mutmut`
+> run against the whole tree found 4,226 survivor mutants across 67 files —
+> the named gaps below are a subset of that, still real and still open, but
+> the other document is the current source of truth for what's left and how
+> it's being worked. Left here for the historical mutation IDs.
+
 - **Ansible chain.** No test covers the path from `ANSIBLE_CFG_PATH`/`SSH_KEY_PATH`
   to the ansible process: the `ANSIBLE_CONFIG` env [A4], `--private-key` [A5], and
   the `discover_now` passthrough [H1, H2]. Nor do disk-size units and type mapping

@@ -193,6 +193,12 @@ async def test_conventions_append_homelab_spec_when_git_configured():
     assert CANONICAL_FORM_SUMMARY in conventions
     assert "# homelab spec body" in conventions
     assert "the rules above win" in conventions
+    # SG1: the three `in` checks above only prove both texts are present
+    # *somewhere* — a generator that inverted precedence (homelab spec first,
+    # this repo's own rules appended after) would still pass every one of
+    # them. This repo's rules must come first, since they're the ones that
+    # "win" when the homelab spec conflicts with them.
+    assert conventions.index(CANONICAL_FORM_SUMMARY) < conventions.index("# homelab spec body")
 
 
 async def test_conventions_fetch_failure_never_blocks_generation():

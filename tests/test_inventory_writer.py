@@ -103,6 +103,35 @@ class TestUpsertHost:
         data = _read(inv)
         assert list(data["all"]["children"]["nas"]["hosts"].keys()) == ["heimdall"]
 
+    def test_group_membership_upsert_never_overwrites_an_existing_host_entry(self, tmp_path):
+        """W1: `list(group_hosts.keys()) == ["heimdall"]` above can't fail by
+        construction — a mapping's keys are already unique, so even a broken guard
+        that unconditionally reassigns `group_hosts[hostname] = CommentedMap()` on
+        every call would still show exactly one key. Pointing this at a
+        *pre-populated* group-host entry pins the behavior the guard actually
+        exists for (this module's own docstring's promise): an existing value
+        under a host inside a group survives, and is only ever skipped, never
+        replaced."""
+        inv = tmp_path / "inventory.yml"
+        inv.write_text(
+            textwrap.dedent(
+                """\
+                all:
+                  hosts:
+                    heimdall:
+                      ansible_host: 10.0.0.9
+                  children:
+                    nas:
+                      hosts:
+                        heimdall:
+                          nas_export: /mnt/data  # hand-set, must survive
+                """
+            )
+        )
+        upsert_host(inv, "heimdall", "10.0.0.9", ["nas"])
+        data = _read(inv)
+        assert data["all"]["children"]["nas"]["hosts"]["heimdall"]["nas_export"] == "/mnt/data"
+
 
 class TestNullEntriesAndAtomicWrite:
     """Ansible's YAML inventories routinely write a bare `host:` or `group:` —

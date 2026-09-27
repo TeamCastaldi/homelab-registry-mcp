@@ -2,6 +2,7 @@
 
 import json
 import logging
+from datetime import timedelta
 
 import pytest
 import structlog
@@ -19,6 +20,8 @@ from registry_mcp.models import (
     Service,
     SourceType,
 )
+from registry_mcp.models.event import ChangeEvent
+from registry_mcp.models.service import utcnow
 
 
 async def call(server, name, args):
@@ -60,6 +63,25 @@ async def test_event_tools_query_changes(server):
     assert all(e["service_id"] == sid for e in for_service["result"])
 
 
+async def test_event_tools_get_for_service_excludes_other_services(server):
+    """EV3: with only one service ever created, `all(e["service_id"] == sid ...)`
+    above is true even if the tool ignores `service_id` entirely and returns every
+    change event in the database — there's nothing else in there to leak. Seeding
+    a second service's events is the only way to prove the filter actually excludes
+    them, not just that the one service present happens to match."""
+    plex = await call(server, "registry_add_service", {"name": "plex", "display_name": "Plex"})
+    gitea = await call(server, "registry_add_service", {"name": "gitea", "display_name": "Gitea"})
+    await call(server, "registry_update_service", {"id": plex["id"], "notes": "plex notes"})
+    await call(server, "registry_update_service", {"id": gitea["id"], "notes": "gitea notes"})
+
+    for_plex = await call(server, "events_get_for_service", {"service_id": plex["id"]})
+
+    assert for_plex["result"]
+    assert all(e["service_id"] == plex["id"] for e in for_plex["result"])
+    assert not any(e["service_id"] == gitea["id"] for e in for_plex["result"])
+    assert not any(e["new"] == "gitea notes" for e in for_plex["result"])
+
+
 async def test_event_tools_discoveries(server, store):
     empty = await call(server, "events_list_discoveries", {})
     assert empty["result"] == []
@@ -73,12 +95,58 @@ async def test_event_tools_discoveries(server, store):
     assert listed["result"][0]["source"] == "traefik"
 
 
-def test_purge_old_events(store):
+def test_purge_old_events_respects_the_cutoff_for_change_events(store):
+    """EV1: a retention_days of -1 (the old test's only case) puts the cutoff
+    in the future, so *everything* is old — a purge that ignored the cutoff
+    entirely and deleted unconditionally would still pass. This pins that
+    an event newer than the cutoff survives and an older one doesn't."""
     created = store.create_service(Service(name="vw", display_name="VW"))
-    assert store.list_change_events(service_id=created.id)
-    purged = store.purge_old_events(-1)  # cutoff in the future -> remove everything
-    assert purged["change_events"] >= 1
-    assert store.list_change_events(service_id=created.id) == []
+    now = utcnow()
+    with Session(store.engine) as session:
+        old_event = ChangeEvent(
+            service_id=created.id,
+            field="notes",
+            old=None,
+            new="old",
+            actor="manual",
+            created_at=now - timedelta(days=10),
+        )
+        new_event = ChangeEvent(
+            service_id=created.id,
+            field="notes",
+            old=None,
+            new="new",
+            actor="manual",
+            created_at=now - timedelta(hours=1),
+        )
+        session.add(old_event)
+        session.add(new_event)
+        session.commit()
+
+    purged = store.purge_old_events(retention_days=7)
+    assert purged["change_events"] == 1  # only old_event predates the 7-day cutoff
+
+    remaining = {e.new for e in store.list_change_events(service_id=created.id) if e.new}
+    assert remaining == {"vw", "new"}  # the __created__ event and new_event both survive
+
+
+def test_purge_old_events_respects_the_cutoff_for_discovery_events(store):
+    """EV2: discovery events were never covered by any purge test at all —
+    a client that dropped the discovery-event delete entirely, or ignored
+    its own cutoff, would pass every other test in this file."""
+    now = utcnow()
+    with Session(store.engine) as session:
+        session.add(DiscoveryEvent(source=SourceType.traefik, started_at=now - timedelta(days=10)))
+        session.add(DiscoveryEvent(source=SourceType.traefik, started_at=now - timedelta(hours=1)))
+        session.commit()
+
+    purged = store.purge_old_events(retention_days=7)
+    assert purged["discovery_events"] == 1
+
+    remaining = store.list_discovery_events(source="traefik")
+    assert len(remaining) == 1
+    # SQLite round-trips datetimes as naive; compare against a naive cutoff.
+    assert remaining[0].started_at > now.replace(tzinfo=None) - timedelta(days=1)
 
 
 @pytest.fixture

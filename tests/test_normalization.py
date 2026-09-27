@@ -779,6 +779,27 @@ async def test_run_sweep_opens_one_pr_per_node():
     assert any(b.startswith("normalize/waldorf-") for b in git.branches)
 
 
+async def test_run_sweep_opens_prs_under_the_normalization_label_not_the_security_one():
+    """NZ1: normalization and security proposals must never be bundled under
+    the same label (CLAUDE.md's "never bundled" rule) — nothing else in this
+    file checks which label actually reaches `open_pr`, so a PR opened under
+    `PROPOSAL_LABEL` by mistake would pass every other test here."""
+    settings = IsolatedSettings(
+        registry_db_path=":memory:",
+        git_base_url="https://git.test",
+        git_token="tok",
+        git_repo="nathan/homelab",
+        normalization_label="normalization",
+        proposal_label="homelab-registry-mcp",
+    )
+    engine, proposals, git = _engine(
+        {"nodes/pi/plex/compose.yaml": _compose("plex")}, settings=settings
+    )
+    await engine.run_sweep(actor="manual:proposal_normalize")
+    assert git.opened[-1]["label"] == "normalization"
+    assert git.opened[-1]["label"] != settings.proposal_label
+
+
 async def test_run_sweep_skips_already_canonical_file():
     files = {"nodes/pi/plex/compose.yaml": "services:\n  plex:\n    image: x:1\n"}
     engine, proposals, git = _engine(files)

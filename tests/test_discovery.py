@@ -344,6 +344,7 @@ def discovery_server(store):
     engine = DiscoveryEngine(store, {SourceType.traefik: source}, stale_threshold=1)
     mcp = FastMCP(name="test")
     register_discovery_tools(mcp, engine)
+    mcp._test_source = source  # exposed so a test can make "plex" go missing
     return mcp
 
 
@@ -364,14 +365,30 @@ async def test_tool_run_all(discovery_server):
 
 
 async def test_tool_run_now_rejects_unknown_and_disabled(discovery_server):
-    assert "error" in await call(discovery_server, "discovery_run_now", {"source": "nope"})
-    assert "error" in await call(discovery_server, "discovery_run_now", {"source": "docker"})
+    # D2: "error" in result alone doesn't distinguish "no such source type"
+    # from "that source exists but isn't enabled" — the two branches return
+    # different messages, and a mutation that conflated them (or swapped
+    # which message goes with which case) would still pass a bare
+    # "error" in result check on both.
+    unknown = await call(discovery_server, "discovery_run_now", {"source": "nope"})
+    assert unknown["error"] == "unknown source 'nope'"
+
+    disabled = await call(discovery_server, "discovery_run_now", {"source": "docker"})
+    assert disabled["error"] == "source 'docker' is not enabled; enabled: ['traefik']"
 
 
 async def test_tool_list_stale(discovery_server):
     await call(discovery_server, "discovery_run_now", {"source": "traefik"})  # plex seen
     # nothing stale yet
     assert await call(discovery_server, "discovery_list_stale", {}) == {"items": []}
+
+    # D1: the case above alone is satisfied by a discovery_list_stale that
+    # always returns [] — seed a genuinely stale service and confirm it's
+    # actually reported.
+    discovery_server._test_source.items = []
+    await call(discovery_server, "discovery_run_now", {"source": "traefik"})  # plex missing once
+    stale = await call(discovery_server, "discovery_list_stale", {})
+    assert [s["name"] for s in stale["items"]] == ["plex"]
 
 
 # --- connect-existing-infra tools (brownfield-only, not in initial setup) --

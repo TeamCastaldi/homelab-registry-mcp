@@ -8,7 +8,6 @@ from registry_mcp.models.hardware import (
     HardwareNode,
     NodeRole,
     NodeStatus,
-    StorageDisk,
     StoragePool,
 )
 from registry_mcp.models.service import Service
@@ -224,16 +223,22 @@ def test_capacity_summary_aggregates_pools(hardware_store):
     assert len(summary["pools"]) == 2
 
 
-def test_service_get_full_context_includes_hardware(store, hardware_store, server):
+async def test_service_get_full_context_includes_hardware(store, hardware_store, server):
+    """L1: the two assertions below the fixture setup only ever exercised the
+    store layer directly — `service_get_full_context` itself, including the
+    `hardware_store and service.hardware_node_id` branch that fills the
+    `hardware_node` key, was never actually called. A regression there (a typo
+    in the attribute name, the branch dropped entirely, `hardware_store` never
+    wired into the tool) would pass this file and every other hardware test."""
     svc = store.create_service(Service(name="myapp", display_name="My App"))
     node = hardware_store.create_node(_node())
     hardware_store.link_service(svc.id, node.id)
 
-    # Verify via store directly (server wiring is validated by build_server in conftest)
-    updated_svc = store.get_service(svc.id)
-    assert updated_svc.hardware_node_id == node.id
-    fetched_node = hardware_store.get_node(updated_svc.hardware_node_id)
-    assert fetched_node.hostname == "workload-01"
+    context = tool_payload(await server.call_tool("service_get_full_context", {"id": svc.id}))
+
+    assert context["hardware_node"] is not None
+    assert context["hardware_node"]["hostname"] == "workload-01"
+    assert context["hardware_node"]["id"] == node.id
 
 
 def test_discovery_status_counts_by_status(hardware_store):
@@ -373,15 +378,3 @@ async def test_hardware_update_node_tool_rejects_invalid_role(server):
     fetched = tool_payload(await server.call_tool("hardware-get-node", {"id": node_id}))
     assert "error" not in fetched
     assert fetched["role"] == "docker_host"
-
-
-def test_storage_disk_model():
-    disk = StorageDisk(device="/dev/sda", size_gb=4000.0, type="hdd")
-    assert disk.device == "/dev/sda"
-    assert disk.type == "hdd"
-
-
-def test_storage_pool_model():
-    pool = StoragePool(name="data", type="zfs", total_gb=4000, used_gb=1200, free_gb=2800)
-    assert pool.health is None
-    assert pool.free_gb == 2800

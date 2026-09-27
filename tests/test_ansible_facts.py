@@ -188,13 +188,3 @@ async def test_gather_facts_nonzero_rc_with_partial_success_is_not_an_error():
         )
     assert facts_by_host == {"a": {"ansible_hostname": "a"}}
     assert failures == {}
-
-
-async def test_gather_facts_parses_stdout():
-    stdout = 'nas | SUCCESS => {"ansible_facts": {"ansible_hostname": "nas"}}'
-    with patch.object(ansible_facts, "_run", new=AsyncMock(return_value=(0, stdout, ""))):
-        facts_by_host, failures = await ansible_facts.gather_facts(
-            pattern="all", ansible_cfg_path="/etc/ansible.cfg", ssh_key_path="/key"
-        )
-    assert facts_by_host == {"nas": {"ansible_hostname": "nas"}}
-    assert failures == {}
