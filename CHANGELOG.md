@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.10.3...v1.11.0) (2026-09-27)
+
+
+### Features
+
+* **webhooks:** Patchmon webhook with emailed Approve/Cancel links (ADR-020) ([7422ec5](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/7422ec5e4263f20661efadd73ef81ee4c85d0b46))
+
 ## [1.10.3](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.10.2...v1.10.3) (2026-09-27)
 
 
