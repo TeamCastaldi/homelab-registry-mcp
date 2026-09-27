@@ -30,7 +30,6 @@ from registry_mcp.server import build_server
 WEBHOOK_PATH = "/webhooks/patchmon"
 SECRET = "patchmon-signing-secret"
 BASE_URL = "https://registry.test"
-CALLBACK = "https://patchmon.test/api/v1/patching/trigger"
 HOST_ID = "0b5f2a8e-1c2d-4e5f-8a9b-0c1d2e3f4a5b"
 
 
@@ -116,8 +115,6 @@ def _settings(tmp_path, **overrides):
         patchmon_webhook_enabled=True,
         patchmon_webhook_secret=SECRET,
         patchmon_approval_base_url=BASE_URL,
-        patchmon_callback_url=CALLBACK,
-        patchmon_api_token="pm-token",
         patchmon_ansible_playbook=str(tmp_path / "patch.yml"),
         notification_provider="smtp",
         notification_smtp_host="smtp.test",
