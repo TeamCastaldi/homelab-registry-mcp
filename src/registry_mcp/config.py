@@ -292,6 +292,38 @@ class Settings(BaseSettings):
     # anything inside it.
     dockhand_webhook_log_raw_payload: bool = Field(default=False)
 
+    # --- Patchmon webhook + email approval (ADR-020) — inbound patch alerts ---
+    # Off by default. PatchMon signs each delivery with HMAC-SHA256 over the raw
+    # body (`X-PatchMon-Signature: sha256=<hex>`); a verified patch alert is
+    # parked as a pending approval and emailed to the operator with single-use,
+    # time-bound Approve/Cancel links. Nothing runs until a human confirms.
+    # Fail-closed at registration: enabled with no secret, no approval base URL,
+    # no SMTP provider, or no execution path leaves every route unmounted.
+    patchmon_webhook_enabled: bool = Field(default=False)
+    patchmon_webhook_path: str = Field(default="/webhooks/patchmon")
+    patchmon_webhook_secret: SecretStr | None = Field(default=None)
+    patchmon_webhook_max_body_bytes: int = Field(default=65536, gt=0)
+    # Comma-separated event types that earn an approval email. The first is the
+    # flat payload shape; the other two are PatchMon's own threshold alerts.
+    patchmon_webhook_events: str = Field(
+        default="patch_available,host_security_updates_exceeded,host_pending_updates_exceeded"
+    )
+    # Public origin the email links point at (e.g. https://registry-mcp.example.com)
+    # — this server can't know how the operator's browser reaches it.
+    patchmon_approval_base_url: str | None = Field(default=None)
+    patchmon_approval_ttl_minutes: int = Field(default=60, gt=0)
+    # The trusted PatchMon trigger endpoint. An approval POSTs here first; a
+    # payload's own `patchmon_callback_url` is honored only on this URL's origin.
+    # Unset means no callback: approvals go straight to the Ansible fallback.
+    patchmon_callback_url: str | None = Field(default=None)
+    patchmon_api_token: SecretStr | None = Field(default=None)
+    patchmon_callback_timeout_seconds: float = Field(default=10.0, gt=0)
+    # Absolute path to the operator's playbook, run with `--limit <one host>`
+    # when the callback is unconfigured or fails. Reuses ANSIBLE_CFG_PATH and
+    # SSH_KEY_PATH, like hardware-discover-now.
+    patchmon_ansible_playbook: str | None = Field(default=None)
+    patchmon_ansible_timeout_seconds: int = Field(default=1800, gt=0)
+
     log_level: str = Field(default="INFO")
 
 

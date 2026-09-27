@@ -3,9 +3,12 @@
 import smtplib
 
 import httpx
+import pytest
 
 from conftest import IsolatedSettings
 from registry_mcp.providers.notification import (
+    ActionLink,
+    NotificationDeliveryError,
     NtfyNotificationProvider,
     NullNotificationProvider,
     SmtpNotificationProvider,
@@ -132,6 +135,46 @@ async def test_smtp_swallows_failure(monkeypatch):
     provider = SmtpNotificationProvider("smtp.test", 587, "bot@test", "you@test")
     # A failed send must never raise.
     await provider.send("Hello", "World")
+
+
+async def test_smtp_actionable_email_carries_each_link_in_both_parts(monkeypatch):
+    _FakeSMTP.instances.clear()
+    monkeypatch.setattr(smtplib, "SMTP", _FakeSMTP)
+    provider = SmtpNotificationProvider("smtp.test", 587, "bot@test", "you@test")
+
+    await provider.send_actionable(
+        "Approve patch: <authentik>",
+        "Host: pi-01",
+        [
+            ActionLink("Approve", "https://r.test/patch/approve?token=a&x=1", "#2da44e"),
+            ActionLink("Cancel", "https://r.test/patch/cancel?token=c", "#cf222e"),
+        ],
+        footer="Expires soon",
+    )
+
+    message = _FakeSMTP.instances[0].sent_message
+    plain = message.get_body(preferencelist=("plain",)).get_content()
+    html_body = message.get_body(preferencelist=("html",)).get_content()
+    assert "Approve: https://r.test/patch/approve?token=a&x=1" in plain
+    assert "Cancel: https://r.test/patch/cancel?token=c" in plain
+    assert "Expires soon" in plain
+    assert 'href="https://r.test/patch/approve?token=a&amp;x=1"' in html_body
+    assert "&lt;authentik&gt;" in html_body  # sender text is escaped, never markup
+    assert "Request Changes" not in html_body  # not the PR-review buttons
+
+
+async def test_smtp_actionable_email_failure_is_raised_not_swallowed(monkeypatch):
+    """Unlike send(): an approval nobody received can never be answered."""
+
+    class _FailingSMTP(_FakeSMTP):
+        def __enter__(self):
+            raise smtplib.SMTPException("boom")
+
+    monkeypatch.setattr(smtplib, "SMTP", _FailingSMTP)
+    provider = SmtpNotificationProvider("smtp.test", 587, "bot@test", "you@test")
+
+    with pytest.raises(NotificationDeliveryError, match="boom"):
+        await provider.send_actionable("t", "b", [ActionLink("Go", "https://x.test")])
 
 
 def test_factory_builds_smtp_when_configured():

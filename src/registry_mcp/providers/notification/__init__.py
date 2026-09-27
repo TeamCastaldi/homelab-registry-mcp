@@ -5,7 +5,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from registry_mcp.config import reveal
-from registry_mcp.providers.notification.base import NotificationProvider
+from registry_mcp.providers.notification.base import (
+    ActionLink,
+    NotificationDeliveryError,
+    NotificationProvider,
+)
 from registry_mcp.providers.notification.ntfy import NtfyNotificationProvider
 from registry_mcp.providers.notification.null import NullNotificationProvider
 from registry_mcp.providers.notification.smtp import SmtpNotificationProvider
@@ -14,6 +18,8 @@ if TYPE_CHECKING:
     from registry_mcp.config import Settings
 
 __all__ = [
+    "ActionLink",
+    "NotificationDeliveryError",
     "NotificationProvider",
     "NtfyNotificationProvider",
     "NullNotificationProvider",

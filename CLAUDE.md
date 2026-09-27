@@ -56,7 +56,8 @@ src/registry_mcp/
 │   ├── proposal.py        # Proposal, FindingType, ProposalStatus (Phase 8)
 │   ├── adoption.py        # AdoptionDraft, DetectedSecret (Phase 7 brownfield adoption)
 │   ├── deletion.py        # PendingDeletion, DeletionEntityType — the math-gate challenge record
-│   └── inventory.py       # PendingInventoryWrite — the math gate in front of the inventory write (ADR-015)
+│   ├── inventory.py       # PendingInventoryWrite — the math gate in front of the inventory write (ADR-015)
+│   └── patch_approval.py  # PatchApproval — a Patchmon alert awaiting its emailed Approve/Cancel (ADR-020)
 ├── registry/
 │   ├── store.py           # SQLite CRUD + event recording
 │   └── reconcile.py       # Match discovered candidates → registry entries
@@ -97,6 +98,9 @@ src/registry_mcp/
 │   └── generator.py       # ComposeGenerator: DSPy GenerateServiceCompose + gates + canonical formatter
 ├── deletion/
 │   └── store.py           # DeletionGateStore: math-challenge request/confirm gate, shared by every hard-delete tool
+├── patching/              # Patchmon patch approvals (ADR-020) — the pause between an alert and a patch
+│   ├── store.py           # PatchApprovalStore: hashed single-use tokens, race-safe consume, TTL
+│   └── executor.py        # PatchExecutor: PatchMon trigger API first, one-host Ansible playbook fallback
 ├── providers/             # pluggable write-path backends (behind protocols)
 │   ├── git/               # GitProvider protocol + Gitea/GitHub impls + factory
 │   └── notification/      # NotificationProvider protocol + Ntfy/Smtp/Null + factory
@@ -118,9 +122,13 @@ src/registry_mcp/
 │   ├── intake.py          # service-intake-repo + shared run_intake() (conversational deploy Phase 1, ADR-018)
 │   ├── service_deploy.py  # service-deploy-generate-compose (conversational deploy Phase 2, ADR-019)
 │   └── ansible_inventory.py  # ansible-inventory-sync-node[-confirm] (ADR-015)
-├── webhooks/              # inbound HTTP receivers (ADR-010) — alerts → staged proposals
+├── webhooks/              # inbound HTTP receivers (ADR-010, ADR-020) — alerts → something a human decides on
+│   ├── common.py          # capped body read + JSON-safe validation detail, shared by the receivers
 │   ├── schemas.py         # Pydantic Dockhand payload models + pure parsing helpers
-│   └── dockhand.py        # POST /webhooks/dockhand — update/CVE alert → proposal
+│   ├── dockhand.py        # POST /webhooks/dockhand — update/CVE alert → proposal
+│   ├── patchmon_schemas.py  # Patchmon payloads: the flat shape + PatchMon's native body → PatchAlert
+│   ├── patchmon.py        # POST /webhooks/patchmon — HMAC-verified alert → pending approval + email
+│   └── approval.py        # GET/POST /patch/approve, /patch/cancel — GET shows, POST acts, once
 ├── logging/
 │   ├── events.py          # structlog config with secret redaction
 │   └── tool_calls.py      # per-call log + turns a reported {"error": ...} into isError: true
@@ -395,8 +403,8 @@ that turns Dockhand's outbound update and CVE alerts into staged proposals. Off 
 (`DOCKHAND_WEBHOOK_ENABLED=false`); requires the same `GIT_*` as the proposal layer. This
 restores the update-triggered path ADR-006 removed with WUD, by push rather than by
 ADR-004's unimplemented polling source.
-- Registered via `FastMCP.custom_route` (the only route this server mounts alongside
-  `/mcp`), and **fail-closed at registration**:
+- Registered via `FastMCP.custom_route` (alongside `/mcp`, as the Patchmon routes below
+  are), and **fail-closed at registration**:
   disabled, or enabled with no `DOCKHAND_WEBHOOK_SECRET`, leaves the route unmounted
   entirely rather than mounted-and-rejecting. Dockhand does not sign its webhook bodies, so
   auth is a bearer secret compared with `hmac.compare_digest` — there is no HMAC to verify.
@@ -433,6 +441,46 @@ ADR-004's unimplemented polling source.
   digest-only payload) answer **200** with `{"skipped"/"ignored": ...}`; a non-2xx would make
   Dockhand retry a condition that never resolves. Malformed payloads get 422, bad
   content-type/body 400, failed auth 403, oversized body 413, internal fault a structured 500.
+
+**Patchmon webhook + email approval (ADR-020, `webhooks/patchmon.py` + `webhooks/approval.py`
++ `patching/`):** turns a PatchMon pending-patch alert into an email with **Approve** and
+**Cancel** buttons, and an approved patch into a live run. Off by default
+(`PATCHMON_WEBHOOK_ENABLED=false`). Setup: `docs/SOPs/SOP-007-Connect-Patchmon-Webhook.md`.
+- **HMAC before parsing, 401 on failure.** PatchMon's real signature (read from its source,
+  `notification_worker.go`) is `X-PatchMon-Signature: sha256=<hex HMAC-SHA256(secret, raw
+  body)>`, with no timestamp. The body is read under `PATCHMON_WEBHOOK_MAX_BODY_BYTES`, then
+  the signature is compared with `hmac.compare_digest` before content type, JSON, or schema.
+- **Two payload shapes** (`patchmon_schemas.py`): the flat `{event, service, target_host,
+  current_version, target_version, patchmon_callback_url}` and PatchMon's native generic
+  body (`event_type`, `metadata.host_name`/`host_id`). Host, service, version, and event are
+  held to a character allowlist at the edge, so nothing reaching `--limit` or extra-vars can
+  widen the target or carry a Jinja `{{ }}`. A PatchMon friendly name with spaces is
+  acknowledged and ignored, never mapped to a guessed inventory name.
+- **The webhook only asks.** It stores a pending `PatchApproval` (TTL
+  `PATCHMON_APPROVAL_TTL_MINUTES`), dedupes a repeat of a still-pending alert, and emails it
+  through `SmtpNotificationProvider.send_actionable()`, which raises on failure (502, row
+  `undelivered`) where `send()` only logs. The links are bearer credentials, so the routes
+  refuse to register unless the provider is SMTP; ntfy topics can be public.
+- **Tokens:** 32 random bytes per link, only their SHA-256 stored; single use through a
+  conditional `UPDATE ... WHERE status='pending' AND expires_at > now`. Either link disarms
+  both. Random tokens rather than HMAC-signed URLs: single use needs the row anyway.
+- **GET shows, POST acts.** Mail scanners prefetch every link, so `GET /patch/approve`
+  renders a confirmation page and changes nothing; only its form's POST consumes the token.
+  Expired (410), used (409), and unknown or cross-action (404) tokens get a plain page saying
+  no action was taken. Pages are `no-store`, `no-referrer`, unframeable, no script.
+- **Execution (`patching/executor.py`), after the response is sent:** POST to
+  `PATCHMON_CALLBACK_URL`, or to the payload's `patchmon_callback_url` only on that URL's
+  origin, with `PATCHMON_API_TOKEN` as a bearer token and no redirects followed. The body
+  carries `host_id` + `patch_type: "patch_all"` for PatchMon's `/api/v1/patching/trigger`. When
+  that is unset, unreachable, or not 2xx, run `PATCHMON_ANSIBLE_PLAYBOOK` with
+  `ANSIBLE_CONFIG=ANSIBLE_CFG_PATH`, `--private-key SSH_KEY_PATH`, `-u SSH_DEFAULT_USER`,
+  `--limit <host>`, and `patchmon_*` extra-vars. Before that, `ansible --list-hosts` must
+  resolve the name to exactly itself (`all` or a group name never patches). Every fallback
+  logs `patch_execution_fallback_ansible` with its reason. The outcome is written to the row
+  and sent as a result email.
+- **Fail-closed at registration**: missing secret, base URL, SMTP provider, or both execution
+  paths leaves every route unmounted (logged `patchmon_webhook_disabled`). Read-only mode:
+  the webhook is 403, and the links show a 503 page without consuming the token.
 
 **Read-only Infisical integration (ADR-016, `integrations/infisical/`):** the operator's
 live secrets (delivered to containers by Dockhand's own Infisical integration at deploy
@@ -582,6 +630,18 @@ closes that gap without ever exposing a value. Off by default (`INFISICAL_ENABLE
 | `DOCKHAND_WEBHOOK_VULNERABILITY_ENABLED` | `true` | Whether CVE alerts also earn a proposal |
 | `DOCKHAND_WEBHOOK_LOG_RAW_PAYLOAD` | `false` | Logs each authorized delivery body verbatim for diagnosing an unknown payload shape; bypasses field-name redaction, so turn it back off |
 | `DOCKHAND_WEBHOOK_VULNERABILITY_MIN_SEVERITY` | `high` | `low`/`medium`/`high`/`critical`; an unrecognized label surfaces rather than being dropped |
+| `PATCHMON_WEBHOOK_ENABLED` | `false` | Registers `POST /webhooks/patchmon` plus `/patch/approve` and `/patch/cancel` (ADR-020); fail-closed unless the secret, base URL, an SMTP provider, and an execution path are all set |
+| `PATCHMON_WEBHOOK_PATH` | `/webhooks/patchmon` | |
+| `PATCHMON_WEBHOOK_SECRET` | unset | The signing secret set on PatchMon's webhook destination; verified as `X-PatchMon-Signature: sha256=<HMAC-SHA256 of the body>` |
+| `PATCHMON_WEBHOOK_MAX_BODY_BYTES` | `65536` | Cap on an accepted body, enforced before the HMAC is computed |
+| `PATCHMON_WEBHOOK_EVENTS` | `patch_available,host_security_updates_exceeded,host_pending_updates_exceeded` | Event types that earn an approval email; others are acknowledged with 200 `ignored` |
+| `PATCHMON_APPROVAL_BASE_URL` | unset | The address a browser uses to reach this server; the email links are `<base>/patch/approve` and `<base>/patch/cancel` |
+| `PATCHMON_APPROVAL_TTL_MINUTES` | `60` | How long the emailed links stay usable |
+| `PATCHMON_CALLBACK_URL` | unset | PatchMon's trigger endpoint (e.g. `https://patchmon.lan/api/v1/patching/trigger`), tried first on approval; also the origin a payload's own callback URL must share |
+| `PATCHMON_API_TOKEN` | unset | Bearer token sent with the callback |
+| `PATCHMON_CALLBACK_TIMEOUT_SECONDS` | `10` | |
+| `PATCHMON_ANSIBLE_PLAYBOOK` | unset | Absolute path to the fallback playbook, run against exactly one inventory host; reuses `ANSIBLE_CFG_PATH`/`SSH_KEY_PATH`/`SSH_DEFAULT_USER` |
+| `PATCHMON_ANSIBLE_TIMEOUT_SECONDS` | `1800` | A fallback run past this is killed and recorded as failed |
 | `EVENT_RETENTION_DAYS` | `90` | Old events purged on startup |
 | `LOG_LEVEL` | `INFO` | |
 
@@ -592,15 +652,15 @@ Copy `.env.example` to `.env` and fill in the upstream URLs before running local
 - **Curated fields are sacred**: `display_name`, `category`, `tags`, `notes` set by humans are never overwritten by discovery. Discovery only updates provenance fields (`host`, `urls`, `traefik_router`, `authentik_app_slug`, `auth_mode`).
 - **Never hard-delete discovered services**: mark `stale=True` after threshold misses.
 - **Every hard delete is math-gated**: `registry_delete_service` and `hardware-delete-node` only request deletion — they return an `x + y = ?` challenge (`deletion/store.py`'s `DeletionGateStore`) that must be solved and passed to `registry_delete_service_confirm`/`hardware-delete-node-confirm` within `DELETE_CHALLENGE_TTL_MINUTES` before the row is actually removed. Not a security boundary (single digits, shown in the challenge itself) — a deliberate human-in-the-loop friction point against an agent or a fat-fingered id deleting something irreversible; a wrong answer invalidates the challenge rather than allowing retries.
-- **Upstream APIs are read-only**: Traefik, Authentik, Docker, and Dockhand are never modified.
-- **The write path writes to Git only**: the proposal layer opens PRs; it never merges them and never writes the filesystem Traefik/Docker watch. The PR + human merge is the safety gate. All write behavior defaults off.
+- **Upstream APIs are read-only**: Traefik, Authentik, Docker, and Dockhand are never modified. The one exception is PatchMon's own trigger API, called only after a human confirms an emailed Approve link (ADR-020).
+- **The write path writes to Git only**: the proposal layer opens PRs; it never merges them and never writes the filesystem Traefik/Docker watch. The PR + human merge is the safety gate. All write behavior defaults off. The one exception is an emailed patch approval (ADR-020): it runs on exactly one inventory host, and only after a person opens the link and confirms the page.
 - **All patch generation goes through DSPy**: `proposal/generator.py` has no rule-based fallback. Low-confidence or invalid-YAML patches become `rejected` Proposals, never commits.
 - **A normalization rewrite must prove behavior equivalence before it's committed**: `normalization/rules.is_equivalent()` projects both the before and after YAML to a representation-independent form and compares them; a rewrite that changes anything Docker would see differently is never committed, regardless of whether the deterministic formatter or the DSPy escalation produced it. Security patches (`proposal/generator.py`) intentionally change behavior and have no equivalent gate.
 - **Normalization and security proposals are never bundled**: `normalization/` is its own engine, never merged into `proposal/`, and opens PRs under a separate label (`NORMALIZATION_LABEL`).
 - **New tools must be registered in `server.py`** — FastMCP doesn't auto-discover them.
 - **A tool reports failure by returning a dict with a non-empty top-level `error`** (context keys alongside are fine; the rule lives in `errors.py`). The tool-call wrapper (`logging/tool_calls.py`) sends that as an MCP tool error — `isError: true`, the same payload as JSON text plus `structuredContent` — and logs it `success=False`. Don't raise for an expected failure, and don't use a top-level `error` key on a success. Tests read either shape with `conftest.tool_payload()`. **Resources** have no `isError`, so a failed read raises instead (`ResourceError`, or `errors.resource_or_raise()` around an integration's `_call`), which clients receive as a JSON-RPC error; JSON resources declare `mime_type="application/json"`.
 - **Every tool declares `openWorldHint`**: `server._CLOSED_WORLD_TOOLS` lists the tools that only touch this server's own state (SQLite, the local homelab clone, the Ansible inventory file); everything else is open-world. Add a new local-only tool to that set — the spec's default for a missing hint is open-world.
-- **An inbound webhook never mutates, and never guesses**: `webhooks/` receivers parse, validate, and hand off to the proposal engine — they never write the registry or touch a container. An alert that doesn't carry enough to build a correct change (a digest where a tag is needed) is acknowledged with a reason, never turned into a speculative PR. Unactionable alerts answer 200 so the sender doesn't retry forever; only malformed input or failed auth earns a non-2xx.
+- **An inbound webhook never mutates, and never guesses**: `webhooks/` receivers parse, validate, and hand off to the proposal engine, or (Patchmon) store a pending question and email it. They never write the registry or touch a container or host themselves; only a human-confirmed approval link starts a patch. An alert that doesn't carry enough to build a correct change (a digest where a tag is needed) is acknowledged with a reason, never turned into a speculative PR. Unactionable alerts answer 200 so the sender doesn't retry forever; only malformed input or failed auth earns a non-2xx.
 - **No LLM calls in the detection layer**: `reconcile.py` and discovery sources stay deterministic. Reasoning (DSPy) lives in `dspy/` and is wired in via injected callables; those layers never `import dspy`.
 - **DSPy/`dspy/` subpackage does not shadow the library**: Python 3 absolute imports resolve `import dspy` to the top-level package; the library is imported lazily so a disabled reasoning layer adds no startup cost.
 - **LLM calls never run on the event loop**: every `Reasoner` call is a blocking litellm round-trip, so async code reaches it through `asyncio.to_thread` — otherwise every MCP session, the webhook, and the scheduler freeze for the whole call. Tests pin this with `conftest.BlockingCall`.
@@ -617,8 +677,8 @@ Copy `.env.example` to `.env` and fill in the upstream URLs before running local
 - **All repo-relative paths go through `gitcrypt.check_path`**: every user- or draft-supplied path (`secrets_*` tools, adoption's `.env` write) is validated by the shared helper in `gitcrypt.py` — reject absolute paths, reject `..` traversal, then `.resolve()` + `is_relative_to(repo)` as a final containment check (also catches symlink escapes), and reject anything that resolves inside `.git/` (its config can hold a remote's credentials; its hooks run on the commits these tools make). Never join a repo base with a caller-supplied path without it; `Path(base) / "/etc/passwd"` silently discards `base` and returns `/etc/passwd`. A path that will be written into `.gitattributes` also passes `gitcrypt.check_attr_path` (no whitespace, line breaks, globs, or quotes — a newline could add a rule that turns encryption off), existing entries are matched by exact line (`has_gitattributes_entry`), and every `.env` key/value goes through `check_dotenv_entry` (one line per entry).
 - **A secret never reaches Git through `GitProvider.commit_file()`**: that call is a raw hosting-API content write and bypasses git-crypt's local clean filter entirely. Anything that must land encrypted (the `.env` files `secrets_*` and adoption write) goes through `gitcrypt.py`'s local-clone subprocess helpers instead — see the brownfield adoption entry above.
 - **Structured logs go to stderr + file** — keeps stdio JSON-RPC transport clean.
-- **No HTTP /health endpoint on `/mcp` itself**: Dockerfile still uses a TCP probe on `MCP_PORT` for container health. `FastMCP.custom_route` (available since the pinned `mcp` SDK, 1.29.0) does let the server expose arbitrary Starlette routes alongside `/mcp` — the Dockhand webhook (`webhooks/dockhand.py`, ADR-010) is the only thing that uses it — but no `/health` HTTP route has been added, and this line describes that gap, not a technical limitation.
-- **ForwardAuth in front of MCP clients breaks them** (clients don't follow redirects). This applies to `/mcp` itself — auth strategy there is deferred; the endpoint is LAN-only. It applies equally to `/webhooks/dockhand`, which authenticates in-process with a bearer secret rather than sitting behind a redirect-based proxy. There is no browser-facing route on this port.
+- **No HTTP /health endpoint on `/mcp` itself**: Dockerfile still uses a TCP probe on `MCP_PORT` for container health. `FastMCP.custom_route` (available since the pinned `mcp` SDK, 1.29.0) does let the server expose arbitrary Starlette routes alongside `/mcp` — the Dockhand and Patchmon webhooks and the patch approval links (ADR-010, ADR-020) are the only things that use it — but no `/health` HTTP route has been added, and this line describes that gap, not a technical limitation.
+- **ForwardAuth in front of MCP clients breaks them** (clients don't follow redirects). This applies to `/mcp` itself — auth strategy there is deferred; the endpoint is LAN-only. It applies equally to `/webhooks/dockhand` and `/webhooks/patchmon`, which authenticate in-process (a bearer secret, an HMAC signature) rather than sitting behind a redirect-based proxy. The only browser-facing routes on this port are `/patch/approve` and `/patch/cancel` (ADR-020). Their single-use token is the credential, so they too must not sit behind ForwardAuth.
 
 ## Testing
 
@@ -723,6 +783,16 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
 
 ## Current Status
 
+- **ADR-020 accepted and implemented — Patchmon webhook + email approval**:
+  `POST /webhooks/patchmon` verifies PatchMon's real `X-PatchMon-Signature` HMAC (401 on
+  failure), accepts the flat patch-alert shape and PatchMon's native body, and emails a
+  pending `PatchApproval` with single-use, time-bound Approve/Cancel links
+  (`webhooks/approval.py`, GET shows / POST acts). An approval runs PatchMon's trigger API
+  first, falling back to an operator playbook against exactly one inventory host
+  (`patching/`). Off by default (`PATCHMON_WEBHOOK_ENABLED=false`). It amends four
+  conventions (webhooks, Git-only writes, read-only upstreams, no browser routes); see
+  ADR-020. Every safety property's test was mutation-probed. Not yet validated against a
+  live PatchMon instance.
 - **Test suite audited (2026-09-25), Tiers 1–3 of the remediation plan complete**: all 40
   test files (845 tests) reviewed file by file, each suspected flaw proven with a mutation
   probe in a throwaway worktree (~160 probes; all 46 labelled controls caught). See
@@ -840,8 +910,8 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
 - **ADR-009 removed**: the web chat interface (`chat/`) and its Ollama backend are gone —
   `/chat`, `/chat/auth/*`, `/chat/api/*`, the `CHAT_*` settings, the `READ_TOOLS`/
   `WRITE_TOOLS`/`DENY_ALWAYS` bridge, and the JS markdown renderer with it. `/mcp` is
-  unaffected; `webhooks/dockhand.py` is now the sole `FastMCP.custom_route` consumer, so
-  `starlette` remains a required dependency. ADR-002 §4.4's Open Questions 1-4, which
+  unaffected; `webhooks/dockhand.py` was then the sole `FastMCP.custom_route` consumer (ADR-020's
+  Patchmon routes have since joined it), so `starlette` remains a required dependency. ADR-002 §4.4's Open Questions 1-4, which
   ADR-009 had resolved, are open again.
 - **Phase 7 complete**: cross-source linking (Authentik ↔ Traefik ↔ Docker), `service_get_full_context()`, and the DSPy reasoning layer (`ResolveServiceIdentity`, `InferServiceMetadata`, `SummarizeAccessAudit`) — off by default via `DSPY_ENABLED`
 - **Phase 8 in progress**: security write path landed — `GenerateRemediationPatch`, Gitea + Ntfy/Smtp/Null providers, `Proposal` model/store, proposal engine (create + verification sweep), and the `proposal_*` tools. Off by default (`GIT_*` unset, `PROPOSAL_AUTO_CREATE=false`); see ADR-002. Normalization path complete — `docs/specs/spec-compose-normal-form.md`, the `normalization/` engine (`ruamel.yaml` deterministic formatter + `NormalizeConfigFile` DSPy escalation + `yamllint`), and the `proposal_normalize` tool + `NORMALIZATION_SCHEDULE` scheduler job. Off by default (`NORMALIZATION_ENABLED=false`).
