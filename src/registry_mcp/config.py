@@ -318,6 +318,17 @@ class Settings(BaseSettings):
     patchmon_ansible_playbook: str | None = Field(default=None)
     patchmon_ansible_timeout_seconds: int = Field(default=1800, gt=0)
 
+    # --- PatchMon Integration API (ADR-020, amended 2026-09-27) — read-only ---
+    # Off unless all three are set. An "API" credential from PatchMon's Settings
+    # -> Integrations, sent as HTTP Basic: the Token Key (`patchmon_ae_...`) and
+    # the Token Secret. Grant it `host:get` only: nothing here deletes. The URL
+    # is the instance root (https://patchmon.example.com); a pasted
+    # `.../api/v1/api/hosts` endpoint is trimmed back to it.
+    patchmon_api_url: str | None = Field(default=None)
+    patchmon_api_key: SecretStr | None = Field(default=None)
+    patchmon_api_secret: SecretStr | None = Field(default=None)
+    patchmon_api_timeout_seconds: float = Field(default=5.0, gt=0)
+
     log_level: str = Field(default="INFO")
 
 

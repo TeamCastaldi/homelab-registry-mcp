@@ -119,6 +119,15 @@ def test_the_retired_patchmon_trigger_settings_are_reported_as_doing_nothing(key
     assert "PATCHMON_ANSIBLE_PLAYBOOK" in entry["note"]
 
 
+def test_the_patchmon_api_needs_both_halves_of_its_credential():
+    result = report(patchmon_api_url="https://patchmon.lan")
+    assert "PatchMon API" in result["features_on"]
+    assert (
+        "PatchMon API is on but missing PATCHMON_API_KEY, PATCHMON_API_SECRET"
+        in (result["problems"])
+    )
+
+
 def test_patchmon_webhook_needs_a_playbook_and_the_control_plane_paths():
     (problem,) = [
         line

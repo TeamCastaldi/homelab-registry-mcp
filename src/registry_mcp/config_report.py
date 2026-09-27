@@ -243,6 +243,12 @@ _FEATURES = (
         ),
     ),
     _Feature(
+        "PatchMon API",
+        lambda s: bool(s.patchmon_api_url),
+        ("patchmon_api_key", "patchmon_api_secret"),
+        ("patchmon_api_timeout_seconds",),
+    ),
+    _Feature(
         "Hardware discovery",
         lambda s: bool(s.ansible_cfg_path or s.ssh_key_path),
         ("ansible_cfg_path", "ssh_key_path"),
