@@ -1,0 +1,22 @@
+# Files outside .claude/ that the commands and skills in .claude/ run.
+#
+# compare_template.sh reads this list from the template commit and offers each
+# file alongside .claude/, so a downstream project that syncs a command also
+# gets the script it depends on. One path per line, relative to the repo root;
+# `#` starts a comment.
+#
+# Add a line when a command or skill starts running a script that lives outside
+# .claude/, and its test beside it. Never list a file that only makes sense in
+# the upstream repo — scripts/simulate_init.sh and template-ci.yml are deleted
+# by init-project on purpose, and listing them would re-offer them every sync.
+
+# /roadmap
+scripts/check_roadmap.sh
+scripts/test_check_roadmap.sh
+
+# /sync-template, init-project
+scripts/check_doc_claims.sh
+scripts/test_check_doc_claims.sh
+scripts/check_scaffolded_project.sh
+scripts/test_check_scaffolded_project.sh
+scripts/validate_skills.sh
