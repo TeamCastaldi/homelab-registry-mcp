@@ -7,6 +7,8 @@ the real `SmtpNotificationProvider` into a fake `smtplib.SMTP`, and the links a
 test follows are read out of that email, the way a person would get them.
 """
 
+import asyncio
+import base64
 import functools
 import hashlib
 import hmac
@@ -18,13 +20,14 @@ from datetime import timedelta
 
 import httpx
 import pytest
-import structlog.testing
 from sqlmodel import Session, select
 
 import registry_mcp.patching.executor as executor_module
 import registry_mcp.server as server_module
+import registry_mcp.webhooks.patchmon as patchmon_module
 from conftest import IsolatedSettings
 from http_fakes import strict_transport
+from registry_mcp.integrations.patchmon import PatchmonClient
 from registry_mcp.models import PatchApproval, PatchApprovalStatus
 from registry_mcp.models.service import utcnow
 from registry_mcp.patching import PatchApprovalStore
@@ -33,8 +36,28 @@ from registry_mcp.server import build_server
 WEBHOOK_PATH = "/webhooks/patchmon"
 SECRET = "patchmon-signing-secret"
 BASE_URL = "https://registry.test"
-CALLBACK = "https://patchmon.test/api/v1/patching/trigger"
 HOST_ID = "0b5f2a8e-1c2d-4e5f-8a9b-0c1d2e3f4a5b"
+# The PatchMon Integration API, off in `_settings` unless a test passes these.
+API = dict(
+    patchmon_api_url="https://patchmon.test",
+    patchmon_api_key="patchmon_ae_key",
+    patchmon_api_secret="api-secret",
+)
+API_AUTH = ("Authorization", "Basic " + base64.b64encode(b"patchmon_ae_key:api-secret").decode())
+INFO_ROUTE = f"GET /api/v1/api/hosts/{HOST_ID}/info"
+SYSTEM_ROUTE = f"GET /api/v1/api/hosts/{HOST_ID}/system"
+PACKAGES_ROUTE = f"GET /api/v1/api/hosts/{HOST_ID}/packages?updates_only=true"
+REPORTS_ROUTE = f"GET /api/v1/api/hosts/{HOST_ID}/package_reports?limit=1"
+
+
+def _package(name, security=False, current="1.0", available="1.1"):
+    return {
+        "name": name,
+        "current_version": current,
+        "available_version": available,
+        "needs_update": True,
+        "is_security_update": security,
+    }
 
 
 # --- fixtures and helpers ---
@@ -102,31 +125,49 @@ def ansible(monkeypatch):
     return fake
 
 
-class PatchmonTrigger:
-    """PatchMon's trigger endpoint: POST only, bearer token required."""
+class PatchmonApi:
+    """PatchMon's scoped Integration API: GET only, HTTP Basic required."""
 
-    def __init__(self, status=200):
-        self.status = status
+    def __init__(self):
+        self.routes = {
+            INFO_ROUTE: {"id": HOST_ID, "hostname": "pi-01", "friendly_name": "Living Room Pi"},
+            SYSTEM_ROUTE: {
+                "id": HOST_ID,
+                "kernel_version": "6.1.0-25-arm64",
+                "installed_kernel_version": "6.1.0-26-arm64",
+                "needs_reboot": True,
+                "reboot_reason": "Kernel update pending",
+            },
+            # Deliberately not in PatchMon's own order: the email sorts.
+            PACKAGES_ROUTE: {
+                "packages": [
+                    _package("curl", current="7.88.1-10", available="7.88.1-11"),
+                    _package("openssl", security=True, current="3.0.13-1", available="3.0.14-1"),
+                    _package("libssl3", security=True, current="3.0.13-1", available="3.0.14-1"),
+                ],
+                "total": 3,
+            },
+            REPORTS_ROUTE: {
+                "reports": [{"date": "2026-09-27T10:30:00Z", "status": "success"}],
+                "total": 1,
+            },
+        }
         self.requests: list[httpx.Request] = []
 
-    def transport(self):
-        return strict_transport(
-            {"POST /api/v1/patching/trigger": lambda r: httpx.Response(self.status, json={})},
-            captured=self.requests,
-            allowed_methods=("POST",),
-            auth_header=("Authorization", "Bearer pm-token"),
-        )
+    def paths(self):
+        return [request.url.path for request in self.requests]
 
 
 @pytest.fixture
-def patchmon(monkeypatch):
-    trigger = PatchmonTrigger()
+def patchmon_api(monkeypatch):
+    api = PatchmonApi()
+    transport = strict_transport(api.routes, captured=api.requests, auth_header=API_AUTH)
     monkeypatch.setattr(
         server_module,
-        "build_patch_executor",
-        functools.partial(server_module.build_patch_executor, transport=trigger.transport()),
+        "build_patchmon_client",
+        functools.partial(server_module.build_patchmon_client, transport=transport),
     )
-    return trigger
+    return api
 
 
 def _settings(tmp_path, **overrides):
@@ -146,8 +187,6 @@ def _settings(tmp_path, **overrides):
         patchmon_webhook_enabled=True,
         patchmon_webhook_secret=SECRET,
         patchmon_approval_base_url=BASE_URL,
-        patchmon_callback_url=CALLBACK,
-        patchmon_api_token="pm-token",
         patchmon_ansible_playbook=str(tmp_path / "patch.yml"),
         notification_provider="smtp",
         notification_smtp_host="smtp.test",
@@ -166,7 +205,6 @@ def _payload(**overrides):
         "target_host": "pi-01",
         "current_version": "2024.2.0",
         "target_version": "2024.2.1",
-        "patchmon_callback_url": CALLBACK,
     }
     body.update(overrides)
     return body
@@ -251,7 +289,7 @@ async def _intake(client, **payload):
         {"patchmon_approval_base_url": "registry.test"},  # no scheme
         {"notification_provider": "ntfy", "notification_url": "https://ntfy.test"},
         {"notification_provider": "smtp", "notification_to_email": None},
-        {"patchmon_callback_url": None, "patchmon_ansible_playbook": None},
+        {"patchmon_ansible_playbook": None},
     ],
     ids=[
         "disabled",
@@ -394,7 +432,6 @@ async def test_unrecognized_shape_is_422_with_serializable_detail(tmp_path):
         {"target_host": "pi 01"},
         {"target_version": "{{ lookup('pipe', 'id') }}"},  # a Jinja template
         {"service": "auth;rm"},
-        {"patchmon_callback_url": "file:///etc/passwd"},
     ],
 )
 async def test_values_that_could_reach_ansible_unsafely_are_422(tmp_path, overrides):
@@ -415,7 +452,7 @@ async def test_patch_alert_emails_single_use_approve_and_cancel_links(tmp_path):
     assert response.status_code == 202
     body = response.json()
     assert body["status"] == "pending_approval"
-    assert "patchmon.test" in body["execution"]
+    assert body["execution"] == "the Ansible playbook patch.yml against pi-01"
 
     assert len(FakeSMTP.sent) == 1
     message = FakeSMTP.sent[0]
@@ -439,6 +476,20 @@ async def test_patch_alert_emails_single_use_approve_and_cancel_links(tmp_path):
     assert timedelta(minutes=44) < remaining <= timedelta(minutes=45)
     # The row can't be replayed as a click: only hashes are stored.
     assert _token(approve) not in (approval.approve_token_hash, approval.cancel_token_hash)
+
+
+async def test_an_older_senders_callback_url_is_accepted_and_ignored(tmp_path, ansible):
+    """ADR-020 once called PatchMon back at this URL. A sender still including it
+    must not be refused, and nothing may ever be sent to it."""
+    settings = _settings(tmp_path)
+    async with _client(build_server(settings)) as client:
+        response = await _deliver(client, _payload(patchmon_callback_url="file:///etc/passwd"))
+        approve, _ = _links(FakeSMTP.sent[-1])
+        await client.post(_path(approve), data={"token": _token(approve)})
+
+    assert response.status_code == 202
+    assert _only_approval(settings).status == PatchApprovalStatus.executed
+    assert [cmd[0] for cmd in ansible.calls] == ["ansible", "ansible-playbook"]
 
 
 async def test_native_patchmon_alert_becomes_an_approval_keyed_by_host_id(tmp_path):
@@ -470,6 +521,210 @@ async def test_friendly_host_name_is_never_guessed_into_an_inventory_name(tmp_pa
     assert FakeSMTP.sent == []
 
 
+# --- naming the host by PatchMon's record for its id ---
+
+
+async def test_a_friendly_name_is_resolved_through_patchmons_record_for_the_host_id(
+    tmp_path, patchmon_api, ansible
+):
+    settings = _settings(tmp_path, **API)
+    async with _client(build_server(settings)) as client:
+        response = await _deliver(client, _native_payload(host_name="Living Room Pi"))
+        approve, _ = _links(FakeSMTP.sent[-1])
+        await client.post(_path(approve), data={"token": _token(approve)})
+
+    assert response.status_code == 202
+    assert f"/api/v1/api/hosts/{HOST_ID}/info" in patchmon_api.paths()
+    approval = _only_approval(settings)
+    assert approval.target_host == "pi-01"
+    assert approval.patchmon_host_id == HOST_ID
+    assert "Living Room Pi" in approval.summary
+    assert FakeSMTP.sent[0]["Subject"].endswith(" on pi-01")
+    cmd = ansible.playbook_runs[0]
+    assert cmd[cmd.index("--limit") + 1] == "pi-01"
+
+
+async def test_a_plain_host_name_is_used_as_sent_and_never_looked_up(tmp_path, patchmon_api):
+    """PatchMon's hostname for the id is pi-01; the alert says pi-02. An alert
+    that already names an inventory host must keep naming it."""
+    settings = _settings(tmp_path, **API)
+    async with _client(build_server(settings)) as client:
+        response = await _deliver(client, _native_payload(host_name="pi-02"))
+
+    assert response.status_code == 202
+    assert _only_approval(settings).target_host == "pi-02"
+    assert not any(path.endswith("/info") for path in patchmon_api.paths())
+
+
+@pytest.mark.parametrize(
+    ("answer", "reason"),
+    [
+        (lambda request: httpx.Response(404, json={"error": "Host not found"}), "failed"),
+        (lambda request: httpx.Response(500, json={"error": "boom"}), "failed"),
+        ({"id": HOST_ID, "hostname": ""}, "no hostname on record"),
+        ({"id": HOST_ID, "hostname": "Living Room Pi"}, "is not one either"),
+        ({"id": HOST_ID, "hostname": "all,pi-02"}, "is not one either"),
+        (
+            {"id": "11111111-2222-4333-8444-555555555555", "hostname": "pi-01"},
+            "a host other than",
+        ),
+    ],
+    ids=["unknown-host", "server-error", "no-hostname", "friendly", "pattern", "other-host"],
+)
+async def test_a_lookup_that_cannot_name_the_host_exactly_is_acknowledged_not_mailed(
+    tmp_path, patchmon_api, answer, reason
+):
+    patchmon_api.routes[INFO_ROUTE] = answer
+    settings = _settings(tmp_path, **API)
+    async with _client(build_server(settings)) as client:
+        response = await _deliver(client, _native_payload(host_name="Living Room Pi"))
+
+    assert response.status_code == 200
+    ignored = response.json()["ignored"]
+    assert "not a plain inventory host name" in ignored
+    assert reason in ignored
+    assert FakeSMTP.sent == []
+
+
+async def test_an_alert_without_a_host_id_is_never_looked_up(tmp_path, patchmon_api):
+    payload = _native_payload(host_name="Living Room Pi")
+    del payload["reference"]
+    del payload["metadata"]["host_id"]
+    async with _client(build_server(_settings(tmp_path, **API))) as client:
+        response = await _deliver(client, payload)
+
+    assert response.status_code == 200
+    assert "not a plain inventory host name" in response.json()["ignored"]
+    assert patchmon_api.requests == []
+
+
+async def test_a_slow_lookup_is_cut_off_inside_patchmons_delivery_timeout(
+    tmp_path, patchmon_api, monkeypatch
+):
+    """PatchMon abandons a delivery after 30s; the lookup must give up first."""
+
+    async def stalls(self, host_id):
+        await asyncio.sleep(2)
+        return {"id": host_id, "hostname": "pi-01"}
+
+    monkeypatch.setattr(PatchmonClient, "get_host_info", stalls)
+    monkeypatch.setattr(patchmon_module, "_LOOKUP_BUDGET_SECONDS", 0.05)
+    async with _client(build_server(_settings(tmp_path, **API))) as client:
+        response = await _deliver(client, _native_payload(host_name="Living Room Pi"))
+
+    assert response.status_code == 200
+    assert "timed out" in response.json()["ignored"]
+    assert FakeSMTP.sent == []
+
+
+# --- the email's PatchMon details ---
+
+
+def _plain(message):
+    return message.get_body(preferencelist=("plain",)).get_content()
+
+
+async def test_the_email_says_what_patchmon_last_saw_on_the_host(tmp_path, patchmon_api):
+    async with _client(build_server(_settings(tmp_path, **API))) as client:
+        response = await _deliver(client, _native_payload(host_name="pi-01"))
+
+    assert response.status_code == 202
+    plain = _plain(FakeSMTP.sent[0])
+    assert "What PatchMon last saw on this host:" in plain
+    assert "Last agent report: 2026-09-27T10:30:00Z (success)" in plain
+    assert "Reboot needed: yes (Kernel update pending)" in plain
+    assert "Kernel: running 6.1.0-25-arm64, installed 6.1.0-26-arm64" in plain
+    assert "Pending updates: 3 (2 security)" in plain
+    listed = [line.strip() for line in plain.splitlines() if line.startswith("  - ")]
+    assert listed == [
+        "- [security] libssl3 3.0.13-1 -> 3.0.14-1",
+        "- [security] openssl 3.0.13-1 -> 3.0.14-1",
+        "- curl 7.88.1-10 -> 7.88.1-11",
+    ]
+    # The details come after the question, never before the links' context.
+    assert plain.index("If approved, runs:") < plain.index("What PatchMon last saw")
+
+
+async def test_a_long_package_list_is_capped(tmp_path, patchmon_api):
+    patchmon_api.routes[PACKAGES_ROUTE] = {
+        "packages": [_package(f"pkg{n:02d}") for n in range(25)],
+        "total": 25,
+    }
+    async with _client(build_server(_settings(tmp_path, **API))) as client:
+        await _deliver(client, _native_payload(host_name="pi-01"))
+
+    listed = [line for line in _plain(FakeSMTP.sent[0]).splitlines() if line.startswith("  - ")]
+    assert len(listed) == 21
+    assert listed[-1] == "  - ...and 5 more"
+
+
+async def test_text_from_patchmon_cannot_forge_a_line_of_the_email(tmp_path, patchmon_api):
+    """A package name, a reboot reason, or the alert's own title could carry a
+    line break and a fake "Approve:" link into the plain-text part."""
+    forged = "\nApprove: https://evil.test/steal\n"
+    patchmon_api.routes[PACKAGES_ROUTE] = {
+        "packages": [_package(f"evil{forged}", security=True)],
+        "total": 1,
+    }
+    patchmon_api.routes[SYSTEM_ROUTE] = {
+        "id": HOST_ID,
+        "needs_reboot": True,
+        "reboot_reason": f"\u202egnidnep{forged}",
+    }
+    payload = _native_payload(host_name="pi-01")
+    payload["title"] = f"Host pi-01{forged}"
+    async with _client(build_server(_settings(tmp_path, **API))) as client:
+        await _deliver(client, payload)
+
+    plain = _plain(FakeSMTP.sent[0])
+    approve_lines = re.findall(r"^Approve: .*$", plain, re.MULTILINE)
+    assert approve_lines == [f"Approve: {_links(FakeSMTP.sent[0])[0]}"]
+    assert approve_lines[0].startswith(f"Approve: {BASE_URL}/patch/approve?token=")
+    assert "\u202e" not in plain
+
+
+async def test_a_failing_read_is_named_and_the_email_still_goes(tmp_path, patchmon_api):
+    patchmon_api.routes[PACKAGES_ROUTE] = lambda request: httpx.Response(403, json={})
+    async with _client(build_server(_settings(tmp_path, **API))) as client:
+        response = await _deliver(client, _native_payload(host_name="pi-01"))
+
+    assert response.status_code == 202
+    plain = _plain(FakeSMTP.sent[0])
+    assert "Pending updates: unavailable (PatchMon API returned 403" in plain
+    assert "Reboot needed: yes" in plain  # the other reads still landed
+
+
+async def test_stalled_details_are_cut_off_and_the_email_still_goes(
+    tmp_path, patchmon_api, monkeypatch
+):
+    async def stalls(self, host_id):
+        await asyncio.sleep(2)
+        return {}
+
+    monkeypatch.setattr(PatchmonClient, "get_host_system", stalls)
+    monkeypatch.setattr(patchmon_module, "_DETAILS_BUDGET_SECONDS", 0.05)
+    async with _client(build_server(_settings(tmp_path, **API))) as client:
+        response = await _deliver(client, _native_payload(host_name="pi-01"))
+
+    assert response.status_code == 202
+    assert "Unavailable: PatchMon didn't answer in time." in _plain(FakeSMTP.sent[0])
+
+
+async def test_an_alert_without_a_host_id_gets_no_details_and_no_calls(tmp_path, patchmon_api):
+    async with _client(build_server(_settings(tmp_path, **API))) as client:
+        response = await _deliver(client, _payload())
+
+    assert response.status_code == 202
+    assert "unavailable (the alert carried no host id)" in _plain(FakeSMTP.sent[0])
+    assert patchmon_api.requests == []
+
+
+async def test_without_the_api_the_email_has_no_patchmon_section(tmp_path):
+    async with _client(build_server(_settings(tmp_path))) as client:
+        await _deliver(client, _native_payload(host_name="pi-01"))
+    assert "PatchMon" not in _plain(FakeSMTP.sent[0]).split("If approved, runs:")[1]
+
+
 async def test_repeat_alert_while_one_is_pending_sends_no_second_email(tmp_path):
     async with _client(build_server(_settings(tmp_path))) as client:
         first = await _deliver(client, _payload())
@@ -499,7 +754,7 @@ async def test_undeliverable_email_is_502_and_a_retry_starts_fresh(tmp_path):
 # --- the links: GET shows, POST acts, once ---
 
 
-async def test_opening_the_approve_link_only_shows_a_confirmation(tmp_path, ansible, patchmon):
+async def test_opening_the_approve_link_only_shows_a_confirmation(tmp_path, ansible):
     settings = _settings(tmp_path)
     async with _client(build_server(settings)) as client:
         approve, _ = await _intake(client)
@@ -515,10 +770,10 @@ async def test_opening_the_approve_link_only_shows_a_confirmation(tmp_path, ansi
     assert page.headers["x-frame-options"] == "DENY"
     assert "frame-ancestors 'none'" in page.headers["content-security-policy"]
     assert _only_approval(settings).status == PatchApprovalStatus.pending
-    assert patchmon.requests == [] and ansible.calls == []
+    assert ansible.calls == []
 
 
-async def test_confirming_approve_triggers_patchmon_and_reports_back(tmp_path, ansible, patchmon):
+async def test_confirming_approve_runs_the_playbook_and_reports_back(tmp_path, ansible):
     settings = _settings(tmp_path)
     async with _client(build_server(settings)) as client:
         approve, _ = await _intake(client)
@@ -526,19 +781,24 @@ async def test_confirming_approve_triggers_patchmon_and_reports_back(tmp_path, a
 
     assert response.status_code == 200
     assert "Patch approved" in response.text
-    assert len(patchmon.requests) == 1
-    sent = json.loads(patchmon.requests[0].content)
-    assert sent["target_host"] == "pi-01" and sent["target_version"] == "2024.2.1"
-    assert ansible.calls == []
+    assert len(ansible.playbook_runs) == 1
+    cmd = ansible.playbook_runs[0]
+    assert cmd[cmd.index("--limit") + 1] == "pi-01"
+    assert cmd[-1] == str(tmp_path / "patch.yml")
+    extra = json.loads(cmd[cmd.index("-e") + 1])
+    assert extra["patchmon_target_version"] == "2024.2.1"
 
     approval = _only_approval(settings)
     assert approval.status == PatchApprovalStatus.executed
-    assert approval.executed_via == "patchmon"
+    assert approval.executed_via == "ansible"
     result_email = FakeSMTP.sent[-1]
     assert result_email["Subject"] == "Patch completed: authentik on pi-01"
+    result_plain = result_email.get_body(preferencelist=("plain",)).get_content()
+    assert "Executed via: ansible" in result_plain
+    assert "PLAY RECAP" in result_plain
 
 
-async def test_a_used_approve_link_does_nothing_the_second_time(tmp_path, ansible, patchmon):
+async def test_a_used_approve_link_does_nothing_the_second_time(tmp_path, ansible):
     settings = _settings(tmp_path)
     async with _client(build_server(settings)) as client:
         approve, _ = await _intake(client)
@@ -549,10 +809,10 @@ async def test_a_used_approve_link_does_nothing_the_second_time(tmp_path, ansibl
     assert reused.status_code == reopened.status_code == 409
     assert "already used" in reused.text
     assert "No further action was taken" in reused.text
-    assert len(patchmon.requests) == 1
+    assert len(ansible.playbook_runs) == 1
 
 
-async def test_an_expired_link_shows_a_clean_message_and_runs_nothing(tmp_path, ansible, patchmon):
+async def test_an_expired_link_shows_a_clean_message_and_runs_nothing(tmp_path, ansible):
     settings = _settings(tmp_path)
     async with _client(build_server(settings)) as client:
         approve, _ = await _intake(client)
@@ -569,11 +829,11 @@ async def test_an_expired_link_shows_a_clean_message_and_runs_nothing(tmp_path, 
     assert "expired" in confirmed.text
     assert "No action was taken" in confirmed.text
     assert "Traceback" not in confirmed.text
-    assert patchmon.requests == [] and ansible.calls == []
+    assert ansible.calls == []
     assert _only_approval(settings).status == PatchApprovalStatus.expired
 
 
-async def test_cancel_closes_the_request_and_disarms_approve(tmp_path, ansible, patchmon):
+async def test_cancel_closes_the_request_and_disarms_approve(tmp_path, ansible):
     settings = _settings(tmp_path)
     async with _client(build_server(settings)) as client:
         approve, cancel = await _intake(client)
@@ -584,14 +844,12 @@ async def test_cancel_closes_the_request_and_disarms_approve(tmp_path, ansible, 
     assert "Request cancelled" in cancelled.text
     assert late.status_code == 409
     assert "cancelled" in late.text
-    assert patchmon.requests == [] and ansible.calls == []
+    assert ansible.calls == []
     assert _only_approval(settings).status == PatchApprovalStatus.cancelled
 
 
 @pytest.mark.parametrize("method", ["GET", "POST"])
-async def test_unknown_or_cross_action_token_is_404_and_harmless(
-    tmp_path, ansible, patchmon, method
-):
+async def test_unknown_or_cross_action_token_is_404_and_harmless(tmp_path, ansible, method):
     async with _client(build_server(_settings(tmp_path))) as client:
         _, cancel = await _intake(client)
         # A cancel token presented at the approve route is not an approval.
@@ -602,67 +860,23 @@ async def test_unknown_or_cross_action_token_is_404_and_harmless(
 
     assert cross.status_code == unknown.status_code == 404
     assert "No action was taken" in unknown.text
-    assert patchmon.requests == [] and ansible.calls == []
+    assert ansible.calls == []
 
 
-async def test_token_in_the_query_string_alone_can_confirm(tmp_path, ansible, patchmon):
+async def test_token_in_the_query_string_alone_can_confirm(tmp_path, ansible):
     """The form posts back to the URL it came from, so the token rides along
     in the query even if a client drops the form body."""
     async with _client(build_server(_settings(tmp_path))) as client:
         approve, _ = await _intake(client)
         response = await client.post(_path(approve))
     assert response.status_code == 200
-    assert len(patchmon.requests) == 1
-
-
-# --- execution fallback, end to end ---
-
-
-async def test_unreachable_patchmon_falls_back_to_ansible_with_a_logged_reason(
-    tmp_path, ansible, monkeypatch
-):
-    def refuse(request):
-        raise httpx.ConnectError("connection refused", request=request)
-
-    monkeypatch.setattr(
-        server_module,
-        "build_patch_executor",
-        functools.partial(
-            server_module.build_patch_executor, transport=httpx.MockTransport(refuse)
-        ),
-    )
-    settings = _settings(tmp_path)
-    with structlog.testing.capture_logs() as logs:
-        async with _client(build_server(settings)) as client:
-            approve, _ = await _intake(client)
-            await client.post(_path(approve), data={"token": _token(approve)})
-
     assert len(ansible.playbook_runs) == 1
-    cmd = ansible.playbook_runs[0]
-    assert cmd[cmd.index("--limit") + 1] == "pi-01"
-    approval = _only_approval(settings)
-    assert approval.status == PatchApprovalStatus.executed
-    assert approval.executed_via == "ansible"
-    fallback = [e for e in logs if e.get("event") == "patch_execution_fallback_ansible"]
-    assert len(fallback) == 1
-    assert "unreachable" in fallback[0]["reason"]
-    result_plain = FakeSMTP.sent[-1].get_body(preferencelist=("plain",)).get_content()
-    assert "Ansible fallback reason: PatchMon callback failed: unreachable" in result_plain
 
 
-async def test_without_a_callback_url_approval_runs_the_playbook(tmp_path, ansible, patchmon):
-    settings = _settings(tmp_path, patchmon_callback_url=None)
-    async with _client(build_server(settings)) as client:
-        approve, _ = await _intake(client)
-        await client.post(_path(approve), data={"token": _token(approve)})
-
-    assert patchmon.requests == []
-    assert len(ansible.playbook_runs) == 1
-    assert _only_approval(settings).executed_via == "ansible"
+# --- execution outcome, end to end ---
 
 
-async def test_failed_patch_is_recorded_and_reported(tmp_path, monkeypatch, patchmon):
-    patchmon.status = 500
+async def test_failed_patch_is_recorded_and_reported(tmp_path, monkeypatch):
     failing = FakeAnsible(rc=2)
     monkeypatch.setattr(executor_module, "_run", failing)
     settings = _settings(tmp_path)
@@ -676,7 +890,7 @@ async def test_failed_patch_is_recorded_and_reported(tmp_path, monkeypatch, patc
     assert FakeSMTP.sent[-1]["Subject"] == "Patch FAILED: authentik on pi-01"
 
 
-async def test_read_only_server_shows_links_but_never_acts(tmp_path, ansible, patchmon):
+async def test_read_only_server_shows_links_but_never_acts(tmp_path, ansible):
     healthy = _settings(tmp_path)
     async with _client(build_server(healthy)) as client:
         approve, _ = await _intake(client)
@@ -689,4 +903,4 @@ async def test_read_only_server_shows_links_but_never_acts(tmp_path, ansible, pa
     assert opened.status_code == confirmed.status_code == 503
     assert "read-only" in confirmed.text
     assert _only_approval(healthy).status == PatchApprovalStatus.pending
-    assert patchmon.requests == [] and ansible.calls == []
+    assert ansible.calls == []

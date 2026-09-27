@@ -9,7 +9,6 @@ from datetime import UTC, datetime
 from typing import Any
 
 import anyio
-import httpx
 import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from mcp.server.fastmcp import FastMCP
@@ -19,7 +18,7 @@ from starlette.applications import Starlette
 
 from registry_mcp import __version__
 from registry_mcp.adoption import AdoptionDraftStore
-from registry_mcp.config import Settings, get_settings, reveal
+from registry_mcp.config import Settings, get_settings
 from registry_mcp.config_report import build_report, process_environ
 from registry_mcp.deletion import DeletionGateStore
 from registry_mcp.discovery.engine import DiscoveryEngine, build_sources
@@ -31,6 +30,7 @@ from registry_mcp.integrations.authentik import register_authentik_tools
 from registry_mcp.integrations.dockhand import register_dockhand_tools
 from registry_mcp.integrations.docs import register_docs_tools
 from registry_mcp.integrations.infisical import register_infisical_tools
+from registry_mcp.integrations.patchmon import build_patchmon_client
 from registry_mcp.integrations.traefik import register_traefik_tools
 from registry_mcp.inventory import InventoryGateStore
 from registry_mcp.logging import configure_logging, get_logger, install_tool_call_logging
@@ -191,21 +191,15 @@ def build_normalization_engine(
     )
 
 
-def build_patch_executor(
-    settings: Settings, *, transport: httpx.AsyncBaseTransport | None = None
-) -> PatchExecutor:
-    """The Patchmon approval executor: PatchMon's trigger API, then the
-    operator's playbook over the same Ansible plumbing hardware-discover-now uses."""
+def build_patch_executor(settings: Settings) -> PatchExecutor:
+    """The Patchmon approval executor: the operator's playbook over the same
+    Ansible plumbing hardware-discover-now uses."""
     return PatchExecutor(
-        callback_url=settings.patchmon_callback_url,
-        api_token=reveal(settings.patchmon_api_token),
-        callback_timeout_seconds=settings.patchmon_callback_timeout_seconds,
         playbook=settings.patchmon_ansible_playbook,
         ansible_cfg_path=settings.ansible_cfg_path,
         ssh_key_path=settings.ssh_key_path,
         ssh_user=settings.ssh_default_user,
         ansible_timeout_seconds=settings.patchmon_ansible_timeout_seconds,
-        transport=transport,
     )
 
 
@@ -312,6 +306,7 @@ def build_app(settings: Settings | None = None) -> tuple[FastMCP, Runtime]:
         build_notification_provider(settings),
         build_patch_executor(settings),
         read_only=read_only,
+        patchmon=build_patchmon_client(settings),
     )
     register_intake_tools(mcp, settings, reasoner)
     register_service_deploy_tools(

@@ -244,11 +244,10 @@ def register_approval_routes(
         lines = [
             f"Host: {approval.target_host}",
             *(f"{label}: {value}" for label, value in describe(approval)[1:]),
-            f"Executed via: {result.executed_via or 'nothing (no execution path succeeded)'}",
+            f"Executed via: {result.executed_via or 'nothing (the playbook never started)'}",
+            "",
+            result.detail,
         ]
-        if result.fallback_reason:
-            lines.append(f"Ansible fallback reason: {result.fallback_reason}")
-        lines.extend(["", result.detail])
         await notifier.send(
             f"Patch {'completed' if ok else 'FAILED'}: {subject(approval)} on "
             f"{approval.target_host}",

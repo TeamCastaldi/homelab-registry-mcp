@@ -1,8 +1,8 @@
 """Patchmon patch approvals (ADR-020): the pause between an alert and a patch.
 
 `PatchApprovalStore` holds each alert until a human answers its email;
-`PatchExecutor` runs an approved one, PatchMon's trigger API first and the
-operator's Ansible playbook as the fallback. The HTTP surface that drives both
+`PatchExecutor` runs an approved one with the operator's Ansible playbook,
+against exactly one inventory host. The HTTP surface that drives both
 lives in `webhooks/patchmon.py` (intake) and `webhooks/approval.py` (the links).
 """
 

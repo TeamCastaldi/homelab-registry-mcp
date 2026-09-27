@@ -100,7 +100,7 @@ src/registry_mcp/
 │   └── store.py           # DeletionGateStore: math-challenge request/confirm gate, shared by every hard-delete tool
 ├── patching/              # Patchmon patch approvals (ADR-020) — the pause between an alert and a patch
 │   ├── store.py           # PatchApprovalStore: hashed single-use tokens, race-safe consume, TTL
-│   └── executor.py        # PatchExecutor: PatchMon trigger API first, one-host Ansible playbook fallback
+│   └── executor.py        # PatchExecutor: the operator's playbook against exactly one inventory host
 ├── providers/             # pluggable write-path backends (behind protocols)
 │   ├── git/               # GitProvider protocol + Gitea/GitHub impls + factory
 │   └── notification/      # NotificationProvider protocol + Ntfy/Smtp/Null + factory
@@ -109,6 +109,7 @@ src/registry_mcp/
 │   ├── authentik/         # httpx client + 10 MCP tools + resource + prompt
 │   ├── dockhand/          # httpx client + 7 MCP tools + resource + prompt (ADR-013, read-only)
 │   ├── infisical/         # Universal Auth httpx client + 1 MCP tool (ADR-016, read-only, off by default)
+│   ├── patchmon/          # HTTP Basic Integration API client, host:get only (ADR-020 amended; no tools yet)
 │   └── docs/              # MCP client for documentation-mcp + get_service_documentation passthrough
 ├── tools/
 │   ├── registry.py        # CRUD: add/get/list/update/delete (math-gated, see deletion/) service
@@ -128,6 +129,7 @@ src/registry_mcp/
 │   ├── dockhand.py        # POST /webhooks/dockhand — update/CVE alert → proposal
 │   ├── patchmon_schemas.py  # Patchmon payloads: the flat shape + PatchMon's native body → PatchAlert
 │   ├── patchmon.py        # POST /webhooks/patchmon — HMAC-verified alert → pending approval + email
+│   ├── patchmon_details.py  # the email's "What PatchMon last saw" section (packages, reboot, kernel)
 │   └── approval.py        # GET/POST /patch/approve, /patch/cancel — GET shows, POST acts, once
 ├── logging/
 │   ├── events.py          # structlog config with secret redaction
@@ -442,25 +444,39 @@ ADR-004's unimplemented polling source.
   Dockhand retry a condition that never resolves. Malformed payloads get 422, bad
   content-type/body 400, failed auth 403, oversized body 413, internal fault a structured 500.
 
-**Patchmon webhook + email approval (ADR-020, `webhooks/patchmon.py` + `webhooks/approval.py`
-+ `patching/`):** turns a PatchMon pending-patch alert into an email with **Approve** and
-**Cancel** buttons, and an approved patch into a live run. Off by default
+**Patchmon webhook + email approval (ADR-020, amended 2026-09-27; `webhooks/patchmon.py` +
+`webhooks/approval.py` + `patching/` + `integrations/patchmon/`):** turns a PatchMon
+pending-patch alert into an email with **Approve** and **Cancel** buttons, and an approved
+patch into a run of the operator's playbook on that one host. Off by default
 (`PATCHMON_WEBHOOK_ENABLED=false`). Setup: `docs/SOPs/SOP-007-Connect-Patchmon-Webhook.md`.
 - **HMAC before parsing, 401 on failure.** PatchMon's real signature (read from its source,
   `notification_worker.go`) is `X-PatchMon-Signature: sha256=<hex HMAC-SHA256(secret, raw
   body)>`, with no timestamp. The body is read under `PATCHMON_WEBHOOK_MAX_BODY_BYTES`, then
   the signature is compared with `hmac.compare_digest` before content type, JSON, or schema.
 - **Two payload shapes** (`patchmon_schemas.py`): the flat `{event, service, target_host,
-  current_version, target_version, patchmon_callback_url}` and PatchMon's native generic
-  body (`event_type`, `metadata.host_name`/`host_id`). Host, service, version, and event are
-  held to a character allowlist at the edge, so nothing reaching `--limit` or extra-vars can
-  widen the target or carry a Jinja `{{ }}`. A PatchMon friendly name with spaces is
-  acknowledged and ignored, never mapped to a guessed inventory name.
+  current_version, target_version}` (a leftover `patchmon_callback_url` is ignored) and
+  PatchMon's native generic body (`event_type`, `metadata.host_name`/`host_id`). Host,
+  service, version, and event are held to a character allowlist at the edge, so nothing
+  reaching `--limit` or extra-vars can widen the target or carry a Jinja `{{ }}`. Free text
+  (`title`, `message`, `severity`) is flattened to one line (`webhooks/common.one_line`), so
+  it can't forge a line of the plain-text email.
+- **A host is named exactly or not at all.** A native alert's `host_name` is PatchMon's
+  display name (the friendly name when set). When it isn't a plain inventory name and the
+  PatchMon API is configured, `GET /api/v1/api/hosts/{host_id}/info` supplies the recorded
+  `hostname`, used only if it answers for that id and passes the same allowlist. An alert
+  that already names an inventory host is never looked up. Otherwise the alert is
+  acknowledged and ignored, never mapped to a guessed name. 8s budget.
 - **The webhook only asks.** It stores a pending `PatchApproval` (TTL
   `PATCHMON_APPROVAL_TTL_MINUTES`), dedupes a repeat of a still-pending alert, and emails it
   through `SmtpNotificationProvider.send_actionable()`, which raises on failure (502, row
   `undelivered`) where `send()` only logs. The links are bearer credentials, so the routes
   refuse to register unless the provider is SMTP; ntfy topics can be public.
+- **The email says what's pending** (`webhooks/patchmon_details.py`), when the PatchMon API
+  is configured and the alert has a host id: pending packages (security first, 20 listed),
+  reboot needed and why, running vs installed kernel, and the latest agent report's time and
+  status. The three reads run together under an 8s budget (with the lookup's, inside
+  PatchMon's 30s delivery timeout); a failed read is named on its own line and the email
+  goes out anyway. Every value is flattened and clipped: agents write PatchMon's data.
 - **Tokens:** 32 random bytes per link, only their SHA-256 stored; single use through a
   conditional `UPDATE ... WHERE status='pending' AND expires_at > now`. Either link disarms
   both. Random tokens rather than HMAC-signed URLs: single use needs the row anyway.
@@ -468,19 +484,24 @@ ADR-004's unimplemented polling source.
   renders a confirmation page and changes nothing; only its form's POST consumes the token.
   Expired (410), used (409), and unknown or cross-action (404) tokens get a plain page saying
   no action was taken. Pages are `no-store`, `no-referrer`, unframeable, no script.
-- **Execution (`patching/executor.py`), after the response is sent:** POST to
-  `PATCHMON_CALLBACK_URL`, or to the payload's `patchmon_callback_url` only on that URL's
-  origin, with `PATCHMON_API_TOKEN` as a bearer token and no redirects followed. The body
-  carries `host_id` + `patch_type: "patch_all"` for PatchMon's `/api/v1/patching/trigger`. When
-  that is unset, unreachable, or not 2xx, run `PATCHMON_ANSIBLE_PLAYBOOK` with
-  `ANSIBLE_CONFIG=ANSIBLE_CFG_PATH`, `--private-key SSH_KEY_PATH`, `-u SSH_DEFAULT_USER`,
-  `--limit <host>`, and `patchmon_*` extra-vars. Before that, `ansible --list-hosts` must
-  resolve the name to exactly itself (`all` or a group name never patches). Every fallback
-  logs `patch_execution_fallback_ansible` with its reason. The outcome is written to the row
-  and sent as a result email.
-- **Fail-closed at registration**: missing secret, base URL, SMTP provider, or both execution
-  paths leaves every route unmounted (logged `patchmon_webhook_disabled`). Read-only mode:
-  the webhook is 403, and the links show a 503 page without consuming the token.
+- **Execution (`patching/executor.py`), after the response is sent:** run
+  `PATCHMON_ANSIBLE_PLAYBOOK` with `ANSIBLE_CONFIG=ANSIBLE_CFG_PATH`, `--private-key
+  SSH_KEY_PATH`, `-u SSH_DEFAULT_USER`, `--limit <host>`, and `patchmon_*` extra-vars. Before
+  that, `ansible --list-hosts` must resolve the name to exactly itself (`all` or a group name
+  never patches). The outcome is written to the row and sent as a result email. It is the
+  only path: PatchMon's `POST /api/v1/patching/trigger` sits behind its session auth
+  (a logged-in user's JWT, `JWT_EXPIRES_IN`, 1h default), so no long-lived token reaches it
+  and calling it would mean holding a PatchMon user's password. The earlier trigger-first
+  design and its settings were removed (ADR-020's amendment).
+- **The PatchMon Integration API is read-only** (`integrations/patchmon/client.py`): HTTP
+  Basic with an "API" credential's Token Key and Secret (`PATCHMON_API_KEY`/`_SECRET`),
+  scope `host:get` only. GET only, no method for the `DELETE` on that surface, a host id
+  must be a UUID before it reaches a path, redirects never followed. Response shapes were read
+  from PatchMon's `internal/handler/api_hosts.go`; its docs name a `host:read` scope the
+  router doesn't check.
+- **Fail-closed at registration**: missing secret, base URL, SMTP provider, or playbook
+  leaves every route unmounted (logged `patchmon_webhook_disabled`). Read-only mode: the
+  webhook is 403, and the links show a 503 page without consuming the token.
 
 **Read-only Infisical integration (ADR-016, `integrations/infisical/`):** the operator's
 live secrets (delivered to containers by Dockhand's own Infisical integration at deploy
@@ -630,18 +651,18 @@ closes that gap without ever exposing a value. Off by default (`INFISICAL_ENABLE
 | `DOCKHAND_WEBHOOK_VULNERABILITY_ENABLED` | `true` | Whether CVE alerts also earn a proposal |
 | `DOCKHAND_WEBHOOK_LOG_RAW_PAYLOAD` | `false` | Logs each authorized delivery body verbatim for diagnosing an unknown payload shape; bypasses field-name redaction, so turn it back off |
 | `DOCKHAND_WEBHOOK_VULNERABILITY_MIN_SEVERITY` | `high` | `low`/`medium`/`high`/`critical`; an unrecognized label surfaces rather than being dropped |
-| `PATCHMON_WEBHOOK_ENABLED` | `false` | Registers `POST /webhooks/patchmon` plus `/patch/approve` and `/patch/cancel` (ADR-020); fail-closed unless the secret, base URL, an SMTP provider, and an execution path are all set |
+| `PATCHMON_WEBHOOK_ENABLED` | `false` | Registers `POST /webhooks/patchmon` plus `/patch/approve` and `/patch/cancel` (ADR-020); fail-closed unless the secret, base URL, an SMTP provider, and `PATCHMON_ANSIBLE_PLAYBOOK` are all set |
 | `PATCHMON_WEBHOOK_PATH` | `/webhooks/patchmon` | |
 | `PATCHMON_WEBHOOK_SECRET` | unset | The signing secret set on PatchMon's webhook destination; verified as `X-PatchMon-Signature: sha256=<HMAC-SHA256 of the body>` |
 | `PATCHMON_WEBHOOK_MAX_BODY_BYTES` | `65536` | Cap on an accepted body, enforced before the HMAC is computed |
 | `PATCHMON_WEBHOOK_EVENTS` | `patch_available,host_security_updates_exceeded,host_pending_updates_exceeded` | Event types that earn an approval email; others are acknowledged with 200 `ignored` |
 | `PATCHMON_APPROVAL_BASE_URL` | unset | The address a browser uses to reach this server; the email links are `<base>/patch/approve` and `<base>/patch/cancel` |
 | `PATCHMON_APPROVAL_TTL_MINUTES` | `60` | How long the emailed links stay usable |
-| `PATCHMON_CALLBACK_URL` | unset | PatchMon's trigger endpoint (e.g. `https://patchmon.lan/api/v1/patching/trigger`), tried first on approval; also the origin a payload's own callback URL must share |
-| `PATCHMON_API_TOKEN` | unset | Bearer token sent with the callback |
-| `PATCHMON_CALLBACK_TIMEOUT_SECONDS` | `10` | |
-| `PATCHMON_ANSIBLE_PLAYBOOK` | unset | Absolute path to the fallback playbook, run against exactly one inventory host; reuses `ANSIBLE_CFG_PATH`/`SSH_KEY_PATH`/`SSH_DEFAULT_USER` |
-| `PATCHMON_ANSIBLE_TIMEOUT_SECONDS` | `1800` | A fallback run past this is killed and recorded as failed |
+| `PATCHMON_ANSIBLE_PLAYBOOK` | unset | Absolute path to the playbook an approval runs, against exactly one inventory host; required for the routes to register. Reuses `ANSIBLE_CFG_PATH`/`SSH_KEY_PATH`/`SSH_DEFAULT_USER` |
+| `PATCHMON_ANSIBLE_TIMEOUT_SECONDS` | `1800` | A playbook run past this is killed and recorded as failed |
+| `PATCHMON_API_URL` | unset | PatchMon's root URL for its read-only Integration API (a pasted `.../api/v1/api/hosts` is trimmed back); with the key and secret, names hosts by id and adds pending packages to the approval email |
+| `PATCHMON_API_KEY` / `PATCHMON_API_SECRET` | unset | An "API" credential's Token Key (`patchmon_ae_...`) and Token Secret, sent as HTTP Basic. Grant `host:get` only |
+| `PATCHMON_API_TIMEOUT_SECONDS` | `5` | Per request; the webhook also caps each phase at 8s |
 | `EVENT_RETENTION_DAYS` | `90` | Old events purged on startup |
 | `LOG_LEVEL` | `INFO` | |
 
@@ -652,7 +673,7 @@ Copy `.env.example` to `.env` and fill in the upstream URLs before running local
 - **Curated fields are sacred**: `display_name`, `category`, `tags`, `notes` set by humans are never overwritten by discovery. Discovery only updates provenance fields (`host`, `urls`, `traefik_router`, `authentik_app_slug`, `auth_mode`).
 - **Never hard-delete discovered services**: mark `stale=True` after threshold misses.
 - **Every hard delete is math-gated**: `registry_delete_service` and `hardware-delete-node` only request deletion — they return an `x + y = ?` challenge (`deletion/store.py`'s `DeletionGateStore`) that must be solved and passed to `registry_delete_service_confirm`/`hardware-delete-node-confirm` within `DELETE_CHALLENGE_TTL_MINUTES` before the row is actually removed. Not a security boundary (single digits, shown in the challenge itself) — a deliberate human-in-the-loop friction point against an agent or a fat-fingered id deleting something irreversible; a wrong answer invalidates the challenge rather than allowing retries.
-- **Upstream APIs are read-only**: Traefik, Authentik, Docker, and Dockhand are never modified. The one exception is PatchMon's own trigger API, called only after a human confirms an emailed Approve link (ADR-020).
+- **Upstream APIs are read-only**: Traefik, Authentik, Docker, Dockhand, and PatchMon are never modified. PatchMon is read through its Integration API with a `host:get`-only credential; its trigger API, once an exception here, is no longer called (ADR-020's amendment).
 - **The write path writes to Git only**: the proposal layer opens PRs; it never merges them and never writes the filesystem Traefik/Docker watch. The PR + human merge is the safety gate. All write behavior defaults off. The one exception is an emailed patch approval (ADR-020): it runs on exactly one inventory host, and only after a person opens the link and confirms the page.
 - **All patch generation goes through DSPy**: `proposal/generator.py` has no rule-based fallback. Low-confidence or invalid-YAML patches become `rejected` Proposals, never commits.
 - **A normalization rewrite must prove behavior equivalence before it's committed**: `normalization/rules.is_equivalent()` projects both the before and after YAML to a representation-independent form and compares them; a rewrite that changes anything Docker would see differently is never committed, regardless of whether the deterministic formatter or the DSPy escalation produced it. Security patches (`proposal/generator.py`) intentionally change behavior and have no equivalent gate.
@@ -783,16 +804,21 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
 
 ## Current Status
 
-- **ADR-020 accepted and implemented — Patchmon webhook + email approval**:
-  `POST /webhooks/patchmon` verifies PatchMon's real `X-PatchMon-Signature` HMAC (401 on
-  failure), accepts the flat patch-alert shape and PatchMon's native body, and emails a
-  pending `PatchApproval` with single-use, time-bound Approve/Cancel links
-  (`webhooks/approval.py`, GET shows / POST acts). An approval runs PatchMon's trigger API
-  first, falling back to an operator playbook against exactly one inventory host
-  (`patching/`). Off by default (`PATCHMON_WEBHOOK_ENABLED=false`). It amends four
-  conventions (webhooks, Git-only writes, read-only upstreams, no browser routes); see
-  ADR-020. Every safety property's test was mutation-probed. Not yet validated against a
-  live PatchMon instance.
+- **ADR-020 accepted, implemented, and amended (2026-09-27) — Patchmon webhook + email
+  approval**: `POST /webhooks/patchmon` verifies PatchMon's real `X-PatchMon-Signature` HMAC
+  (401 on failure), accepts the flat patch-alert shape and PatchMon's native body, and emails
+  a pending `PatchApproval` with single-use, time-bound Approve/Cancel links
+  (`webhooks/approval.py`, GET shows / POST acts). An approval runs the operator's playbook
+  against exactly one inventory host (`patching/`). Off by default
+  (`PATCHMON_WEBHOOK_ENABLED=false`). **Amendment**: reading PatchMon's router showed its
+  `/api/v1/patching/trigger` accepts only a logged-in user's short-lived session token, so
+  the trigger-first path (and `PATCHMON_CALLBACK_URL`/`PATCHMON_API_TOKEN`, now reported as
+  retired) was removed and PatchMon went back to read-only. An optional read-only
+  Integration API client (`integrations/patchmon/`, `host:get`) names a host by its PatchMon
+  id when the alert carries only a friendly name, and lists the pending packages, reboot
+  status, kernels, and last report in the approval email. It amends three conventions
+  (webhooks, Git-only writes, no browser routes); see ADR-020. Every safety property's test
+  was mutation-probed. Not yet validated against a live PatchMon instance.
 - **Test suite audited (2026-09-25), Tiers 1–3 of the remediation plan complete**: all 40
   test files (845 tests) reviewed file by file, each suspected flaw proven with a mutation
   probe in a throwaway worktree (~160 probes; all 46 labelled controls caught). See

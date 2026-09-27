@@ -12,7 +12,7 @@ Approve link and confirms the page it shows.
 Conventions, in the order a request meets them:
 
 * **Fail closed at registration.** Disabled, or enabled without a signing
-  secret, an approval base URL, an SMTP provider, or any execution path,
+  secret, an approval base URL, an SMTP provider, or a playbook to run,
   leaves every route unmounted (a real 404). Approval links are bearer
   credentials, so they go by email only, never ntfy, whose topics can be
   readable by anyone who knows the name.
@@ -21,15 +21,25 @@ Conventions, in the order a request meets them:
   missing or wrong signature is a 401, checked with `hmac.compare_digest`
   before the body is parsed. Only the size cap comes first, so an unsigned
   sender can't make this server buffer an unbounded body to hash.
+* **The email says what's pending**, when the PatchMon API is configured and
+  the alert carries a host id: packages (security first), reboot status,
+  kernels, and the latest agent report (`webhooks/patchmon_details.py`). Best
+  effort; a slow or failing API never holds the email back.
+* **A host is named exactly or not at all.** PatchMon's own alerts carry the
+  host's display name, which can be a friendly name with spaces. When it isn't
+  a plain inventory name and the PatchMon API is configured, the alert's host
+  id is looked up there and PatchMon's recorded `hostname` stands in, held to
+  the same allowlist. Nothing is ever guessed from the display name itself.
 * **An unactionable alert answers 200**, like the Dockhand webhook: an event
-  type not in PATCHMON_WEBHOOK_EVENTS, a host name that isn't a plain inventory
-  name, or an alert that already has a pending approval. A non-2xx makes
+  type not in PATCHMON_WEBHOOK_EVENTS, a host that can't be named exactly, or
+  an alert that already has a pending approval. A non-2xx makes
   PatchMon retry. The one deliberate exception is an approval email that
   couldn't be sent (502): a retry then gets a fresh approval and another try.
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -42,6 +52,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from registry_mcp.config import Settings, reveal
+from registry_mcp.integrations.patchmon import PatchmonClient, PatchmonError
 from registry_mcp.logging import get_logger
 from registry_mcp.models import PatchApproval, PatchApprovalStatus
 from registry_mcp.patching import ApprovalAction, PatchApprovalStore, PatchExecutor
@@ -59,8 +70,10 @@ from registry_mcp.webhooks.approval import (
     subject,
 )
 from registry_mcp.webhooks.common import declared_too_large, read_capped, validation_detail
+from registry_mcp.webhooks.patchmon_details import host_details
 from registry_mcp.webhooks.patchmon_schemas import (
     IgnoredAlert,
+    PatchAlert,
     PatchmonNativeAlert,
     PatchmonWebhookSchema,
 )
@@ -69,6 +82,11 @@ _log = get_logger("webhooks.patchmon")
 
 SIGNATURE_HEADER = "X-PatchMon-Signature"
 _SIGNATURE_PREFIX = "sha256="
+# PatchMon gives up on a webhook delivery after 30 seconds; a host lookup has
+# to leave room for the rest of the request inside that.
+_LOOKUP_BUDGET_SECONDS = 8.0
+# Likewise for the email's PatchMon details; together they stay well under 30s.
+_DETAILS_BUDGET_SECONDS = 8.0
 
 
 def signature_matches(header: str, body: bytes, key: bytes) -> bool:
@@ -102,6 +120,36 @@ def _parse(payload: Any) -> tuple[BaseModel | None, list[dict[str, str]]]:
     return None, errors
 
 
+async def _resolve_by_host_id(
+    parsed: PatchmonNativeAlert, ignored: IgnoredAlert, patchmon: PatchmonClient
+) -> PatchAlert | IgnoredAlert:
+    """Name the host by PatchMon's record for the alert's host id, or say why not."""
+    host_id = ignored.lookup_host_id
+    try:
+        info = await asyncio.wait_for(patchmon.get_host_info(host_id), _LOOKUP_BUDGET_SECONDS)
+    except (PatchmonError, TimeoutError) as exc:
+        error = str(exc) or "timed out"
+        _log.warning("patchmon_host_lookup_failed", host_id=host_id, error=error)
+        return IgnoredAlert(
+            ignored.event,
+            f"{ignored.reason}; looking up host {host_id} in PatchMon failed: {error}",
+        )
+    if info.get("id") != host_id:
+        _log.warning("patchmon_host_lookup_mismatch", host_id=host_id)
+        return IgnoredAlert(
+            ignored.event, f"{ignored.reason}; PatchMon answered for a host other than {host_id}"
+        )
+    hostname = info.get("hostname")
+    if not isinstance(hostname, str) or not hostname.strip():
+        return IgnoredAlert(
+            ignored.event, f"{ignored.reason}; PatchMon has no hostname on record for {host_id}"
+        )
+    alert = parsed.normalize(resolved_hostname=hostname)
+    if isinstance(alert, PatchAlert):
+        _log.info("patchmon_host_resolved", host_id=host_id, target_host=alert.target_host)
+    return alert
+
+
 def _approval_base_url(value: str | None) -> str | None:
     """PATCHMON_APPROVAL_BASE_URL without a trailing slash, or None if unusable."""
     if not value or not value.strip():
@@ -125,11 +173,14 @@ def register_patchmon_routes(
     executor: PatchExecutor,
     *,
     read_only: bool,
+    patchmon: PatchmonClient | None = None,
 ) -> bool:
     """Register the Patchmon webhook and its approval links, or nothing at all.
 
     Returns whether the routes were mounted. Every refusal is logged at error
     level with the setting that caused it; none of them leaves a route open.
+    `patchmon`, when configured, names hosts whose alert carries only a
+    display name.
     """
     if not settings.patchmon_webhook_enabled:
         return False
@@ -153,10 +204,7 @@ def register_patchmon_routes(
             "NOTIFICATION_SMTP_HOST, NOTIFICATION_FROM_EMAIL, and NOTIFICATION_TO_EMAIL"
         )
     if not executor.can_execute:
-        return refuse(
-            "an approval would have nothing to run: set PATCHMON_CALLBACK_URL, "
-            "PATCHMON_ANSIBLE_PLAYBOOK, or both"
-        )
+        return refuse("an approval would have nothing to run: set PATCHMON_ANSIBLE_PLAYBOOK")
     if urlsplit(base_url).scheme != "https":
         _log.warning(
             "patchmon_approval_links_not_https",
@@ -218,6 +266,13 @@ def register_patchmon_routes(
                     {"ignored": f"event {event!r} is not in PATCHMON_WEBHOOK_EVENTS"}
                 )
             alert = parsed.normalize()
+            if (
+                isinstance(alert, IgnoredAlert)
+                and alert.lookup_host_id
+                and patchmon is not None
+                and isinstance(parsed, PatchmonNativeAlert)
+            ):
+                alert = await _resolve_by_host_id(parsed, alert, patchmon)
             if isinstance(alert, IgnoredAlert):
                 _log.info("patchmon_alert_ignored", patchmon_event=event, reason=alert.reason)
                 return JSONResponse({"ignored": alert.reason})
@@ -237,6 +292,15 @@ def register_patchmon_routes(
                     }
                 )
 
+            details: list[str] = []
+            if patchmon is not None:
+                if alert.patchmon_host_id:
+                    details = await host_details(
+                        patchmon, alert.patchmon_host_id, budget=_DETAILS_BUDGET_SECONDS
+                    )
+                else:
+                    details = ["PatchMon details: unavailable (the alert carried no host id)"]
+
             issued = approvals.create(
                 PatchApproval(
                     event=alert.event,
@@ -247,7 +311,6 @@ def register_patchmon_routes(
                     severity=alert.severity,
                     patchmon_host_id=alert.patchmon_host_id,
                     summary=alert.summary,
-                    payload_callback_url=alert.callback_url,
                 ),
                 ttl_minutes,
             )
@@ -260,6 +323,7 @@ def register_patchmon_routes(
                     "",
                     *(f"{label}: {value}" for label, value in describe(approval)),
                     f"If approved, runs: {plan}",
+                    *(["", *details] if details else []),
                 ]
             )
             footer = (
@@ -324,7 +388,7 @@ def register_patchmon_routes(
         path=settings.patchmon_webhook_path,
         events=sorted(events),
         ttl_minutes=ttl_minutes,
-        callback_configured=bool(settings.patchmon_callback_url),
-        ansible_fallback_configured=bool(settings.patchmon_ansible_playbook),
+        playbook=settings.patchmon_ansible_playbook,
+        patchmon_api_configured=patchmon is not None,
     )
     return True

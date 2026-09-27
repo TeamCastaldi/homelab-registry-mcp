@@ -298,7 +298,7 @@ class Settings(BaseSettings):
     # parked as a pending approval and emailed to the operator with single-use,
     # time-bound Approve/Cancel links. Nothing runs until a human confirms.
     # Fail-closed at registration: enabled with no secret, no approval base URL,
-    # no SMTP provider, or no execution path leaves every route unmounted.
+    # no SMTP provider, or no playbook leaves every route unmounted.
     patchmon_webhook_enabled: bool = Field(default=False)
     patchmon_webhook_path: str = Field(default="/webhooks/patchmon")
     patchmon_webhook_secret: SecretStr | None = Field(default=None)
@@ -312,17 +312,22 @@ class Settings(BaseSettings):
     # — this server can't know how the operator's browser reaches it.
     patchmon_approval_base_url: str | None = Field(default=None)
     patchmon_approval_ttl_minutes: int = Field(default=60, gt=0)
-    # The trusted PatchMon trigger endpoint. An approval POSTs here first; a
-    # payload's own `patchmon_callback_url` is honored only on this URL's origin.
-    # Unset means no callback: approvals go straight to the Ansible fallback.
-    patchmon_callback_url: str | None = Field(default=None)
-    patchmon_api_token: SecretStr | None = Field(default=None)
-    patchmon_callback_timeout_seconds: float = Field(default=10.0, gt=0)
     # Absolute path to the operator's playbook, run with `--limit <one host>`
-    # when the callback is unconfigured or fails. Reuses ANSIBLE_CFG_PATH and
-    # SSH_KEY_PATH, like hardware-discover-now.
+    # once a human confirms an approval: the only execution path. Reuses
+    # ANSIBLE_CFG_PATH and SSH_KEY_PATH, like hardware-discover-now.
     patchmon_ansible_playbook: str | None = Field(default=None)
     patchmon_ansible_timeout_seconds: int = Field(default=1800, gt=0)
+
+    # --- PatchMon Integration API (ADR-020, amended 2026-09-27) — read-only ---
+    # Off unless all three are set. An "API" credential from PatchMon's Settings
+    # -> Integrations, sent as HTTP Basic: the Token Key (`patchmon_ae_...`) and
+    # the Token Secret. Grant it `host:get` only: nothing here deletes. The URL
+    # is the instance root (https://patchmon.example.com); a pasted
+    # `.../api/v1/api/hosts` endpoint is trimmed back to it.
+    patchmon_api_url: str | None = Field(default=None)
+    patchmon_api_key: SecretStr | None = Field(default=None)
+    patchmon_api_secret: SecretStr | None = Field(default=None)
+    patchmon_api_timeout_seconds: float = Field(default=5.0, gt=0)
 
     log_level: str = Field(default="INFO")
 

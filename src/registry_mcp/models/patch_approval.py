@@ -40,19 +40,17 @@ class PatchApproval(SQLModel, table=True):
     current_version: str | None = None
     target_version: str | None = None
     severity: str | None = None
-    # PatchMon's own host UUID, when the alert came in PatchMon's native shape.
-    # Its trigger API addresses a host by this id, never by name.
+    # PatchMon's own host UUID, when the alert carried one. PatchMon's API
+    # addresses a host by this id, never by name.
     patchmon_host_id: str | None = None
     summary: str | None = None
-    # The payload's callback URL as sent. Re-checked against the configured
-    # PATCHMON_CALLBACK_URL origin at execution time, never trusted as stored.
-    payload_callback_url: str | None = None
     approve_token_hash: str = Field(index=True, unique=True)
     cancel_token_hash: str = Field(index=True, unique=True)
     status: PatchApprovalStatus = Field(default=PatchApprovalStatus.pending, index=True)
     created_at: datetime = Field(default_factory=utcnow, index=True)
     expires_at: datetime = Field(index=True)
     resolved_at: datetime | None = None
-    # "patchmon" or "ansible" once execution picked a path.
+    # "ansible" once the playbook path ran. Rows from before ADR-020's
+    # 2026-09-27 amendment may read "patchmon" (its since-removed trigger API).
     executed_via: str | None = None
     detail: str | None = None

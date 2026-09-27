@@ -109,6 +109,38 @@ def test_unknown_keys_name_typos_and_retired_settings():
 
 @pytest.mark.parametrize(
     "key",
+    ["PATCHMON_CALLBACK_URL", "PATCHMON_CALLBACK_TIMEOUT_SECONDS", "PATCHMON_API_TOKEN"],
+)
+def test_the_retired_patchmon_trigger_settings_are_reported_as_doing_nothing(key):
+    """Left in an operator's .env after the trigger path was removed, these
+    would otherwise read as configured."""
+    (entry,) = report({key: "x"})["unknown_keys"]
+    assert entry["key"] == key
+    assert "PATCHMON_ANSIBLE_PLAYBOOK" in entry["note"]
+
+
+def test_the_patchmon_api_needs_both_halves_of_its_credential():
+    result = report(patchmon_api_url="https://patchmon.lan")
+    assert "PatchMon API" in result["features_on"]
+    assert (
+        "PatchMon API is on but missing PATCHMON_API_KEY, PATCHMON_API_SECRET"
+        in (result["problems"])
+    )
+
+
+def test_patchmon_webhook_needs_a_playbook_and_the_control_plane_paths():
+    (problem,) = [
+        line
+        for line in report(patchmon_webhook_enabled=True)["problems"]
+        if line.startswith("Patchmon webhook is on but missing")
+    ]
+    for name in ("PATCHMON_ANSIBLE_PLAYBOOK", "ANSIBLE_CFG_PATH", "SSH_KEY_PATH"):
+        assert name in problem
+    assert "PATCHMON_CALLBACK_URL" not in problem
+
+
+@pytest.mark.parametrize(
+    "key",
     [
         "GITHUB_TOKEN",
         "GH_TOKEN",

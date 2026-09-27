@@ -29,12 +29,18 @@ from registry_mcp.config import Settings, get_settings
 # it (GITHUB_TOKEN 0.86 against GIT_TOKEN, ANSIBLE_INVENTORY 0.87).
 _TYPO_CUTOFF = 0.9
 
-# Setting families of features that have since been removed. A key with one
-# of these prefixes does nothing any more.
+# Setting families (or single settings) of features that have since been
+# removed. A key starting with one of these does nothing any more.
+_PATCHMON_TRIGGER_RETIRED = (
+    "PatchMon's trigger API is no longer called; approved patches run "
+    "PATCHMON_ANSIBLE_PLAYBOOK (ADR-020, amended 2026-09-27)"
+)
 _RETIRED_PREFIXES = {
     "KOMODO_": "the Komodo integration was removed (ADR-011)",
     "CHAT_": "the /chat interface was removed (ADR-011)",
     "WUD_": "the WUD webhook was removed (ADR-006)",
+    "PATCHMON_CALLBACK_": _PATCHMON_TRIGGER_RETIRED,
+    "PATCHMON_API_TOKEN": _PATCHMON_TRIGGER_RETIRED,
 }
 
 # Settings that exist but that nothing reads yet.
@@ -223,18 +229,24 @@ _FEATURES = (
             "notification_smtp_host",
             "notification_from_email",
             "notification_to_email",
-            "patchmon_callback_url|patchmon_ansible_playbook",
+            "patchmon_ansible_playbook",
+            "ansible_cfg_path",
+            "ssh_key_path",
         ),
         (
             "patchmon_webhook_path",
             "patchmon_webhook_max_body_bytes",
             "patchmon_webhook_events",
             "patchmon_approval_ttl_minutes",
-            "patchmon_api_token",
-            "patchmon_callback_timeout_seconds",
             "patchmon_ansible_timeout_seconds",
             "ssh_default_user",
         ),
+    ),
+    _Feature(
+        "PatchMon API",
+        lambda s: bool(s.patchmon_api_url),
+        ("patchmon_api_key", "patchmon_api_secret"),
+        ("patchmon_api_timeout_seconds",),
     ),
     _Feature(
         "Hardware discovery",
