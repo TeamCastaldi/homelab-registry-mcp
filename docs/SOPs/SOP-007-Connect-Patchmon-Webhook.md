@@ -43,6 +43,11 @@ only the setup.
 - [ ] Working Ansible plumbing from this server's container
       ([SOP-004](SOP-004-Verify-Ansible-Control-Plane-Plumbing.md)):
       `ANSIBLE_CFG_PATH`, `SSH_KEY_PATH`, and `SSH_DEFAULT_USER`.
+- [ ] The Ansible user can `sudo` without a password on the hosts you'll patch.
+      The playbook runs unattended, so a sudo password prompt fails every
+      approval with "Missing sudo password". Granting that makes the SSH key
+      this server holds root-equivalent on those hosts; decide that
+      deliberately, and record it where your homelab records decisions.
 - [ ] The hosts PatchMon reports are in your Ansible inventory under the same
       name. An alert that carries a PatchMon friendly name with spaces is matched
       only through the API credential (Step 3), never guessed at. Every approval
@@ -76,23 +81,33 @@ It receives these extra-vars: `patchmon_target_host`, `patchmon_host_id`,
 `patchmon_service`, `patchmon_current_version`, `patchmon_target_version`,
 `patchmon_event`, and `patchmon_approval_id`.
 
-A minimal one, if you're starting from nothing:
+A minimal one for apt hosts, if you're starting from nothing. It refuses to
+run against more than one host, never removes a package (`upgrade: safe` is
+`apt-get upgrade --with-new-pkgs`), and never reboots:
 
 ```yaml
 # patch-host.yml — apply every pending package update on the one host given.
-- hosts: all
+- name: Apply pending package updates to one host
+  hosts: all
   become: true
   tasks:
-    - name: Upgrade packages (Debian/Ubuntu)
+    - name: Refuse to run against more than one host
+      ansible.builtin.assert:
+        that: ansible_play_hosts_all | length == 1
+    - name: Upgrade every installed package
       ansible.builtin.apt:
         update_cache: true
-        upgrade: dist
-      when: ansible_facts.pkg_mgr == "apt"
-    - name: Upgrade packages (Fedora/RHEL)
-      ansible.builtin.dnf:
-        name: "*"
-        state: latest
-      when: ansible_facts.pkg_mgr == "dnf"
+        upgrade: safe
+        force_apt_get: true
+        lock_timeout: 300
+      register: upgrade
+    - name: Check whether a reboot is needed
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: reboot
+    - name: Summarize (this line reaches the result email)
+      ansible.builtin.debug:
+        msg: "upgraded={{ upgrade.changed }} reboot_required={{ reboot.stat.exists }}"
 ```
 
 **Expected result:**
