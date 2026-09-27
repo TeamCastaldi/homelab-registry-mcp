@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.10.2](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.10.1...v1.10.2) (2026-09-27)
+
+
+### Bug Fixes
+
+* **secrets:** parse a file named .env by name, not just suffix ([d2b0743](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/d2b07439949ace61a5a553254f9291d99250c5f8))
+
+
+### Documentation
+
+* add phased mutation-testing remediation plan ([12b6791](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/12b679110d024bf07434c06600e429554c1d034b))
+* **tests:** add test-suite audit and remediation plan ([07d2564](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/07d256438a24a886bf5fdcadf1c80f992660b509))
+* **tests:** add test-suite audit and remediation plan ([5cbdbe0](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/5cbdbe0c183ea869bfcdb7545e1c6ee9001010e8))
+
 ## [1.10.1](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.10.0...v1.10.1) (2026-09-25)
 
 
