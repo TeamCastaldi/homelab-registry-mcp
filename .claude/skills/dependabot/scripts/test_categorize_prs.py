@@ -4,6 +4,7 @@ Run with:
 
     python3 -m pytest .claude/skills/dependabot/scripts/test_categorize_prs.py -q
 """
+
 import importlib.util
 import json
 import subprocess
@@ -35,7 +36,7 @@ def pr(title):
         ("1.2.3", (1, 2, 3)),
         ("1.2", (1, 2, 0)),
         ("2", (2, 0, 0)),
-        ("v3", (3, 0, 0)),          # GitHub Actions tag style
+        ("v3", (3, 0, 0)),  # GitHub Actions tag style
         ("V3.1", (3, 1, 0)),
         ("1.2.3-beta.1", (1, 2, 3)),  # pre-release stripped
         ("1.2.3+build5", (1, 2, 3)),  # build metadata stripped
