@@ -6,6 +6,7 @@ import json
 from datetime import timedelta
 
 import pytest
+from sqlalchemy import text
 from sqlmodel import Session
 
 import registry_mcp.patching.executor as executor_module
@@ -178,6 +179,18 @@ def test_purge_expired_marks_only_past_ttl_pending_rows(approvals):
     assert approvals.purge_expired() == 1
     assert approvals.get(old.approval.id).status == PatchApprovalStatus.expired
     assert approvals.get(fresh.approval.id).status == PatchApprovalStatus.pending
+
+
+def test_a_database_from_before_the_callback_removal_still_works(approvals):
+    """Deployed databases keep the dropped `payload_callback_url` column
+    (nullable, never migrated away); inserts that omit it must still succeed."""
+    with approvals.engine.begin() as conn:
+        conn.execute(text("ALTER TABLE patchapproval ADD COLUMN payload_callback_url VARCHAR"))
+
+    issued = approvals.create(_approval(), ttl_minutes=60)
+
+    assert approvals.get(issued.approval.id).target_host == "pi-01"
+    assert approvals.consume(issued.approve_token, ApprovalAction.approve).state is TokenState.valid
 
 
 # --- executor: fakes ---

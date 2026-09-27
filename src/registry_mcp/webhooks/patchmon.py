@@ -12,7 +12,7 @@ Approve link and confirms the page it shows.
 Conventions, in the order a request meets them:
 
 * **Fail closed at registration.** Disabled, or enabled without a signing
-  secret, an approval base URL, an SMTP provider, or any execution path,
+  secret, an approval base URL, an SMTP provider, or a playbook to run,
   leaves every route unmounted (a real 404). Approval links are bearer
   credentials, so they go by email only, never ntfy, whose topics can be
   readable by anyone who knows the name.
@@ -153,10 +153,7 @@ def register_patchmon_routes(
             "NOTIFICATION_SMTP_HOST, NOTIFICATION_FROM_EMAIL, and NOTIFICATION_TO_EMAIL"
         )
     if not executor.can_execute:
-        return refuse(
-            "an approval would have nothing to run: set PATCHMON_CALLBACK_URL, "
-            "PATCHMON_ANSIBLE_PLAYBOOK, or both"
-        )
+        return refuse("an approval would have nothing to run: set PATCHMON_ANSIBLE_PLAYBOOK")
     if urlsplit(base_url).scheme != "https":
         _log.warning(
             "patchmon_approval_links_not_https",
@@ -247,7 +244,6 @@ def register_patchmon_routes(
                     severity=alert.severity,
                     patchmon_host_id=alert.patchmon_host_id,
                     summary=alert.summary,
-                    payload_callback_url=alert.callback_url,
                 ),
                 ttl_minutes,
             )
@@ -324,7 +320,6 @@ def register_patchmon_routes(
         path=settings.patchmon_webhook_path,
         events=sorted(events),
         ttl_minutes=ttl_minutes,
-        callback_configured=bool(settings.patchmon_callback_url),
-        ansible_fallback_configured=bool(settings.patchmon_ansible_playbook),
+        playbook=settings.patchmon_ansible_playbook,
     )
     return True

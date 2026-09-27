@@ -136,7 +136,6 @@ def _payload(**overrides):
         "target_host": "pi-01",
         "current_version": "2024.2.0",
         "target_version": "2024.2.1",
-        "patchmon_callback_url": CALLBACK,
     }
     body.update(overrides)
     return body
@@ -364,7 +363,6 @@ async def test_unrecognized_shape_is_422_with_serializable_detail(tmp_path):
         {"target_host": "pi 01"},
         {"target_version": "{{ lookup('pipe', 'id') }}"},  # a Jinja template
         {"service": "auth;rm"},
-        {"patchmon_callback_url": "file:///etc/passwd"},
     ],
 )
 async def test_values_that_could_reach_ansible_unsafely_are_422(tmp_path, overrides):
@@ -409,6 +407,20 @@ async def test_patch_alert_emails_single_use_approve_and_cancel_links(tmp_path):
     assert timedelta(minutes=44) < remaining <= timedelta(minutes=45)
     # The row can't be replayed as a click: only hashes are stored.
     assert _token(approve) not in (approval.approve_token_hash, approval.cancel_token_hash)
+
+
+async def test_an_older_senders_callback_url_is_accepted_and_ignored(tmp_path, ansible):
+    """ADR-020 once called PatchMon back at this URL. A sender still including it
+    must not be refused, and nothing may ever be sent to it."""
+    settings = _settings(tmp_path)
+    async with _client(build_server(settings)) as client:
+        response = await _deliver(client, _payload(patchmon_callback_url="file:///etc/passwd"))
+        approve, _ = _links(FakeSMTP.sent[-1])
+        await client.post(_path(approve), data={"token": _token(approve)})
+
+    assert response.status_code == 202
+    assert _only_approval(settings).status == PatchApprovalStatus.executed
+    assert [cmd[0] for cmd in ansible.calls] == ["ansible", "ansible-playbook"]
 
 
 async def test_native_patchmon_alert_becomes_an_approval_keyed_by_host_id(tmp_path):

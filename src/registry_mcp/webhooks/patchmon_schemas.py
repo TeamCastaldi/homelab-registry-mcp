@@ -1,7 +1,8 @@
 """Patchmon webhook payloads (ADR-020): two accepted shapes, one normalized alert.
 
 * `PatchmonWebhookSchema` — the flat patch-alert shape: one host, one service,
-  one version bump, and optionally the PatchMon URL to trigger it at.
+  one version bump. A `patchmon_callback_url` from an older sender is ignored:
+  nothing calls back to PatchMon (ADR-020's 2026-09-27 amendment).
 * `PatchmonNativeAlert` — the generic body PatchMon's own webhook destination
   sends (`event_type`, `severity`, `title`, `message`, `reference`, `metadata`),
   read from its `server-source-code/internal/queue/notification_worker.go`. Its
@@ -9,7 +10,7 @@
   `host_pending_updates_exceeded`) name the host in `metadata.host_name` and
   PatchMon's own id for it in `metadata.host_id`.
 
-Every value that can reach the Ansible fallback (host, service, versions, event)
+Every value that can reach the Ansible playbook (host, service, versions, event)
 is held to a character allowlist here, at the edge: no spaces, no pattern
 characters (`,:!&*`), no leading `-`, and no `{`/`}`, so none of it can widen a
 `--limit` or carry a Jinja template into the playbook's extra-vars.
@@ -20,7 +21,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from typing import Annotated, Any
-from urllib.parse import urlsplit
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, StringConstraints, field_validator
 
@@ -29,7 +29,6 @@ _VERSION_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._+:~-]{0,127}$"
 _EVENT_PATTERN = r"^[a-z0-9][a-z0-9_.-]{0,63}$"
 _UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$")
 _NAME_RE = re.compile(_NAME_PATTERN)
-_MAX_URL_CHARS = 2048
 _MAX_TEXT_CHARS = 1000
 
 HostName = Annotated[str, StringConstraints(strip_whitespace=True, pattern=_NAME_PATTERN)]
@@ -59,7 +58,6 @@ class PatchAlert:
     severity: str | None = None
     patchmon_host_id: str | None = None
     summary: str | None = None
-    callback_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -70,22 +68,8 @@ class IgnoredAlert:
     reason: str
 
 
-def _http_url(value: str | None) -> str | None:
-    if value is None:
-        return None
-    value = value.strip()
-    if not value:
-        return None
-    if len(value) > _MAX_URL_CHARS:
-        raise ValueError("URL is too long")
-    parts = urlsplit(value)
-    if parts.scheme not in ("http", "https") or not parts.hostname:
-        raise ValueError("must be an http(s) URL")
-    return value
-
-
 def _host_id(value: object) -> str | None:
-    """PatchMon's trigger API takes a UUID and nothing else; anything else is dropped."""
+    """PatchMon addresses a host by UUID and nothing else; anything else is dropped."""
     text = str(value).strip() if value is not None else ""
     return text if _UUID_RE.match(text) else None
 
@@ -102,12 +86,6 @@ class PatchmonWebhookSchema(BaseModel):
     target_version: Version | None = None
     severity: ShortText = None
     patchmon_host_id: str | None = None
-    patchmon_callback_url: str | None = None
-
-    @field_validator("patchmon_callback_url")
-    @classmethod
-    def _check_url(cls, value: str | None) -> str | None:
-        return _http_url(value)
 
     @field_validator("patchmon_host_id")
     @classmethod
@@ -127,7 +105,6 @@ class PatchmonWebhookSchema(BaseModel):
             severity=self.severity,
             patchmon_host_id=self.patchmon_host_id,
             summary=summary,
-            callback_url=self.patchmon_callback_url,
         )
 
 
