@@ -58,7 +58,6 @@ cannot see it from a title alone.
 This script only classifies. It does not touch git, GitHub, or any
 repository state.
 """
-
 import json
 import re
 import sys
