@@ -38,6 +38,7 @@ dirty `uv.lock` after `uv sync`, not as a CI failure.
 | `DOCS_ROOT` | `docs/` |
 | `ADR_PATH` | `docs/ADRs/` |
 | `SNAPSHOT_PATH` | `docs/session-history/` |
+| `ROADMAP_PATH` | `docs/plans/ROADMAP.md` |
 
 ## Project Structure
 
