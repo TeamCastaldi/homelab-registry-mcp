@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.0.1](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v2.0.0...v2.0.1) (2026-10-06)
+
+
+### Documentation
+
+* **plans:** blueprint for the Glances diagnostic dashboard ([3c2670f](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/3c2670fa41c849c12ab69883a418b805d48b82af))
+* **session:** snapshot 2026-10-06 -- Glances dashboard blueprint ([703506a](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/703506a3b626bf78966d0c6b500d239116045a71))
+
 ## [2.0.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v1.11.0...v2.0.0) (2026-09-27)
 
 
