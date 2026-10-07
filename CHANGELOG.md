@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.0.2](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v2.0.1...v2.0.2) (2026-10-07)
+
+
+### Documentation
+
+* add MCP SDK v2 adoption plan and roadmap ([4568295](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/4568295f86c314db78a0cf0df3327dcb7f824055))
+* **plans:** plan the move to stateless MCP via Python SDK v2 ([6e1dac5](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/6e1dac592b1b308197433328254820913c94144b))
+
 ## [2.0.1](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v2.0.0...v2.0.1) (2026-10-06)
 
 
