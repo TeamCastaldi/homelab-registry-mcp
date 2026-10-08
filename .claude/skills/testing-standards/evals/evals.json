@@ -1,0 +1,35 @@
+{
+  "skill_name": "testing-standards",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I fixed the bug where parse_date('2026-02-30') quietly rolled over to March 2nd. It now raises ValueError. Write a pytest test for it.",
+      "expected_output": "The testing-standards skill is applied: the test asserts the specific error for the invalid date, includes a valid boundary date so the test would fail if valid input were rejected too, and checks one behavior.",
+      "assertions": [
+        "The testing-standards skill is invoked",
+        "The test asserts ValueError specifically (pytest.raises(ValueError)), not just that some exception occurred",
+        "A valid boundary date such as 2026-02-28 or 2024-02-29 is asserted to parse correctly",
+        "The test does not mock parse_date itself"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Set up pytest in this project: add it to the dev dependencies and give it a minimal config.",
+      "expected_output": "Configuring a test runner is not writing or reviewing a test, so the testing-standards skill is not used. The output is a dependency line and a minimal pytest config.",
+      "assertions": [
+        "The testing-standards skill is not invoked",
+        "pytest is added to the dev dependencies and a minimal config is written"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Is this test worth keeping?\n\n```python\nfrom unittest.mock import patch\n\nfrom billing.webhooks import handle_payment_webhook\n\n\ndef test_handles_payment_webhook():\n    with patch(\"billing.webhooks.fetch_charge\") as fetch:\n        fetch.return_value = {\"id\": \"ch_1\", \"status\": \"succeeded\"}\n        handle_payment_webhook({\"charge\": \"ch_1\"})\n        fetch.assert_called_once()\n```",
+      "expected_output": "The review applies the skill's mock table: fetch_charge is an incoming data stub, so asserting only that it was called is rule M2, and the bare call check with no state or response assertion is a flaw. The verdict is to rewrite the test to assert what the handler did with the charge.",
+      "assertions": [
+        "The review identifies fetch_charge as an incoming data stub and cites rule M2",
+        "It says the bare assert_called_once() with no state or response assertion is a flaw",
+        "The verdict is to rewrite the test, not keep it as is, and the rewrite asserts the handler's observable result"
+      ]
+    }
+  ]
+}

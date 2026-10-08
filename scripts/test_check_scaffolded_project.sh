@@ -42,6 +42,11 @@ fixture() {
   printf '# ADRs\n\n## Index\n\n| ADR | Title | Status |\n|-----|-------|--------|\n| _none yet_ | — | — |\n' \
     > "$dir/docs/ADRs/README.md"
 
+  # The issue tracking every scaffolded project keeps.
+  mkdir -p "$dir/.github/ISSUE_TEMPLATE" "$dir/.github/workflows" "$dir/scripts"
+  touch "$dir/.github/labels.yml" "$dir/.github/ISSUE_TEMPLATE/bug.yml" \
+    "$dir/.github/workflows/label-sync.yml" "$dir/scripts/sync_labels.sh" "$dir/scripts/check_issues.sh"
+
   printf '%s' "$dir"
 }
 
@@ -98,6 +103,11 @@ d="$(fixture)"; mkdir -p "$d/.claude/skills/demo"
 printf 'Replace {PROJECT_NAME} during scaffolding.\n' > "$d/.claude/skills/demo/SKILL.md"
 assert_clean "ignores placeholders documented inside skills" "$d"
 
+# An installed dependency's docs are not this project's docs, whatever they say.
+d="$(fixture)"; mkdir -p "$d/node_modules/some-pkg"
+printf 'Config: {set by init-project — e.g. "npm test"}\n' > "$d/node_modules/some-pkg/README.md"
+assert_clean "ignores placeholder-shaped text inside node_modules" "$d"
+
 # -------------------------------------------------------------------- CLAUDE.md
 
 d="$(fixture)"
@@ -120,6 +130,14 @@ assert_hit "catches a missing foundation.md" "$d" MISSING_FILE
 d="$(fixture)"; rm "$d/.template-version"
 assert_hit "catches a missing .template-version" "$d" MISSING_FILE
 
+for f in .github/labels.yml .github/workflows/label-sync.yml scripts/sync_labels.sh scripts/check_issues.sh; do
+  d="$(fixture)"; rm "$d/$f"
+  assert_hit "catches a missing $f" "$d" MISSING_FILE
+done
+
+d="$(fixture)"; rm "$d/.github/ISSUE_TEMPLATE/bug.yml"; touch "$d/.github/ISSUE_TEMPLATE/notes.md"
+assert_hit "catches an ISSUE_TEMPLATE folder with no form in it" "$d" MISSING_FILE
+
 # ------------------------------------------------------------ template residue
 
 d="$(fixture)"; printf '# Changelog\n\nNotable changes to this template.\n' > "$d/CHANGELOG.md"
@@ -132,6 +150,32 @@ d="$(fixture)"
 printf '# acme\n\n## Getting started\n\nRun init-project.\n\n## Stack\n\n- x\n\n## Quick Start\n\nx\n' \
   > "$d/README.md"
 assert_hit "catches the one-time Getting started section" "$d" GETTING_STARTED
+
+# The template keeps its own session snapshots and reviews in docs/template/, and
+# init-project deletes that whole folder. A folder, not a list of file names: the
+# template adds a snapshot every session, so no list could stay current.
+d="$(fixture)"; mkdir -p "$d/docs/template"
+printf '# Session\n' > "$d/docs/template/SESSION_SNAPSHOT_2026-09-27.md"
+assert_hit "catches the template's own records folder carried over" "$d" TEMPLATE_RESIDUE
+
+# init-project must also point SNAPSHOT_PATH back at the project's own folder.
+# The value can be spelled several ways, so each has to be caught.
+for spelling in 'docs/template/' 'docs/template' './docs/template/' 'docs/template/session-history/'; do
+  d="$(fixture)"
+  printf '# CLAUDE.md\n\n## Project identity\n\nacme.\n\n## Session Config\n\n| Value | Setting |\n|---|---|\n| `SNAPSHOT_PATH` | %s |\n' "$spelling" \
+    > "$d/CLAUDE.md"
+  assert_hit "catches SNAPSHOT_PATH still pointing at the template's records ($spelling)" "$d" TEMPLATE_RESIDUE
+done
+
+# The guard against over-reach. A project writes its OWN snapshots into
+# docs/session-history/ with /session-end, so the check must never read a
+# snapshot file there as residue.
+d="$(fixture)"; mkdir -p "$d/docs/session-history"
+printf '# Session history\n' > "$d/docs/session-history/README.md"
+printf '## Session Goals\n\nShip the first release.\n' > "$d/docs/session-history/SESSION_SNAPSHOT_2026-10-05.md"
+printf '# CLAUDE.md\n\n## Project identity\n\nacme.\n\n## Session Config\n\n| Value | Setting |\n|---|---|\n| `SNAPSHOT_PATH` | docs/session-history/ |\n' \
+  > "$d/CLAUDE.md"
+assert_clean "accepts a project's own session snapshots in docs/session-history/" "$d"
 
 # ------------------------------------------------------------------------ ADRs
 

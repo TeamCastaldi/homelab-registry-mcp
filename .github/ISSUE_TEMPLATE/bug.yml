@@ -1,0 +1,48 @@
+name: Bug
+description: Something is broken.
+labels: ["type:bug", "status:backlog"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Start the title with a verb: "Fix export on Safari", not "Export broken". Security problems go through the private reporting route in SECURITY.md, not here.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, including any error message.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+      description: What should have happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance criteria
+      description: What "fixed" looks like, one checkbox per criterion.
+      value: |
+        - [ ] 
+        - [ ] A test covers it
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Issues that must be finished first, as `#N`, one per line. Leave empty if there are none.
+      placeholder: "Blocked by #12"

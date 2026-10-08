@@ -15,7 +15,11 @@
 #                      stale unless deliberately historical)
 #
 # Files under .claude/skills/ are skipped: a skill that explains the template
-# is supposed to mention it.
+# is supposed to mention it. So are files under docs/template/, the template's
+# own session snapshots and reviews, which init-project deletes; a copy that
+# leaks into a project is reported by check_scaffolded_project.sh as a folder.
+# Files under node_modules/ are skipped because installed dependencies' READMEs
+# aren't this repo's docs.
 #
 # Every hit needs a human call. A deliberate historical mention — a decision
 # log recording that the repo was scaffolded from a template — is a
@@ -73,7 +77,7 @@ while IFS= read -r -d '' f; do
   FILES+=("$f")
 done < <(
   find "$ROOT" \
-    -type d \( -name .git -o -path "$ROOT/.claude/skills" \) -prune -o \
+    -type d \( -name .git -o -name node_modules -o -path "$ROOT/.claude/skills" -o -path "$ROOT/docs/template" \) -prune -o \
     -type f \( -name '*.md' -o -name '*.yml' -o -name '*.yaml' \) -print0
 )
 

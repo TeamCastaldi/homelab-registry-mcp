@@ -1,0 +1,37 @@
+name: Tech debt
+description: Refactoring, cleanup or an infrastructure update.
+labels: ["type:debt", "status:backlog"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Start the title with a verb: "Split the parser module", not "Parser". Priority is set at triage, when this moves out of backlog.
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: What is wrong with the current state, and what does it cost to leave it?
+    validations:
+      required: true
+  - type: textarea
+    id: proposed-change
+    attributes:
+      label: Proposed change
+      description: What to change. Rough is fine; the details can wait until it is planned.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance criteria
+      description: What "done" looks like, one checkbox per criterion.
+      value: |
+        - [ ] 
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Issues that must be finished first, as `#N`, one per line. Leave empty if there are none.
+      placeholder: "Blocked by #12"

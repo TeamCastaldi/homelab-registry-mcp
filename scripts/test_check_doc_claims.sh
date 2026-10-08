@@ -110,6 +110,36 @@ assert_no_hit "doc-claims-ok suppresses a hypothetical ecosystem" "$d" ECOSYSTEM
 d="$(fixture)"; echo "Docker images are not scanned." > "$d/SECURITY.md"
 assert_hit "flags docker when unconfigured" "$d" ECOSYSTEM_CLAIM "docker named"
 
+# Regression guard: package-ecosystem values in single quotes are ordinary
+# YAML, not just the double-quoted style this template's own dependabot.yml
+# happens to use. Before the fix, the extraction regex matched zero lines
+# here, and under `set -euo pipefail` that aborted the whole script silently
+# with no output at all — which a plain assert_no_hit cannot distinguish from
+# a correct clean pass, since both produce no ECOSYSTEM_CLAIM line. Assert the
+# exit code and the summary line too, so a silent abort is caught as a failure.
+d="$(fixture)"
+printf 'version: 2\nupdates:\n  - package-ecosystem: '"'"'pip'"'"'\n' > "$d/.github/dependabot.yml"
+echo "Dependabot monitors pip." > "$d/SECURITY.md"
+name="accepts single-quoted package-ecosystem values"
+out="$("$SUT" "$d" 2>&1)"; status=$?
+if [[ $status -eq 0 ]] && grep -qF "ECOSYSTEM_CLAIM=0" <<<"$out"; then
+  pass=$((pass + 1))
+else
+  fail=$((fail + 1))
+  echo "FAIL: $name"
+  echo "  expected exit 0 and ECOSYSTEM_CLAIM=0 (not a silent abort), got exit $status:"
+  indent "$out"
+fi
+rm -rf "$d"
+
+# Regression guard: a dependabot.yml with no package-ecosystem lines at all
+# (a plausible state for a freshly scaffolded project) must not abort the
+# script either — every ecosystem SECURITY.md claims should still be flagged.
+d="$(fixture)"
+printf 'version: 2\nupdates: []\n' > "$d/.github/dependabot.yml"
+echo "Dependabot monitors pip and npm." > "$d/SECURITY.md"
+assert_hit "reports a full set of claims when dependabot.yml configures nothing" "$d" ECOSYSTEM_CLAIM "pip named"
+
 # ------------------------------------------------------------- manifest claims
 
 # The second live bug: a requirements.txt that was never committed.

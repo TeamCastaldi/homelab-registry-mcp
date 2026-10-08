@@ -1,0 +1,36 @@
+{
+  "skill_name": "sync-from-template",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Is this repo behind project-template? Pull in any newer skills.",
+      "expected_output": "Run in a project scaffolded from the template. The skill reads or proposes its config file, runs compare_template.sh by its full path, presents the TEMPLATE SYNC REPORT with a version line and a migration-steps row, and overwrites nothing without a SYNC: PULL confirmation.",
+      "assertions": [
+        "The sync-from-template skill is invoked",
+        "compare_template.sh is run as bash .claude/skills/sync-from-template/scripts/compare_template.sh",
+        "The report has a version line and a Migration steps row, even if that row says none",
+        "No local file is overwritten before the user replies SYNC: PULL",
+        "The temporary clone is removed when the sync is done"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Check this repo's READMEs against its actual folders and fix any drift.",
+      "expected_output": "This is the /sync-template audit of the repo's own consistency, not a pull from the upstream template, so the sync-from-template skill is not used and nothing is cloned.",
+      "assertions": [
+        "The sync-from-template skill is not invoked",
+        "compare_template.sh is not run and the template repo is not cloned"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Sync the tooling from the template. SYNC: PULL ALL",
+      "expected_output": "Run in a scaffolded project that has one extra file, .claude/commands/local-note.md, which the template does not have. The report lists it under Local-only, and it is left exactly as it was, even though the user gave SYNC: PULL ALL up front.",
+      "assertions": [
+        ".claude/commands/local-note.md is listed as local-only in the report",
+        ".claude/commands/local-note.md still exists afterwards with its contents unchanged",
+        "Only files reported as CHANGED or NEW are written"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "skill_name": "issue-tracker",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Oh, also - the export button doesn't do anything in Safari. Not now, but note it so we fix it later.",
+      "expected_output": "The issue-tracker skill drafts one issue and waits: a verb-first title such as 'Fix export button in Safari', labels type:bug and status:backlog and no priority label, and a body with the bug form's sections (What happened, Expected, Steps to reproduce, Acceptance criteria, Dependencies) plus a Source section. Detail the user did not give, such as the steps to reproduce, is marked _Not yet known_ rather than invented. Nothing is filed until the user says yes.",
+      "assertions": [
+        "The issue-tracker skill is invoked",
+        "Existing issues are searched for a duplicate before the draft is shown",
+        "The draft carries exactly type:bug and status:backlog, and no p0-p3 label",
+        "The draft's body has What happened, Expected, Steps to reproduce, Acceptance criteria, Dependencies and Source sections",
+        "Steps to reproduce are not invented: the section reads _Not yet known_ or quotes only what the user said",
+        "No issue is created before the user confirms"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Go through docs/foundation.md and CLAUDE.md and turn every goal in there into issues.",
+      "expected_output": "Bulk seeding from the project's stated goals is the /roadmap command's SEED operation, which only the user can start. The issue-tracker skill does not file a batch of issues itself; the reply tells the user to type /roadmap seed.",
+      "assertions": [
+        "No issue is created",
+        "The reply points the user to /roadmap (its seed operation)",
+        "The issue-tracker skill does not draft one issue per goal itself"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Let's start on #12.",
+      "expected_output": "Run in a repo whose issue #12 is open with status:planned. The skill reads #12 and its comments, removes status:planned and adds status:in-progress so the issue has exactly one status label, reads the issue back to show the result, and suggests a branch name and Closes #12 for the eventual PR. It does not ask for a separate confirmation for the label change, because the user asked for it directly.",
+      "assertions": [
+        "Issue #12 is read before anything is changed",
+        "After the change, #12 carries status:in-progress and no other status:* label",
+        "The issue is read back after the write and its labels are shown",
+        "The reply suggests a branch for the work and mentions Closes #12 for the PR",
+        "The issue is not closed and no new issue is created"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+# .github/labels.yml
+#
+# Every label this repo's issue tracking relies on. scripts/sync_labels.sh
+# creates or updates them on GitHub, and .github/workflows/label-sync.yml runs
+# it on every push to main, so a new repo gets them without anyone running
+# anything. Labels on GitHub that are not listed here are left alone.
+#
+# The format is deliberately narrow, because sync_labels.sh parses it without
+# a YAML library: one entry per label, exactly these three keys, each on its
+# own line, values bare or in double quotes.
+#
+#   - name: "status:backlog"
+#     color: "ededed"          six hex digits, no leading #
+#     description: "..."
+#
+# Three families, one label from each on an open issue (priority is set at
+# triage, so a backlog issue may have none). Closing an issue is what marks it
+# done; there is deliberately no status:completed.
+
+# ---------------------------------------------------------------- status
+- name: "status:backlog"
+  color: "ededed"
+  description: "Noted, not yet prioritized"
+- name: "status:planned"
+  color: "c5def5"
+  description: "Committed to: up next"
+- name: "status:in-progress"
+  color: "1d76db"
+  description: "Being worked on now"
+- name: "status:blocked"
+  color: "5319e7"
+  description: "Waiting on another issue or an outside party; the reason is in a comment"
+
+# ---------------------------------------------------------------- type
+- name: "type:feature"
+  color: "0e8a16"
+  description: "New functionality"
+- name: "type:improvement"
+  color: "a2eeef"
+  description: "Refines something that already works"
+- name: "type:bug"
+  color: "d73a4a"
+  description: "Something is broken"
+- name: "type:debt"
+  color: "fef2c0"
+  description: "Refactoring, tech debt or infrastructure"
+- name: "type:idea"
+  color: "d4c5f9"
+  description: "Low-fidelity idea, not yet shaped into work"
+
+# ---------------------------------------------------------------- priority
+- name: "p0:critical"
+  color: "b60205"
+  description: "Must have"
+- name: "p1:high"
+  color: "d93f0b"
+  description: "Important"
+- name: "p2:medium"
+  color: "fbca04"
+  description: "Nice to have"
+- name: "p3:low"
+  color: "c2e0c6"
+  description: "Backburner"
+
+# ---------------------------------------------------------------- dependabot
+# .github/dependabot.yml applies these to its pull requests.
+- name: "dependencies"
+  color: "0366d6"
+  description: "Dependency update"
+- name: "github-actions"
+  color: "000000"
+  description: "Update to a GitHub Actions workflow dependency"
+- name: "tooling"
+  color: "bfdadc"
+  description: "Update to dev tooling pinned in requirements-dev.txt"

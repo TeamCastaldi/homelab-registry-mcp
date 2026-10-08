@@ -5,10 +5,10 @@ description: >
   completed in a coding session - new features, architectural decisions, changed
   dependencies, revised setup steps. Distinct from /session-end's
   SESSION_SNAPSHOT files, which are a dated log; this skill edits the docs a new
-  contributor would actually read today. Use whenever Nathan says things like "update the
+  contributor would actually read today. Use whenever the user says things like "update the
   docs", "update the README", "sync CLAUDE.md", "the docs are stale", "make sure the
   readme reflects this", or asks to bring project documentation up to date after finishing
-  work - even if he names no specific file.
+  work - even if they name no specific file.
 ---
 
 # Session docs updater
@@ -34,6 +34,13 @@ Work from whatever evidence is available, in order of preference:
      doc claim is now wrong, and `--oneline` hides it.
    - If a commit's subject hints at something removed, replaced, or deprecated, run
      `git show <hash>` on it to see the actual diff before writing the update.
+
+The user's own description of a change counts as evidence that it happened: "I added an
+`export` subcommand" is enough to document one. It is not evidence for the details it
+leaves out. Take those from the code and git history, and never invent one that neither
+gives. If a detail a reader would act on is still missing, such as a command's syntax, ask
+for it rather than write a guess or a placeholder into the doc. A decision's reason that
+nobody gave is marked as not recorded, not reconstructed.
 
 If neither source shows a clear, specific change, don't guess at what to document - use the
 exact wording in Edge cases below instead of inventing plausible-sounding updates.
@@ -72,7 +79,7 @@ the first time.
 - Only document work that the session context or git history actually evidences - never
   document a "likely" next step or something implied but not confirmed.
 - Preserve each file's existing structure and heading style rather than reorganizing it,
-  unless Nathan asks for that separately.
+  unless the user asks for that separately.
 
 ## Edge cases
 

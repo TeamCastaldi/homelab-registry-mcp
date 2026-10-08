@@ -1,18 +1,25 @@
-# Files outside .claude/ that the commands and skills in .claude/ run.
+# Files outside .claude/ that the commands and skills in .claude/ run or
+# depend on.
 #
 # compare_template.sh reads this list from the template commit and offers each
-# file alongside .claude/, so a downstream project that syncs a command also
-# gets the script it depends on. One path per line, relative to the repo root;
-# `#` starts a comment.
+# path alongside .claude/, so a downstream project that syncs a command also
+# gets what it stands on. One path per line, relative to the repo root; a
+# directory brings every file in it. `#` starts a comment.
 #
-# Add a line when a command or skill starts running a script that lives outside
-# .claude/, and its test beside it. Never list a file that only makes sense in
-# the upstream repo — scripts/simulate_init.sh and template-ci.yml are deleted
-# by init-project on purpose, and listing them would re-offer them every sync.
+# Add a line when a command or skill starts depending on something outside
+# .claude/, and a script's test beside it. Never list a file that only makes
+# sense in the upstream repo — scripts/simulate_init.sh and template-ci.yml are
+# deleted by init-project on purpose, and listing them would re-offer them
+# every sync.
 
-# /roadmap
-scripts/check_roadmap.sh
-scripts/test_check_roadmap.sh
+# issue-tracker, /roadmap, /session-start: issue tracking on GitHub Issues
+scripts/check_issues.sh
+scripts/test_check_issues.sh
+scripts/sync_labels.sh
+scripts/test_sync_labels.sh
+.github/labels.yml
+.github/ISSUE_TEMPLATE
+.github/workflows/label-sync.yml
 
 # /sync-template, init-project
 scripts/check_doc_claims.sh
@@ -20,3 +27,4 @@ scripts/test_check_doc_claims.sh
 scripts/check_scaffolded_project.sh
 scripts/test_check_scaffolded_project.sh
 scripts/validate_skills.sh
+scripts/test_validate_skills.sh

@@ -1,5 +1,6 @@
 ---
 description: Open a coding session — scan repo state and recent history, pick a mission, then work it one verified step at a time.
+disable-model-invocation: true
 argument-hint: "[optional: what you want to work on]"
 ---
 
@@ -31,6 +32,14 @@ Perform all of the following before responding:
    - **If the tree is dirty**, stop before drafting missions and surface it explicitly rather than folding it quietly into Current Pulse. Present three options and wait for a choice: (a) treat the existing changes as this session's mission and continue them, (b) stash them (`git stash push -m "<description>"`) and start clean, (c) leave them untouched and let the user handle it manually.
 3. **Session snapshot** — find the most recent `SESSION_SNAPSHOT*.md` in `{SNAPSHOT_PATH}` and retrieve its "Next Steps" and "Technical Debt".
 4. **Standards scan** — read `CLAUDE.md` for naming conventions, indentation, and architectural patterns. Where it is silent, infer from file samples in `{SRC_ROOT}` rather than guessing blind.
+5. **Open issues** — the work noted for later lives in the repo's GitHub Issues. With `gh` logged in, or the GitHub connector in a cloud session, read the open issues through the checker, which lists them in pick-up order:
+
+   ```bash
+   gh api 'repos/{owner}/{repo}/issues?state=open&per_page=100' --paginate \
+     | bash scripts/check_issues.sh -
+   ```
+
+   Through the connector, save the `list_issues` pages as one JSON array and pass that file instead of `-`. Keep the `IN_PROGRESS` lines, then the first few `PLANNED`. With no GitHub access, or no `scripts/check_issues.sh`, say so in one line and carry on without them.
 
 If the user passed an argument, treat it as a proposed mission — still run the scan, and still confirm the mission at Gate 1.
 
@@ -40,7 +49,9 @@ Present:
 
 - **Current Pulse** — two sentences on project state, from git history plus the snapshot.
 - **Standards Detected** — brief list of naming and coding patterns to enforce this session.
-- **Active Missions** — 3–5 candidates, ranging from "finish the WIP" to "start something from the snapshot's Next Steps".
+- **Active Missions** — 3–5 candidates, ranging from "finish the WIP" to "start something from the snapshot's Next Steps". In-progress issues come first, then planned ones in the checker's order, each as `#N title`.
+
+Picking an issue as the mission starts it the way the `issue-tracker` skill does: its status label moves to `status:in-progress`, and the PR that finishes it carries `Closes #N`.
 
 > [!IMPORTANT]
 > Gate 1 — mission selection. The user must reply `MISSION: <number>`, optionally with extra instructions.
@@ -67,7 +78,7 @@ Once a mission is selected:
 
 ## Close
 
-When the plan is complete or the user stops early, summarize what was achieved and offer to run `/session-end`.
+When the plan is complete or the user stops early, summarize what was achieved and suggest typing `/session-end` to close out.
 
 ## Conventions
 

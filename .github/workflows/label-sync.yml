@@ -1,0 +1,38 @@
+name: Sync labels
+
+# Keeps the repo's GitHub labels matching .github/labels.yml, which the issue
+# tracking (the issue-tracker skill, /roadmap and the forms in
+# .github/ISSUE_TEMPLATE/) depends on. It only creates and updates; a label not
+# in the file is never deleted.
+#
+# Deliberately no path filter: a repo created from the template never edits
+# labels.yml, so a filter on it would mean the labels never get created. When
+# nothing has drifted, a run is one API call. workflow_dispatch lets a session
+# with no gh login (a cloud session using the GitHub connector) create the
+# labels by running this workflow.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: label-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync labels from .github/labels.yml
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sync labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: bash scripts/sync_labels.sh

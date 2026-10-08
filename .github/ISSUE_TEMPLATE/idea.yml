@@ -1,0 +1,18 @@
+name: Idea
+description: A rough idea, not yet shaped into work. Fine to keep it short.
+labels: ["type:idea", "status:backlog"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ideas are deliberately low-fidelity. When one is picked up, it is reshaped into a feature, improvement or debt issue with acceptance criteria.
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why it might matter

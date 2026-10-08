@@ -1,0 +1,36 @@
+{
+  "skill_name": "dependabot",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "There are nine open Dependabot PRs on this repo and most of them look like patch bumps. Can you clean them up?",
+      "expected_output": "The dependabot skill runs its Phase 0 preflight before reading any PRs, categorizes them with the bundled script, presents a consolidation plan, and stops for the user to reply \"consolidate\" before changing anything.",
+      "assertions": [
+        "The dependabot skill is invoked",
+        "gh auth status and git status --porcelain run before gh pr list",
+        "If any PRs are found, they are categorized by running .claude/skills/dependabot/scripts/categorize_prs.py, not by reading titles by hand",
+        "No branch is created, no PR is opened and no PR is closed before the user replies consolidate"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Bump pytest to the next patch release in requirements-dev.txt and rerun the skills tests.",
+      "expected_output": "A direct edit to the pytest pin in requirements-dev.txt followed by a test run. This is a manual dependency bump, not triage of Dependabot PRs, so the dependabot skill is not used.",
+      "assertions": [
+        "The dependabot skill is not invoked",
+        "No gh pr command is run",
+        "Only the pytest line in requirements-dev.txt changes"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Consolidate the open Dependabot PRs.",
+      "expected_output": "Run with an uncommitted change in the working tree. The skill stops in Phase 0, names the failing preflight check and the action to take (commit or stash; or gh auth login, if gh is not authenticated, which is checked first), and does nothing else.",
+      "assertions": [
+        "The run stops before gh pr list is executed",
+        "The reply names the failing preflight check and the action the user should take",
+        "No branch is created or switched to"
+      ]
+    }
+  ]
+}

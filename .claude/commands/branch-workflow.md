@@ -1,5 +1,6 @@
 ---
 description: Interactive menu for starting a new unit of work on a branch, with a context-aware starter checklist per work type.
+disable-model-invocation: true
 argument-hint: "[optional: what you're working on]"
 ---
 

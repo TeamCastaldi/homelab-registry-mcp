@@ -1,5 +1,6 @@
 ---
 description: Audit this repo for drift between its folder structure, READMEs and tooling, then fix what has fallen out of sync.
+disable-model-invocation: true
 ---
 
 # Sync structure
