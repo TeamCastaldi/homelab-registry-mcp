@@ -18,8 +18,10 @@
 # is supposed to mention it. So are files under docs/template/, the template's
 # own session snapshots and reviews, which init-project deletes; a copy that
 # leaks into a project is reported by check_scaffolded_project.sh as a folder.
-# Files under node_modules/ are skipped because installed dependencies' READMEs
-# aren't this repo's docs.
+# Files under node_modules/, .venv/ and any other virtualenv (a folder holding a
+# pyvenv.cfg) are skipped, as are the vendored third-party skills under
+# .agents/skills/. Installed and vendored packages' READMEs and links aren't
+# this repo's docs.
 #
 # Every hit needs a human call. A deliberate historical mention — a decision
 # log recording that the repo was scaffolded from a template — is a
@@ -72,12 +74,16 @@ SKIP_MARKER='inherited-docs-ok'
 # workflow paths. Read NUL-delimited so paths with spaces survive, via the
 # read loop rather than `mapfile -d` — the latter needs bash 4.4, and macOS
 # still ships 3.2.
+# A virtualenv is recognised by the pyvenv.cfg it writes at its root, so one
+# named something other than .venv is still skipped.
 FILES=()
 while IFS= read -r -d '' f; do
   FILES+=("$f")
 done < <(
   find "$ROOT" \
-    -type d \( -name .git -o -name node_modules -o -path "$ROOT/.claude/skills" -o -path "$ROOT/docs/template" \) -prune -o \
+    -type d \( -name .git -o -name node_modules -o -name .venv \
+      -o -path "$ROOT/.agents/skills" -o -path "$ROOT/.claude/skills" -o -path "$ROOT/docs/template" \
+      -o -exec test -e "{}/pyvenv.cfg" \; \) -prune -o \
     -type f \( -name '*.md' -o -name '*.yml' -o -name '*.yaml' \) -print0
 )
 

@@ -127,6 +127,18 @@ assert_hit "catches a filled-in-with-nothing Stack section" "$d" EMPTY_SECTION
 d="$(fixture)"; rm "$d/docs/foundation.md"
 assert_hit "catches a missing foundation.md" "$d" MISSING_FILE
 
+# A project that keeps its docs in a folder holds the same brief as
+# docs/foundation/FOUNDING_BRIEF.md. That layout satisfies the check too.
+d="$(fixture)"; rm "$d/docs/foundation.md"; mkdir -p "$d/docs/foundation"
+printf '# acme — Founding brief\n**Status**: Accepted\n' > "$d/docs/foundation/FOUNDING_BRIEF.md"
+assert_clean "accepts the founding brief at docs/foundation/FOUNDING_BRIEF.md" "$d"
+
+# The folder layout is not a loophole: only FOUNDING_BRIEF.md counts there. Any
+# other file beside it, with the root brief gone, still reports the file missing.
+d="$(fixture)"; rm "$d/docs/foundation.md"; mkdir -p "$d/docs/foundation"
+printf '# notes\n' > "$d/docs/foundation/notes.md"
+assert_hit "catches a docs/foundation/ folder with no founding brief in it" "$d" MISSING_FILE
+
 d="$(fixture)"; rm "$d/.template-version"
 assert_hit "catches a missing .template-version" "$d" MISSING_FILE
 

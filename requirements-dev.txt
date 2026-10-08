@@ -1,0 +1,11 @@
+# Lint and test tooling for the template's own scripts under .claude/skills/.
+# Not a stack choice — a project scaffolded from this template picks its own
+# runtime dependencies separately, and keeps this file only for as long as it
+# keeps those skills.
+#
+# Pinned exactly, on purpose. These pins are the CI ruleset: an unpinned
+# `pip install --upgrade ruff` turns every upstream release into a surprise
+# red build on a PR that changed no Python at all. Dependabot's pip ecosystem
+# watches this file, so a bump arrives as a reviewable PR instead.
+pytest==9.1.1
+ruff==0.16.10

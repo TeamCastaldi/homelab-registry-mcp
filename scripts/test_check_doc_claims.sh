@@ -158,6 +158,34 @@ echo 'Write pyproject.toml or package.json as the stack needs.' > "$d/.claude/sk
 echo "# Clean" > "$d/README.md"
 assert_no_hit "ignores manifest mentions inside skills" "$d" MANIFEST_CLAIM
 
+# A monorepo keeps each manifest in its own folder while the root doc names it.
+# The claim is true when the file exists at depth, not only at the root.
+d="$(fixture)"; mkdir -p "$d/backend" "$d/frontend"
+echo 'Pin the versions in `requirements.txt` and `package.json`.' > "$d/SECURITY.md"
+printf 'fastapi==0.110\n' > "$d/backend/requirements.txt"
+printf '{}\n' > "$d/frontend/package.json"
+assert_no_hit "accepts manifests that live in subfolders (monorepo)" "$d" MANIFEST_CLAIM
+
+# Depth does not rescue a manifest that exists nowhere, even beside one that does.
+d="$(fixture)"; mkdir -p "$d/backend"
+echo 'Pin the versions in `requirements.txt` and `go.mod`.' > "$d/SECURITY.md"
+printf 'fastapi==0.110\n' > "$d/backend/requirements.txt"
+assert_hit "still flags a manifest missing at every depth in a monorepo" "$d" MANIFEST_CLAIM "go.mod named"
+
+# node_modules, .venv and .agents hold other projects' manifests. A copy there is
+# not this repo's file, so it must not satisfy the claim.
+d="$(fixture)"; mkdir -p "$d/node_modules/pkg"; printf '{}\n' > "$d/node_modules/pkg/package.json"
+echo 'Pin the versions in `package.json`.' > "$d/SECURITY.md"
+assert_hit "a manifest inside node_modules does not satisfy the claim" "$d" MANIFEST_CLAIM "package.json named"
+
+d="$(fixture)"; mkdir -p "$d/.venv/lib"; printf 'x\n' > "$d/.venv/lib/requirements.txt"
+echo 'Pin the versions in `requirements.txt`.' > "$d/SECURITY.md"
+assert_hit "a manifest inside .venv does not satisfy the claim" "$d" MANIFEST_CLAIM "requirements.txt named"
+
+d="$(fixture)"; mkdir -p "$d/.agents/skills/x"; printf 'x\n' > "$d/.agents/skills/x/pyproject.toml"
+echo 'Pin the versions in `pyproject.toml`.' > "$d/SECURITY.md"
+assert_hit "a manifest inside .agents does not satisfy the claim" "$d" MANIFEST_CLAIM "pyproject.toml named"
+
 # --------------------------------------------------------------- script targets
 
 # Regression guard: an earlier version piped through `tr -d '[:space:]'`, which

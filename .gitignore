@@ -42,3 +42,8 @@ htmlcov/
 # under ansible/roles and ansible/playbooks are tracked)
 .ansible/
 ansible/archive/
+
+# skill-creator writes each evaluation run to <skill>-workspace/ beside the
+# skill. Run output, not source — and validate_skills.sh would read the folder
+# as a skill missing its SKILL.md.
+.claude/skills/*-workspace/

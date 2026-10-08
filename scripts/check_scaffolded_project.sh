@@ -22,7 +22,9 @@
 #                    and it slips past the placeholder check precisely because
 #                    the placeholder was removed
 #   MISSING_FILE     a file every scaffolded project must have is absent
-#                    (docs/foundation.md, .template-version, and the issue
+#                    (the founding brief at docs/foundation.md, or at
+#                    docs/foundation/FOUNDING_BRIEF.md for a project that keeps
+#                    its docs in a folder; .template-version; and the issue
 #                    tracking the template ships ready to use: labels.yml,
 #                    the issue forms, label-sync.yml and its two scripts)
 #   TEMPLATE_RESIDUE a file belonging to the template itself was carried into
@@ -132,8 +134,13 @@ fi
 
 # --------------------------------------------------------------- required files
 
-[[ -f "$ROOT/docs/foundation.md" ]] || \
-  problem MISSING_FILE "docs/foundation.md" "init-project Phase 6 writes this founding brief"
+# The founding brief has two accepted homes. init-project writes docs/foundation.md;
+# a project that keeps its docs in a folder may hold the same brief as
+# docs/foundation/FOUNDING_BRIEF.md. Either one satisfies the check, and nothing
+# else under docs/foundation/ does.
+if [[ ! -f "$ROOT/docs/foundation.md" && ! -f "$ROOT/docs/foundation/FOUNDING_BRIEF.md" ]]; then
+  problem MISSING_FILE "docs/foundation.md" "no founding brief: init-project Phase 6 writes docs/foundation.md, or docs/foundation/FOUNDING_BRIEF.md in a project that keeps its docs in a folder"
+fi
 
 [[ -f "$ROOT/.template-version" ]] || \
   problem MISSING_FILE ".template-version" "records the template version this project came from"

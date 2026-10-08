@@ -20,6 +20,8 @@ Every command, skill and hook in this folder, one line each. `/sync-template` ch
 | Command | `/branch-workflow` | Start a unit of work on a named branch, with a starter checklist per work type |
 | Command | `/audit-tests` | Audit the whole test suite against `testing-standards` and write a dated, machine-checked report |
 | Command | `/commit-msg` | Draft a Conventional Commit message from the staged diff and session context |
+| Command | `/legacy-cleanup` | Trace named legacy files for dead code, obsolete flags and circular dependencies, and recommend safe removals — analysis only, no edits |
+| Command | `/red-team` | Adversarial review of one piece of cryptography or money-movement code: a fresh reviewer tries to break it and reports one exploitable flaw |
 | Command | `/roadmap` | Seed the repo's GitHub Issues from its stated goals, audit the open ones against the code, or migrate an old `ROADMAP.md` into issues |
 | Command | `/session-end` | Write the session snapshot, run the test and lint gate, then commit and push behind confirmations |
 | Command | `/session-start` | Scan repo state and history, pick a mission, and work it one verified step at a time |

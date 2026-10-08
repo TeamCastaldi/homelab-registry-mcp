@@ -16,7 +16,8 @@
 #   ECOSYSTEM_CLAIM  a package ecosystem named in SECURITY.md that
 #                    .github/dependabot.yml does not configure
 #   MANIFEST_CLAIM   a dependency-manifest filename named in a root doc that
-#                    does not exist on disk
+#                    does not exist anywhere in the repo, at any depth (copies
+#                    inside .git, node_modules, .venv or .agents do not count)
 #   MISSING_TARGET   a script path invoked in a fenced command block, or named
 #                    by a Bash() allow rule in .claude/settings.json, that does
 #                    not exist on disk
@@ -115,14 +116,23 @@ PATTERNS
 fi
 
 # ---------------------------------------------------------------- check 2
-# Manifest filenames named in a root doc must exist.
+# Manifest filenames named in a root doc must exist somewhere in the repo. A
+# monorepo keeps its manifests in subfolders (backend/requirements.txt,
+# frontend/package.json), so the name resolves at any depth. The folders that
+# hold other projects' files are not searched: a package.json inside node_modules
+# or a virtualenv does not make this repo's claim true.
+manifest_in_repo() {
+  [[ -n "$(find "$ROOT" \( -name .git -o -name node_modules -o -name .venv -o -name .agents \) -prune \
+    -o -name "$1" -print -quit)" ]]
+}
+
 for doc in "${CLAIM_DOCS[@]}"; do
   f="$ROOT/$doc"
   [[ -f "$f" ]] || continue
   for manifest in "${MANIFESTS[@]}"; do
-    [[ -e "$ROOT/$manifest" ]] && continue
     while IFS=: read -r lineno text; do
       [[ -z "${lineno:-}" ]] && continue
+      manifest_in_repo "$manifest" && continue
       text="${text#"${text%%[![:space:]]*}"}"
       printf 'MANIFEST_CLAIM\t%s:%s\t%s named but not present in the repo\n' \
         "$doc" "$lineno" "$manifest"

@@ -117,6 +117,40 @@ node_modules_fixture() {
 assert_no_hit "skips template language inside node_modules" "$(node_modules_fixture)" TEMPLATE_LANGUAGE
 assert_no_hit "skips broken links inside node_modules" "$(node_modules_fixture)" BROKEN_LINK
 
+# Virtualenvs and vendored skills hold other people's files, the way node_modules
+# does. A virtualenv is one with a pyvenv.cfg at its root, whatever it is named.
+# Each case builds one kind alone, so a failure names the folder it broke on.
+skipped_fixture() {
+  local d
+  d="$(fixture)"
+  case "$1" in
+    venv)   mkdir -p "$d/.venv/lib/pillow"; echo "See [notes](docs/notes.md)." > "$d/.venv/lib/pillow/libjpeg_turbo.md" ;;
+    named)  mkdir -p "$d/env/lib/pkg"; printf 'home = /usr/bin\n' > "$d/env/pyvenv.cfg"
+            echo "Use this template. See [docs](docs/api.md)." > "$d/env/lib/pkg/README.md" ;;
+    agents) mkdir -p "$d/.agents/skills/langfuse/references"
+            echo "See [refs](references/missing.md)." > "$d/.agents/skills/langfuse/references/instrumentation.md" ;;
+  esac
+  echo "# A project" > "$d/README.md"
+  printf '%s' "$d"
+}
+assert_no_hit "skips broken links inside .venv" "$(skipped_fixture venv)" BROKEN_LINK
+assert_no_hit "skips broken links inside a virtualenv named otherwise" "$(skipped_fixture named)" BROKEN_LINK
+assert_no_hit "skips template language inside a virtualenv named otherwise" "$(skipped_fixture named)" TEMPLATE_LANGUAGE
+assert_no_hit "skips broken links inside vendored .agents/skills" "$(skipped_fixture agents)" BROKEN_LINK
+
+# The guards against over-pruning. A folder named like a virtualenv is not one
+# without a pyvenv.cfg, and only .agents/skills/ is vendored; the rest of .agents/
+# is still this repo's, and is still swept.
+d="$(fixture)"; mkdir -p "$d/venv/lib"
+echo "See [notes](docs/notes.md)." > "$d/venv/lib/README.md"
+echo "# A project" > "$d/README.md"
+assert_hit "still sweeps a folder named venv that has no pyvenv.cfg" "$d" BROKEN_LINK "venv/lib/README.md:1"
+
+d="$(fixture)"; mkdir -p "$d/.agents/notes"
+echo "See [notes](docs/notes.md)." > "$d/.agents/notes/guide.md"
+echo "# A project" > "$d/README.md"
+assert_hit "still sweeps the rest of .agents beside skills" "$d" BROKEN_LINK ".agents/notes/guide.md:1"
+
 # The template's own session snapshots and reviews live in docs/template/, which
 # init-project deletes. They are meant to talk about the template, so the sweep
 # skips them the way it skips a skill. A copy that leaks into a project is still
