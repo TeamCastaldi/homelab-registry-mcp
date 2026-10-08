@@ -1,5 +1,6 @@
 ---
 description: Run a full, evidence-based audit of the test suite against the testing-standards skill's rules, and write a dated, machine-checkable report.
+disable-model-invocation: true
 ---
 
 # Audit tests

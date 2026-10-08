@@ -1,0 +1,36 @@
+{
+  "skill_name": "init-project",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I just cloned this template for a new CLI tool. Help me set it up.",
+      "expected_output": "The init-project skill runs its Phase 0 scan, including the inherited-docs sweep, then asks the first interview question on its own and waits.",
+      "assertions": [
+        "The init-project skill is invoked",
+        "bash .claude/skills/init-project/scripts/check_inherited_docs.sh runs before the first question",
+        "The first reply to the user contains exactly one question",
+        "No folder or file is created in the first turn"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Let's start a coding session. What should I work on today?",
+      "expected_output": "Run in an already-initialized project. This is the /session-start workflow, not first-time setup, so the init-project skill is not used and no setup interview starts.",
+      "assertions": [
+        "The init-project skill is not invoked",
+        "No setup interview question (project name, problem, stack) is asked"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Fresh clone of the template. Get it going. I'm building a Python CLI that renames photos by their EXIF date.",
+      "expected_output": "The interview asks one question at a time even though the prompt already answers some of them: no list of upcoming questions, no progress counter, and no question the prompt has already made moot.",
+      "assertions": [
+        "The first question message contains exactly one question",
+        "No list or preview of later questions appears",
+        "No progress counter such as 'question 1 of 16' appears",
+        "It does not ask whether the project needs a frontend or what kind of thing it is, which the prompt already answered"
+      ]
+    }
+  ]
+}

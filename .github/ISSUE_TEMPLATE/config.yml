@@ -1,0 +1,5 @@
+# Every issue goes through one of the forms in this folder, so each arrives
+# with a type:* label, status:backlog, and the sections the issue-tracker skill
+# and scripts/check_issues.sh read. Issues filed through the API (gh, or Claude
+# using the GitHub connector) are not affected by this setting.
+blank_issues_enabled: false

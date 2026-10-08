@@ -181,6 +181,39 @@ check "a single-file sync path is compared" "$(printf 'NEW\tscripts/template_onl
 clone_path="$(sed -n 's/^TEMP_CLONE=//p' <<<"$OUT" | head -n1)"
 [[ -n "$clone_path" && -d "$clone_path" ]] && rm -rf "$clone_path"
 
+# A listed directory — the issue forms are one — brings every file in it, so a
+# project that never had the folder is offered each form as NEW.
+mkdir -p "$TEMPLATE/.github/ISSUE_TEMPLATE"
+printf 'name: Bug\n'     > "$TEMPLATE/.github/ISSUE_TEMPLATE/bug.yml"
+printf 'name: Feature\n' > "$TEMPLATE/.github/ISSUE_TEMPLATE/feature.yml"
+printf '.github/ISSUE_TEMPLATE\n' >> "$TEMPLATE/.claude/skills/sync-from-template/tooling_paths.txt"
+git -C "$TEMPLATE" add -A
+git -C "$TEMPLATE" \
+  -c user.email=test@example.invalid -c user.name=test \
+  commit --quiet -m "issue forms"
+
+OUT="$("$SUT" "$TEMPLATE" main "$PROJECT" .claude 2>&1)" || true
+clone_path="$(sed -n 's/^TEMP_CLONE=//p' <<<"$OUT" | head -n1)"
+check "each file in a listed directory missing locally reports NEW" "$(printf 'NEW\t.github/ISSUE_TEMPLATE/bug.yml')"
+check "every file in the listed directory is reported" "$(printf 'NEW\t.github/ISSUE_TEMPLATE/feature.yml')"
+if cmp -s "$clone_path/.github/ISSUE_TEMPLATE/feature.yml" "$TEMPLATE/.github/ISSUE_TEMPLATE/feature.yml"; then
+  pass=$((pass + 1))
+else
+  fail=$((fail + 1))
+  echo "FAIL: a listed directory's files are in TEMP_CLONE for the caller to copy"
+fi
+[[ -n "$clone_path" && -d "$clone_path" ]] && rm -rf "$clone_path"
+
+# Once the project has the folder, its own forms stay its own.
+mkdir -p "$PROJECT/.github/ISSUE_TEMPLATE"
+printf 'name: Our bug form\n' > "$PROJECT/.github/ISSUE_TEMPLATE/bug.yml"
+printf 'name: Ours only\n'    > "$PROJECT/.github/ISSUE_TEMPLATE/local.yml"
+OUT="$("$SUT" "$TEMPLATE" main "$PROJECT" .claude 2>&1)" || true
+check "a differing file in a listed directory reports CHANGED" "$(printf 'CHANGED\t.github/ISSUE_TEMPLATE/bug.yml')"
+check "a project-only file in a listed directory reports LOCAL_ONLY" "$(printf 'LOCAL_ONLY\t.github/ISSUE_TEMPLATE/local.yml')"
+clone_path="$(sed -n 's/^TEMP_CLONE=//p' <<<"$OUT" | head -n1)"
+[[ -n "$clone_path" && -d "$clone_path" ]] && rm -rf "$clone_path"
+
 # Too few arguments is a usage error.
 if "$SUT" only two 2>/dev/null; then
   fail=$((fail + 1))

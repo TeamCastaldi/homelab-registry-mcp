@@ -1,0 +1,40 @@
+{
+  "skill_name": "docs-updater",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I just added an `export` subcommand that writes the results to a CSV file. Update the README so it documents it.",
+      "expected_output": "Run after committing evals/files/export-command.patch (setup in .claude/skills/README.md, under Evaluations), so the export subcommand exists in the code and in git log. The docs-updater skill reads README.md in full, takes the command's syntax from the committed code, then proposes the updated README as a full file replacement in a code block with the path stated above it. It documents `kettle export SOURCE` with its -o/--output option and report.csv default, and keeps every existing setup instruction.",
+      "assertions": [
+        "The docs-updater skill is invoked",
+        "README.md is read before any edit is proposed",
+        "The proposal is a full replacement of README.md in a code block, with the file path stated directly above it",
+        "Every setup instruction in the original README is still present",
+        "The export subcommand is documented with the SOURCE argument and -o/--output option that src/kettle/cli.py defines, and no argument or option the code lacks"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "We're done for today. Write the session snapshot and wrap up.",
+      "expected_output": "This is the /session-end workflow (a dated snapshot), not a living-docs update, so the docs-updater skill is not used. Claude points the user at /session-end, which only the user can start, and does not write the snapshot itself.",
+      "assertions": [
+        "The docs-updater skill is not invoked",
+        "README.md and CLAUDE.md are not rewritten",
+        "The reply tells the user to type /session-end",
+        "No SESSION_SNAPSHOT file is written to disk"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "We moved session storage from Redis to Postgres today. Update the docs to match.",
+      "expected_output": "A reversed stack decision gets a new ADR file in docs/ADRs/ following the naming convention in docs/ADRs/README.md, a row in that README's Index table, and a one-line link in CLAUDE.md's Decision log. The decision's reasoning is not written into CLAUDE.md. Every change is proposed in the reply, not written to disk.",
+      "assertions": [
+        "A new docs/ADRs/ADR-NNN-*.md file is proposed, numbered after the existing ones",
+        "docs/ADRs/README.md's Index table gains a row for the new file",
+        "CLAUDE.md's Decision log gains exactly one line, a link to the new ADR",
+        "No paragraph explaining the Redis-to-Postgres reasoning is added to CLAUDE.md",
+        "Each change is proposed as a full file replacement in a code block with its path stated above it, and no file is written or edited on disk"
+      ]
+    }
+  ]
+}

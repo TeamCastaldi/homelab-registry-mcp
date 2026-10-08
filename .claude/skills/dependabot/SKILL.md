@@ -6,6 +6,19 @@ compatibility: Requires a local git checkout of the target repo, the GitHub CLI 
 
 # Dependabot PR consolidator
 
+Copy this checklist into your reply and tick it off as you go:
+
+```
+- [ ] Phase 0: preflight (gh auth, clean tree; note auto-merge)
+- [ ] Phase 1: query open Dependabot PRs
+- [ ] Phase 2: categorize them with the bundled script
+- [ ] Phase 3: cross-check runtime and base-image bumps
+- [ ] Phase 4: build the plan and show it
+- [ ] Phase 5: GATE: wait for the user to reply "consolidate"
+- [ ] Phase 6: build the branch, open the PR, try auto-merge
+- [ ] Phase 7: close superseded PRs only once the consolidated PR is verified
+```
+
 ## Purpose
 
 Open Dependabot PRs pile up fast. Most are low-risk minor or patch bumps
@@ -93,13 +106,17 @@ Stop here in that case. Do not proceed to later phases.
 
 ## Phase 2: Categorize each PR by SemVer risk
 
-Pipe the JSON from Phase 1 into the bundled script:
+Pipe the JSON from Phase 1 into the bundled script, from the repo root:
 
 ```bash
 gh pr list --author "app/dependabot" --state open \
   --json number,title,url,headRefName --limit 100 \
-  | python3 scripts/categorize_prs.py
+  | python3 .claude/skills/dependabot/scripts/categorize_prs.py
 ```
+
+It prints the same array back with `package`, `old_version`, `new_version`,
+`category` and `reason` added to each PR. It never touches git or the network
+and never sees repo contents; that is Phase 3's job.
 
 Use the script rather than eyeballing version numbers or titles by hand.
 It handles several cases that are easy to get wrong under time pressure:
@@ -272,6 +289,9 @@ fatal error - note it plainly (the consolidated PR still reduces N
 originals to one PR to review) and carry the "needs a manual merge"
 status into Phase 7 and the final report.
 
+If `gh pr create` or `gh pr merge` fails for any other reason (branch
+protection, missing required reviews), report the exact `gh` error and stop.
+
 **Do not close any original PR in this phase**, regardless of whether
 auto-merge was enabled. See Phase 7 for why.
 
@@ -318,36 +338,6 @@ gh pr checks "$NEW_PR_NUMBER"
   their decision before closing anything or taking further action on the
   consolidated PR.
 
-## Edge cases
-
-- **No Dependabot PRs found**: respond exactly `No open Dependabot PRs
-  found. Exiting.` and stop (Phase 1).
-- **Working tree not clean**: stop before Phase 1 and ask the user to
-  commit or stash first (Phase 0).
-- **GitHub CLI not authenticated**: instruct the user to run
-  `gh auth login` and stop execution (Phase 0).
-- **Repo-level auto-merge disabled**: not fatal. Note it in the plan
-  (Phase 4) and again in the final report - the consolidated PR (or
-  single qualifying PR) will need a manual merge (Phase 6).
-- **Only one PR qualifies as Minor/Patch**: skip the consolidation
-  branch; enable auto-merge directly on that PR instead (Phase 4).
-- **Git conflict while cherry-picking**: abort, delete the temporary
-  branch, and name the conflicting package (Phase 6). Nothing has been
-  pushed or closed, so originals are untouched and safe to retry
-  individually.
-- **`gh pr create` or `gh pr merge` fails** for another reason (branch
-  protection, missing required reviews): report the exact `gh` error.
-  Do not close any original PRs - they are only superseded once the
-  consolidated PR actually exists and has been verified (Phase 7).
-- **CI fails on the consolidated PR, or an automated reviewer objects**:
-  report it and ask the user - do not push additional commits to force
-  it green (see the constraint at the top of this skill). Leave
-  superseded originals open until the user decides (Phase 7).
-- **A Minor/Patch bump is a language runtime or Docker base image**: run
-  the Phase 3 cross-reference check before including it. A version
-  pinned elsewhere in the repo (linter config, `.tool-versions`, docs)
-  can make a textually "safe" bump unsafe for this specific project.
-
 ## Output format
 
 On completion, report using this structure, including only the lines
@@ -376,14 +366,3 @@ report only what was left open and why.
 Professional, cautious, and exact. The person reading this is the
 engineer who invoked the skill and will act on what it reports -
 state what happened, not what might have happened.
-
-## Bundled script
-
-`scripts/categorize_prs.py` - reads a JSON array of PRs from stdin
-(the shape `gh pr list --json number,title,url,headRefName` produces)
-and prints the same array back with `package`, `old_version`,
-`new_version`, `category`, and `reason` added to each entry. Pure
-classification - it never touches git or the network, and it never sees
-repo contents (that's Phase 3's job). Run it directly against synthetic
-input to sanity-check its rules before trusting it against a real PR
-queue.

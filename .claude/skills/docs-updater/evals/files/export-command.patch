@@ -1,0 +1,87 @@
+From 46b773578c8bd84ac393c1856485d86e99b05e6f Mon Sep 17 00:00:00 2001
+From: Kettle Dev <dev@example.com>
+Date: Wed, 7 Oct 2026 14:59:21 +0000
+Subject: [PATCH] Add export subcommand that writes the report to CSV
+
+kettle export SOURCE reads a CSV export, counts rows per value of its
+first column, and writes the counts to a CSV file: report.csv by
+default, or the path given with -o/--output.
+
+The CLI is installed as the kettle console script, so pyproject.toml
+now declares Click as a dependency.
+---
+ pyproject.toml         |  5 +++++
+ src/kettle/__init__.py |  1 +
+ src/kettle/cli.py      | 42 ++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 48 insertions(+)
+ create mode 100644 src/kettle/__init__.py
+ create mode 100644 src/kettle/cli.py
+
+diff --git a/pyproject.toml b/pyproject.toml
+index 3edcef6..e48d178 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -1,3 +1,8 @@
+ [project]
+ name = "kettle"
+ version = "0.1.0"
++requires-python = ">=3.12"
++dependencies = ["click>=8.1"]
++
++[project.scripts]
++kettle = "kettle.cli:cli"
+diff --git a/src/kettle/__init__.py b/src/kettle/__init__.py
+new file mode 100644
+index 0000000..31fb07d
+--- /dev/null
++++ b/src/kettle/__init__.py
+@@ -0,0 +1 @@
++"""kettle: brew structured reports from messy CSV exports."""
+diff --git a/src/kettle/cli.py b/src/kettle/cli.py
+new file mode 100644
+index 0000000..20c0b5d
+--- /dev/null
++++ b/src/kettle/cli.py
+@@ -0,0 +1,42 @@
++"""Command-line interface for kettle."""
++
++import csv
++from pathlib import Path
++
++import click
++
++
++def brew(rows):
++    """Count rows per value of the first column, skipping blank keys."""
++    counts = {}
++    for row in rows:
++        key = row[0].strip() if row else ""
++        if key:
++            counts[key] = counts.get(key, 0) + 1
++    return sorted(counts.items())
++
++
++@click.group()
++def cli():
++    """Brew structured reports from messy CSV exports."""
++
++
++@cli.command()
++@click.argument("source", type=click.Path(exists=True, dir_okay=False, path_type=Path))
++@click.option(
++    "-o",
++    "--output",
++    type=click.Path(dir_okay=False, path_type=Path),
++    default="report.csv",
++    show_default=True,
++    help="Where to write the report.",
++)
++def export(source, output):
++    """Write the report brewed from SOURCE to a CSV file."""
++    with source.open(newline="") as f:
++        results = brew(csv.reader(f))
++    with output.open("w", newline="") as f:
++        writer = csv.writer(f)
++        writer.writerow(["key", "count"])
++        writer.writerows(results)
++    click.echo(f"Wrote {len(results)} rows to {output}")

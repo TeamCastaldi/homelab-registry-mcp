@@ -1,5 +1,6 @@
 ---
 description: Close out a coding session — write the snapshot, run the test and lint gate, then commit and push behind explicit confirmations.
+disable-model-invocation: true
 ---
 
 # Session end

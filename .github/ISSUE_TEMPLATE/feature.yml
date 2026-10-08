@@ -1,0 +1,37 @@
+name: Feature
+description: New functionality the project does not have yet.
+labels: ["type:feature", "status:backlog"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Start the title with a verb: "Add CSV export", not "CSV". Priority is set at triage, when this moves out of backlog.
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Why do this? What problem does it solve, and for whom?
+    validations:
+      required: true
+  - type: textarea
+    id: user-story
+    attributes:
+      label: User story
+      placeholder: As a <kind of user>, I want to <action> so that <value>.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance criteria
+      description: What "done" looks like, one checkbox per criterion.
+      value: |
+        - [ ] 
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Issues that must be finished first, as `#N`, one per line. Leave empty if there are none.
+      placeholder: "Blocked by #12"

@@ -1,6 +1,14 @@
 ---
 name: sync-from-template
-description: "Pulls the .claude folder (commands and skills), plus the scripts outside it that they run, from Nathan's project-template repo into the current repo (a project scaffolded from that template), with a file-by-file diff and confirmation before anything is overwritten. Also reads any Major changelog entries between this project's version and the template's current one and, when they carry a Migration steps list, proposes the deletions and edits they call for -- one batch confirmation, never silent. Trigger this whenever Nathan says '/sync-from-template', asks to sync, pull, or update commands, skills, or tooling from the template, says the template has newer tooling than this repo, asks to catch up on a breaking template change, mentions migrating a repo to a new template version, asks to check this repo against project-template, or wants to catch up on template changes -- even if he does not name the skill. This is the mirror image of the /sync-template command, which audits a repo's internal consistency with itself. This skill instead reaches OUT from a downstream project repo back to the template to pull specific folders in. Do not use this for auditing a repo's own internal folder, README, or CLAUDE.md consistency -- that is a separate concern handled by the /sync-template command."
+description: >-
+  Pulls newer commands, skills and the scripts they run from the upstream project-template
+  repo into a project scaffolded from it, showing a diff per file and waiting for
+  confirmation before overwriting anything. Also turns the Migration steps of any Major
+  changelog entry in the version gap into proposed deletions and edits. Use when the user
+  asks to sync, pull or update tooling, commands or skills from the template, says the
+  template has newer tooling, asks to catch up on or migrate to a newer template version, or
+  asks whether this repo is behind project-template. Not for auditing a repo's own
+  consistency between folders, READMEs and CLAUDE.md; that is the /sync-template command.
 ---
 
 # Sync from template
@@ -12,9 +20,10 @@ the template repo, and pulls its current `.claude` folder — commands and
 skills — in. Every file that differs is shown as a diff and held for confirmation before
 it touches anything on disk. Nothing is overwritten silently.
 
-Some of those commands run scripts that live outside `.claude/` — `/roadmap`
-runs `scripts/check_roadmap.sh`, `/sync-template` runs
-`scripts/validate_skills.sh`. The template lists exactly those files in
+Some of those commands and skills depend on files that live outside
+`.claude/` — `/sync-template` runs `scripts/validate_skills.sh`, and the
+`issue-tracker` skill needs `.github/labels.yml`, the issue forms and the label
+workflow. The template lists exactly those files in
 [`tooling_paths.txt`](tooling_paths.txt), and they are offered alongside
 `.claude/` under the same diff-and-confirm rules. Nothing else outside
 `.claude/` is ever touched.
@@ -25,26 +34,17 @@ than new files — deleting something, or editing a file the normal sync
 doesn't touch — and those get proposed as their own batch, held for their
 own confirmation, same as everything else here.
 
-## When to use this
+## Not to be confused with `/sync-template`
 
-Run it when Nathan:
-
-- Asks to sync, pull, or update commands, skills, or tooling from the template
-- Says the template has picked up new commands, skills, or `CLAUDE.md` changes
-- Wants to check whether this repo is behind `project-template`
-- Types `/sync-from-template`
-
-Do not confuse this with the `/sync-template` command. That command audits a
-repo's own internal consistency — folders vs. READMEs, documented commands vs.
-reality — without reaching outside it. This skill reaches from a *downstream*
-project repo back to the template and pulls a folder in. Different direction,
-different job.
+That command audits a repo's own internal consistency without reaching outside
+it; this skill reaches from a downstream project back to the template and pulls
+files in.
 
 ## One-time setup: the config file
 
 The first time this runs in a repo, look for `.claude/sync-from-template.yaml`.
 If it does not exist, this is a first run: propose the defaults below (this is
-Nathan's one template repo, so the URL and branch are already known), let him
+the template's own repo, so the URL and branch are already known), let the user
 confirm or override, and create the file.
 
 ```yaml
@@ -57,14 +57,8 @@ sync_paths:
   - .claude
 ```
 
-> [!NOTE]
-> This repo does not currently record its template origin anywhere else (e.g.
-> in `CLAUDE.md`). If `init-project` starts doing that later, read that value
-> first and treat this file as the fallback -- don't ask Nathan to duplicate
-> the same URL in two places once there's a single source of truth for it.
-
 Proposing the default above on first run is fine -- it's a known, confirmed
-value, not a guess. If Nathan ever points this skill at a different template
+value, not a guess. If the user ever points this skill at a different template
 repo, or the default above stops being accurate, don't invent a replacement
 URL; stop and ask.
 
@@ -72,20 +66,18 @@ URL; stop and ask.
 
 ### 1. Fetch and compare
 
-Run [`scripts/compare_template.sh`](scripts/compare_template.sh) with the
-values from the config file:
+Run [`scripts/compare_template.sh`](scripts/compare_template.sh) from the
+repo root, with the values from the config file:
 
 ```bash
-scripts/compare_template.sh "$TEMPLATE_REPO_URL" "$TEMPLATE_REF" "$PROJECT_ROOT" "${SYNC_PATHS[@]}"
+bash .claude/skills/sync-from-template/scripts/compare_template.sh "$TEMPLATE_REPO_URL" "$TEMPLATE_REF" "$PROJECT_ROOT" "${SYNC_PATHS[@]}"
 ```
 
 This does an ephemeral sparse clone of the template (shallow, blob-filtered,
 scoped to `sync_paths` only) into a temp directory, then reports how every
 file under those paths compares to the local repo. It never touches the local
-repo itself -- it only reads and reports. Read
-[`scripts/compare_template.sh`](scripts/compare_template.sh) itself if you
-need to understand exactly what it does before running it; it is short and
-worth reading rather than trusting blindly.
+repo itself -- it only reads and reports. The output it prints is described
+below; read the script itself only if what it prints does not match that.
 
 The script's output gives you four buckets per file: `NEW`, `CHANGED`, `SAME`,
 `LOCAL_ONLY`. It also prints `TEMP_CLONE=<path>` (where the fetched template
@@ -126,14 +118,6 @@ statement of how far behind this project is:
   of this sync, so the next run can report a real gap.
 - **`TEMPLATE_VERSION=unknown`** -- the pinned ref predates versioning. Fall back
   to the SHA and say that is what you are comparing against.
-
-We use an ephemeral clone rather than a persistent `template` git remote on
-purpose: the only thing that needs to know where the template lives is the
-config file above. If the template ever moves, Nathan changes one YAML value
-and every future sync just picks it up, instead of having to also update a
-remote URL that isn't tracked anywhere. This does mean a fresh clone on every
-run instead of an incremental fetch -- if that ever becomes slow enough to be
-annoying, a persistent remote is the fallback; revisit then.
 
 ### 2. Report
 
@@ -232,7 +216,7 @@ cp "$TEMP_CLONE/$rel" "$PROJECT_ROOT/$rel"
 ```
 
 `LOCAL_ONLY` files are report-only. Never delete, move, or modify them,
-regardless of what confirmation phrase Nathan gives -- there is no phrase
+regardless of what confirmation phrase the user gives -- there is no phrase
 that authorizes touching them. If a file only exists locally, that's either
 intentional local customization or something the template dropped; either
 way it needs a human to look at it deliberately, not this skill deciding on
@@ -253,13 +237,21 @@ declined every change is still on its old version, and a marker claiming
 otherwise makes the next sync report a gap that does not exist -- worse than
 having no marker at all.
 
-If Nathan applied only some of the `CHANGED` files, or only some of the
+If the user applied only some of the `CHANGED` files, or only some of the
 pending migration steps, say so and ask before stamping: the version is a
 claim about the whole synced tree, and a partial apply does not support it.
 
-### 5. Clean up
+### 5. Labels, if this brought in issue tracking
 
-Once Nathan is done applying changes (or decides not to apply any), remove
+If `.github/labels.yml` or `.github/workflows/label-sync.yml` was just applied,
+the repo's GitHub labels may not exist yet. Run the `issue-tracker` skill's
+"Labels ready" check (its section 2) and, if labels are missing, offer to
+create them now. If they can't be created from this session, say the "Sync
+labels" workflow creates them once the sync commit reaches `main`.
+
+### 6. Clean up
+
+Once the user is done applying changes (or decides not to apply any), remove
 the temp clone:
 
 ```bash
@@ -267,9 +259,9 @@ rm -rf "$TEMP_CLONE"
 ```
 
 This is safe to run without asking first -- `$TEMP_CLONE` is a directory this
-skill created a few minutes ago under `mktemp -d`, not anything of Nathan's.
+skill created a few minutes ago under `mktemp -d`, not anything of the user's.
 
-### 6. Suggest a commit
+### 7. Suggest a commit
 
 Once at least one file was applied, suggest (don't run) a commit:
 

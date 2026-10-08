@@ -84,8 +84,8 @@ SECURITY="$ROOT/SECURITY.md"
 DEPENDABOT="$ROOT/.github/dependabot.yml"
 
 if [[ -f "$SECURITY" && -f "$DEPENDABOT" ]]; then
-  configured=$(grep -oE 'package-ecosystem:[[:space:]]*"?[a-z-]+"?' "$DEPENDABOT" \
-    | sed -E 's/.*package-ecosystem:[[:space:]]*"?([a-z-]+)"?.*/\1/' | sort -u)
+  configured=$(grep -oE "package-ecosystem:[[:space:]]*[\"']?[a-z-]+[\"']?" "$DEPENDABOT" \
+    | sed -E "s/.*package-ecosystem:[[:space:]]*[\"']?([a-z-]+)[\"']?.*/\1/" | sort -u || true)
 
   # Ecosystem names as Dependabot spells them, plus the prose spellings a
   # human would write. Each maps to the canonical value in dependabot.yml.

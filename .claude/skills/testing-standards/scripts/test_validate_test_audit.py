@@ -4,7 +4,6 @@ Run with:
 
     python3 -m pytest .claude/skills/testing-standards/scripts -q
 """
-
 import importlib.util
 import json
 from pathlib import Path
@@ -206,7 +205,9 @@ def test_invalid_verdict_errors():
 
 
 def test_invalid_rule_code_errors():
-    entry = keep_entry(verdict="REWRITE", rationale="x", findings=[finding(rules=["Z9"])])
+    entry = keep_entry(
+        verdict="REWRITE", rationale="x", findings=[finding(rules=["Z9"])]
+    )
     errors = validate([entry], None, complete=False)
     assert any("non-empty subset" in e for e in errors)
 

@@ -6,6 +6,13 @@
 # Leaves the clone on disk (path printed as TEMP_CLONE=...) so the caller can
 # diff and copy individual files before removing it.
 #
+# The clone is ephemeral rather than a persistent `template` git remote on
+# purpose: the only thing that needs to know where the template lives is the
+# skill's config file. If the template moves, one YAML value changes and every
+# later sync picks it up, with no untracked remote URL to update as well. The
+# cost is a fresh clone per run instead of an incremental fetch; if that ever
+# becomes slow enough to matter, a persistent remote is the fallback.
+#
 # A sync path may be a directory or a single file. On top of the paths passed
 # in, the template itself can name files that its commands and skills depend on
 # but that live outside the synced folders — a check script under scripts/, say.

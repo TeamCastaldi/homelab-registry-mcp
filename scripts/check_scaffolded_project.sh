@@ -22,9 +22,13 @@
 #                    and it slips past the placeholder check precisely because
 #                    the placeholder was removed
 #   MISSING_FILE     a file every scaffolded project must have is absent
-#                    (docs/foundation.md, .template-version)
+#                    (docs/foundation.md, .template-version, and the issue
+#                    tracking the template ships ready to use: labels.yml,
+#                    the issue forms, label-sync.yml and its two scripts)
 #   TEMPLATE_RESIDUE a file belonging to the template itself was carried into
-#                    the project (CHANGELOG.md still logging template releases)
+#                    the project (CHANGELOG.md still logging template releases;
+#                    the docs/template/ folder of the template's own session
+#                    records; SNAPSHOT_PATH still pointing into that folder)
 #   GETTING_STARTED  README.md still carries the one-time "Getting started"
 #                    section whose own instructions say to delete it
 #   ADR_UNINDEXED    an ADR file with no row in docs/ADRs/README.md's Index
@@ -69,7 +73,8 @@ problem() {
 
 # Placeholders the scaffolding phases are supposed to replace. Files under
 # .claude/skills/ are skipped: a skill that documents a placeholder has to
-# spell it out.
+# spell it out. Files under node_modules/ are skipped for the same reason:
+# installed dependencies' docs aren't this repo's docs.
 PLACEHOLDER_RE='\{PROJECT_NAME\}|init-project fills this in|\{set by init-project'
 
 while IFS= read -r -d '' f; do
@@ -80,7 +85,7 @@ while IFS= read -r -d '' f; do
   done < <(grep -niE "$PLACEHOLDER_RE" "$f" || true)
 done < <(
   find "$ROOT" \
-    -type d \( -name .git -o -path "$ROOT/.claude/skills" \) -prune -o \
+    -type d \( -name .git -o -name node_modules -o -path "$ROOT/.claude/skills" \) -prune -o \
     -type f \( -name '*.md' -o -name '*.yml' -o -name '*.yaml' \) -print0
 )
 
@@ -133,12 +138,45 @@ fi
 [[ -f "$ROOT/.template-version" ]] || \
   problem MISSING_FILE ".template-version" "records the template version this project came from"
 
+# Issue tracking works in a new repo with no setup only because these files
+# arrive with it, and init-project's Phase 3 keeps them. The issue-tracker
+# skill, /roadmap and /session-start all stand on them.
+for f in .github/labels.yml .github/workflows/label-sync.yml scripts/sync_labels.sh scripts/check_issues.sh; do
+  [[ -f "$ROOT/$f" ]] || \
+    problem MISSING_FILE "$f" "part of the issue tracking init-project keeps"
+done
+if ! compgen -G "$ROOT/.github/ISSUE_TEMPLATE/*.yml" >/dev/null; then
+  problem MISSING_FILE ".github/ISSUE_TEMPLATE/" "no issue forms; init-project keeps the shipped ones"
+fi
+
 # ------------------------------------------------------------ template residue
 
 # The template's own changelog logs template releases, not this project's. A
 # project may keep a CHANGELOG.md of its own — only the inherited one is wrong.
 if [[ -f "$ROOT/CHANGELOG.md" ]] && grep -qiE 'this template|stack-agnostic' "$ROOT/CHANGELOG.md"; then
   problem TEMPLATE_RESIDUE "CHANGELOG.md" "still logs template releases — a project's changelog starts at its own first version"
+fi
+
+# The template keeps its own session snapshots and reviews in docs/template/;
+# init-project deletes the whole folder and points SNAPSHOT_PATH back at the
+# project's own docs/session-history/. Checked as a folder, not by file name: the
+# template adds a snapshot every session, so no list of names could stay current.
+# A project's own snapshots live in docs/session-history/ and are never residue.
+if [[ -d "$ROOT/docs/template" ]]; then
+  problem TEMPLATE_RESIDUE "docs/template/" "the template's own session snapshots and reviews — init-project deletes this folder"
+fi
+
+if [[ -f "$CLAUDE_MD" ]]; then
+  # First SNAPSHOT_PATH row of the Session Config table, value cell only. awk
+  # reads the file directly and exits at the first match, so no pipe is involved.
+  snapshot_path="$(awk -F'|' '/^\| *`SNAPSHOT_PATH` *\|/ { gsub(/[[:space:]`]/, "", $3); print $3; exit }' "$CLAUDE_MD")"
+  snapshot_path="${snapshot_path#./}"
+  snapshot_path="${snapshot_path%/}"
+  case "$snapshot_path" in
+    docs/template|docs/template/*)
+      problem TEMPLATE_RESIDUE "CLAUDE.md" "SNAPSHOT_PATH is still $snapshot_path, the template's own records — a project's snapshots belong in docs/session-history/"
+      ;;
+  esac
 fi
 
 if [[ -f "$ROOT/README.md" ]] && grep -q '^## Getting started' "$ROOT/README.md"; then

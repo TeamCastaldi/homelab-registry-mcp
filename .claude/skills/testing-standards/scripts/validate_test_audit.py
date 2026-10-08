@@ -142,10 +142,8 @@ def _check_entry(e: object, i: int, collected: dict[str, set[str]] | None) -> li
 
     if not e["findings"]:
         derived = "KEEP"
-    elif (
-        names is not None
-        and flagged >= names
-        and all(f.get("verdict") == "DELETE" for f in e["findings"])
+    elif names is not None and flagged >= names and all(
+        f.get("verdict") == "DELETE" for f in e["findings"]
     ):
         derived = "DELETE"
     elif names is not None:
@@ -163,7 +161,9 @@ def _check_entry(e: object, i: int, collected: dict[str, set[str]] | None) -> li
     return errors
 
 
-def validate(entries: object, collected: dict[str, set[str]] | None, complete: bool) -> list[str]:
+def validate(
+    entries: object, collected: dict[str, set[str]] | None, complete: bool
+) -> list[str]:
     """Return every schema error in an audit's parsed files.json."""
     if not isinstance(entries, list):
         return ["top level must be a JSON array"]
