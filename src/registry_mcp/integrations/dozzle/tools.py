@@ -226,7 +226,11 @@ def register_dozzle_tools(mcp: FastMCP, settings: Settings, store: RegistryStore
     ) -> dict[str, Any]:
         """Search one container's logs for a keyword or phrase; only matching entries
         come back. Same bounds, scrubbing, and untrusted-data warning as
-        `dozzle_get_container_logs`."""
+        `dozzle_get_container_logs`.
+
+        Dozzle matches plain-text lines but not text inside JSON-structured log
+        messages (checked live), so zero matches does not prove a structured line
+        is absent; use `dozzle_get_container_logs` with `level` for those."""
         if not query.strip():
             return {"error": "query must not be empty"}
         bounds = _bounds(since_minutes, stream, max_entries)

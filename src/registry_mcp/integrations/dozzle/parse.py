@@ -20,6 +20,8 @@ NO_LOGS = "(no logs in the specified time range)"
 NEAR_UPSTREAM_LIMIT = 900_000
 
 _SEARCH_HEADER = re.compile(r'^Found (\d+) matches for ".*" \(scanned (\d+) entries\):$')
+# What a search with no hits answers, seen against a live Dozzle (not in its docs).
+_NO_MATCHES = re.compile(r'^\(no matches for ".*" in (\d+) log entries scanned\)$')
 
 
 def parse_json(text: str, what: str) -> Any:
@@ -34,6 +36,9 @@ def parse_log_text(text: str) -> dict[str, Any]:
     stripped = text.strip()
     if stripped == NO_LOGS:
         return {"entries": [], "matches": None, "scanned": 0, "notes": []}
+    no_matches = _NO_MATCHES.match(stripped)
+    if no_matches:
+        return {"entries": [], "matches": 0, "scanned": int(no_matches.group(1)), "notes": []}
 
     entries: list[dict[str, Any]] = []
     notes: list[str] = []
