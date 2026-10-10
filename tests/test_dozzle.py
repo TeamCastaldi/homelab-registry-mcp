@@ -172,6 +172,11 @@ def test_parser_reads_a_search_header_and_truncation_note():
     assert parsed["notes"] == ["(output truncated at 1 MB)"]
 
 
+def test_parser_reads_the_live_zero_match_reply():
+    parsed = parse_log_text('(no matches for "boom" in 86 log entries scanned)')
+    assert parsed == {"entries": [], "matches": 0, "scanned": 86, "notes": []}
+
+
 def test_parser_rejects_an_unrecognized_shape_instead_of_guessing():
     with pytest.raises(DozzleError, match="not recognized"):
         parse_log_text("Something entirely different happened")
@@ -309,6 +314,18 @@ async def test_search_sends_its_arguments_and_reports_the_match_count(wired):
     )
     assert fake.calls[-1][1]["query"] == "boom" and fake.calls[-1][1]["case_sensitive"] is True
     assert payload["matches"] == 1 and payload["scanned"] == 400
+
+
+async def test_a_search_with_no_hits_is_an_empty_result_not_an_error(wired):
+    server, fake = wired
+    fake.logs = '(no matches for "boom" in 86 log entries scanned)'
+    payload = await _call(
+        server,
+        "dozzle_search_container_logs",
+        {"host": "h", "container_id": "c", "query": "boom"},
+    )
+    assert payload["entries"] == [] and payload["matches"] == 0 and payload["scanned"] == 86
+    assert "error" not in payload
 
 
 async def test_bad_bounds_are_rejected_before_dozzle_is_called(wired):
