@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     docs_mcp_url: str | None = Field(default=None)
     docs_mcp_token: SecretStr | None = Field(default=None)
     docs_mcp_timeout_seconds: float = Field(default=30.0)
+    # Dozzle's MCP server (`/api/mcp`); reach it over swarm-net, e.g. http://dozzle:8080/api/mcp.
+    dozzle_mcp_url: str | None = Field(default=None)
+    dozzle_mcp_token: SecretStr | None = Field(default=None)
+    dozzle_timeout_seconds: float = Field(default=30.0)
+    dozzle_max_response_chars: int = Field(default=60000)
 
     # MCP transport
     mcp_transport: Transport = Field(default="streamable-http")

@@ -26,6 +26,7 @@ def full_server(tmp_path):
             service_deploy_enabled=True,
             adoption_enabled=True,
             docs_mcp_url="http://docs.test",
+            dozzle_mcp_url="http://dozzle.test/api/mcp",
         )
     )
 
