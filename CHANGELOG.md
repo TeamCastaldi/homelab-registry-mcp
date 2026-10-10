@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v2.0.2...v2.1.0) (2026-10-10)
+
+
+### Features
+
+* **dozzle:** read-only relay to Dozzle's MCP server over swarm-net ([4ee18aa](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/4ee18aaf51c79c6a895367b378b1ecea7dbe6a8f))
+* **dozzle:** typed log tools in place of the generic relay ([537ebaf](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/537ebaf7571a412b335bdbaf9f4c85e766e630e4))
+
 ## [2.0.2](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v2.0.1...v2.0.2) (2026-10-07)
 
 
