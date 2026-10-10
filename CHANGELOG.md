@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.1](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v2.1.0...v2.1.1) (2026-10-10)
+
+
+### Bug Fixes
+
+* **dozzle:** treat a search with no hits as an empty result ([7063152](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/70631525ac440936b869a8f8289fdcd515546246))
+* **dozzle:** treat a search with no hits as an empty result ([d3531d7](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/d3531d7912740227253896925a9379be4d51cb85))
+
 ## [2.1.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v2.0.2...v2.1.0) (2026-10-10)
 
 
