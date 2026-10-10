@@ -108,7 +108,12 @@ _FEATURES = (
         "Dozzle",
         lambda s: bool(s.dozzle_mcp_url or s.dozzle_mcp_token),
         ("dozzle_mcp_url",),
-        ("dozzle_mcp_token", "dozzle_timeout_seconds", "dozzle_max_response_chars"),
+        (
+            "dozzle_mcp_token",
+            "dozzle_mcp_timeout_seconds",
+            "dozzle_mcp_max_log_entries",
+            "dozzle_mcp_max_since_minutes",
+        ),
     ),
     _Feature(
         "Reasoning layer (DSPy)",

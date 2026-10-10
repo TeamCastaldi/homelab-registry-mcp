@@ -269,7 +269,7 @@ def build_app(settings: Settings | None = None) -> tuple[FastMCP, Runtime]:
     register_dockhand_tools(mcp, settings)
     register_infisical_tools(mcp, settings, build_notification_provider(settings))
     register_docs_tools(mcp, settings)
-    register_dozzle_tools(mcp, settings)
+    register_dozzle_tools(mcp, settings, store)
     register_discovery_tools(mcp, engine)
     register_linking_tools(mcp, store, settings, hardware_store=hardware_store)
     register_hardware_tools(

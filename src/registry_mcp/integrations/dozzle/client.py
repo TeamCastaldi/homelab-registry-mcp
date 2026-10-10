@@ -5,9 +5,9 @@ Dozzle is itself an MCP server, so like `DocsMcpClient` this wraps
 It is meant to be reached over `swarm-net` (`http://dozzle:8080/api/mcp`), where
 the Authentik forward-auth that guards the public route never applies.
 
-Dozzle's tools are all read-only upstream. This client still refuses any tool name
-outside `READ_ONLY_TOOLS`, so a future upstream tool that mutates a container can't
-be relayed by accident.
+Dozzle's five tools are all read-only upstream. This client still refuses any tool
+name outside `READ_ONLY_TOOLS`, so a tool a later Dozzle release adds (one that
+acts on a container, say) can't be relayed by accident.
 """
 
 from __future__ import annotations
@@ -33,7 +33,8 @@ READ_ONLY_TOOLS = frozenset(
 
 
 class DozzleError(RuntimeError):
-    """Raised when Dozzle cannot be reached or returns an error."""
+    """Raised when Dozzle cannot be reached, reports an error, or answers in a shape
+    this client doesn't recognize."""
 
 
 class DozzleClient:
@@ -44,7 +45,7 @@ class DozzleClient:
         url: str,
         token: str | None = None,
         *,
-        timeout: float = 30.0,
+        timeout: float = 15.0,
         session_factory: SessionFactory | None = None,
     ) -> None:
         self._url = url
@@ -66,20 +67,8 @@ class DozzleClient:
             await session.initialize()
             yield session
 
-    async def list_tools(self) -> list[dict[str, Any]]:
-        """The live tool list with each input schema, as Dozzle reports it."""
-        try:
-            async with self._session_factory() as session:
-                result = await session.list_tools()
-        except Exception as exc:
-            raise DozzleError(f"Dozzle request failed: {exc}") from exc
-        return [
-            {"name": t.name, "description": t.description, "input_schema": t.inputSchema}
-            for t in result.tools
-        ]
-
-    async def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
-        """Call one allowlisted tool; returns structured content, parsed JSON, or text."""
+    async def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> str:
+        """Call one allowlisted tool and return its text. `isError` raises."""
         if name not in READ_ONLY_TOOLS:
             raise DozzleError(f"{name!r} is not an allowed Dozzle tool")
         try:
@@ -92,9 +81,6 @@ class DozzleClient:
         text = "\n".join(t for t in texts if t is not None)
         if result.isError:
             raise DozzleError(f"Dozzle tool {name} failed: {text or 'no detail'}")
-        structured = getattr(result, "structuredContent", None)
-        if structured is not None:
-            return structured
         if not text:
             raise DozzleError(f"Dozzle tool {name} returned no content")
         return text
