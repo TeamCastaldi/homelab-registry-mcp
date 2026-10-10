@@ -108,6 +108,7 @@ src/registry_mcp/
 │   ├── traefik/           # httpx client + 7 MCP tools + resource + prompt
 │   ├── authentik/         # httpx client + 10 MCP tools + resource + prompt
 │   ├── dockhand/          # httpx client + 7 MCP tools + resource + prompt (ADR-013, read-only)
+│   ├── dozzle/            # MCP client for Dozzle's /api/mcp + 6 read-only log tools + diagnose_service_logs prompt
 │   ├── infisical/         # Universal Auth httpx client + 1 MCP tool (ADR-016, read-only, off by default)
 │   ├── patchmon/          # HTTP Basic Integration API client, host:get only (ADR-020 amended; no tools yet)
 │   └── docs/              # MCP client for documentation-mcp + get_service_documentation passthrough
@@ -663,6 +664,10 @@ closes that gap without ever exposing a value. Off by default (`INFISICAL_ENABLE
 | `PATCHMON_API_URL` | unset | PatchMon's root URL for its read-only Integration API (a pasted `.../api/v1/api/hosts` is trimmed back); with the key and secret, names hosts by id and adds pending packages to the approval email |
 | `PATCHMON_API_KEY` / `PATCHMON_API_SECRET` | unset | An "API" credential's Token Key (`patchmon_ae_...`) and Token Secret, sent as HTTP Basic. Grant `host:get` only |
 | `PATCHMON_API_TIMEOUT_SECONDS` | `5` | Per request; the webhook also caps each phase at 8s |
+| `DOZZLE_MCP_URL` | unset | Enables the `dozzle_*` tools; use the swarm-net address `http://dozzle:8080/api/mcp` so Authentik forward-auth is never in the path |
+| `DOZZLE_MCP_TOKEN` | unset | Bearer token, only if Dozzle's own auth is on |
+| `DOZZLE_MCP_TIMEOUT_SECONDS` | `15` | Per call |
+| `DOZZLE_MCP_MAX_LOG_ENTRIES` / `DOZZLE_MCP_MAX_SINCE_MINUTES` | `200` / `1440` | Newest entries returned per log call (the rest are counted, not returned); upper bound on a caller's `since_minutes` |
 | `EVENT_RETENTION_DAYS` | `90` | Old events purged on startup |
 | `LOG_LEVEL` | `INFO` | |
 

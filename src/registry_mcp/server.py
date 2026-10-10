@@ -29,6 +29,7 @@ from registry_mcp.health import check_health
 from registry_mcp.integrations.authentik import register_authentik_tools
 from registry_mcp.integrations.dockhand import register_dockhand_tools
 from registry_mcp.integrations.docs import register_docs_tools
+from registry_mcp.integrations.dozzle import register_dozzle_tools
 from registry_mcp.integrations.infisical import register_infisical_tools
 from registry_mcp.integrations.patchmon import build_patchmon_client
 from registry_mcp.integrations.traefik import register_traefik_tools
@@ -268,6 +269,7 @@ def build_app(settings: Settings | None = None) -> tuple[FastMCP, Runtime]:
     register_dockhand_tools(mcp, settings)
     register_infisical_tools(mcp, settings, build_notification_provider(settings))
     register_docs_tools(mcp, settings)
+    register_dozzle_tools(mcp, settings, store)
     register_discovery_tools(mcp, engine)
     register_linking_tools(mcp, store, settings, hardware_store=hardware_store)
     register_hardware_tools(

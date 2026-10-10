@@ -105,6 +105,17 @@ _FEATURES = (
         ("docs_mcp_timeout_seconds",),
     ),
     _Feature(
+        "Dozzle",
+        lambda s: bool(s.dozzle_mcp_url or s.dozzle_mcp_token),
+        ("dozzle_mcp_url",),
+        (
+            "dozzle_mcp_token",
+            "dozzle_mcp_timeout_seconds",
+            "dozzle_mcp_max_log_entries",
+            "dozzle_mcp_max_since_minutes",
+        ),
+    ),
+    _Feature(
         "Reasoning layer (DSPy)",
         lambda s: s.dspy_enabled,
         uses=(
