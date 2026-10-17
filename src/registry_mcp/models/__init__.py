@@ -10,6 +10,10 @@ from registry_mcp.models.deletion import (
     PendingDeletion,
     PendingDeletionStatus,
 )
+from registry_mcp.models.dockhand_action import (
+    PendingDockhandAction,
+    PendingDockhandActionStatus,
+)
 from registry_mcp.models.event import (
     FIELD_CREATED,
     FIELD_DELETED,
@@ -70,6 +74,8 @@ __all__ = [
     "PatchApprovalStatus",
     "PendingDeletion",
     "PendingDeletionStatus",
+    "PendingDockhandAction",
+    "PendingDockhandActionStatus",
     "PendingInventoryWrite",
     "PendingInventoryWriteStatus",
     "PoolType",
