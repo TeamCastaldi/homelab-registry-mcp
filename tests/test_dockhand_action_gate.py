@@ -1,4 +1,4 @@
-"""The Dockhand action confirmation gate (ADR-021): DockhandActionGateStore."""
+"""The Dockhand action confirmation gate (ADR-023): DockhandActionGateStore."""
 
 from __future__ import annotations
 

@@ -1,5 +1,5 @@
 """PendingDockhandAction: the math-problem gate in front of a Dockhand
-container or stack action (ADR-021).
+container or stack action (ADR-023).
 
 Like `PendingDeletion` and `PendingInventoryWrite`, the action is split into a
 request/confirm pair: the request step stores *exactly what will run* and

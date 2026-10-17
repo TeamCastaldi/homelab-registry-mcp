@@ -1,4 +1,4 @@
-"""The gated Dockhand action tools (ADR-021), driven through the real server:
+"""The gated Dockhand action tools (ADR-023), driven through the real server:
 request -> challenge -> confirm, against a strict POST-only Dockhand fake."""
 
 from __future__ import annotations

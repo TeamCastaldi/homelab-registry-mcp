@@ -1,4 +1,4 @@
-"""The Dockhand client's write path (ADR-021): a closed allowlist of container
+"""The Dockhand client's write path (ADR-023): a closed allowlist of container
 and stack actions, each sent once, to a validated path."""
 
 import httpx
@@ -202,7 +202,7 @@ async def test_actions_use_their_own_timeout_and_reads_keep_the_read_timeout():
 
 
 def test_the_client_has_no_method_for_any_other_write():
-    """ADR-021's exclusions are structural: nothing to call, even by accident."""
+    """ADR-023's exclusions are structural: nothing to call, even by accident."""
     public = {name for name in dir(DockhandClient) if not name.startswith("_")}
     reads = {name for name in public if name.startswith(("list_", "get_"))}
     assert public - reads == {"container_action", "stack_action"}

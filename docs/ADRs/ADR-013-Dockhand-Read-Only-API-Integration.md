@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Accepted |
-| **Amended by** | [ADR-021](ADR-021-Dockhand-Gated-Container-And-Stack-Actions.md) — permits math-gated container/stack start, stop, restart and redeploy behind `DOCKHAND_ALLOW_WRITE`; everything else here still holds |
+| **Amended by** | [ADR-023](ADR-023-Dockhand-Gated-Container-And-Stack-Actions.md) — permits math-gated container/stack start, stop, restart and redeploy behind `DOCKHAND_ALLOW_WRITE`; everything else here still holds |
 | **Related** | ADR-010 (Dockhand Update Webhook) — covers inbound alerts, not outbound queries |
 | **Related** | ADR-011 (Remove Komodo Integration) — the architecturally closest precedent |
 | **Date** | 2026-09-09 |

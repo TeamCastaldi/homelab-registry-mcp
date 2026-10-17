@@ -1,7 +1,7 @@
 """Dockhand integration: API client and MCP tools.
 
 Reads are the default (ADR-013). The one write surface is `actions.py`: gated,
-off-by-default container and stack actions (ADR-021), from a closed allowlist.
+off-by-default container and stack actions (ADR-023), from a closed allowlist.
 Every other Dockhand write endpoint is still never exposed.
 """
 

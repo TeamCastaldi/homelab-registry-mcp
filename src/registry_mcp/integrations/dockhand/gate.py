@@ -1,4 +1,4 @@
-"""PendingDockhandAction CRUD over the shared registry SQLite engine (ADR-021).
+"""PendingDockhandAction CRUD over the shared registry SQLite engine (ADR-023).
 
 Modelled on `inventory/store.py`, with one difference that matters here: the
 challenge is consumed by a conditional UPDATE (`status='pending' AND

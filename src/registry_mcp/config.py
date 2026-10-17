@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     dockhand_token: SecretStr | None = Field(default=None)
     dockhand_timeout_seconds: float = Field(default=10.0)
     dockhand_retries: int = Field(default=3)
-    # Gated container/stack actions (ADR-021). Off by default: with it false the
+    # Gated container/stack actions (ADR-023). Off by default: with it false the
     # action tools are not registered at all. The TTL has the same shape as
     # delete_challenge_ttl_minutes; stack calls run to completion, so they get
     # their own, longer timeout than the read path's.

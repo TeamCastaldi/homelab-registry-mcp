@@ -1,4 +1,4 @@
-"""Gated Dockhand container and stack actions as MCP tools (ADR-021).
+"""Gated Dockhand container and stack actions as MCP tools (ADR-023).
 
 Three tools: two that only *request* an action and a `dockhand_action_confirm`
 that runs it. A request stores exactly what will run and returns an `x + y = ?`

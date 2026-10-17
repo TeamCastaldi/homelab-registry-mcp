@@ -1,7 +1,7 @@
 """Async HTTP client for the Dockhand API, with token auth, timeout, and retry.
 
 Reads are the whole of it except for two methods, `container_action` and
-`stack_action` (ADR-021): a closed allowlist of start/stop/restart and a stack
+`stack_action` (ADR-023): a closed allowlist of start/stop/restart and a stack
 redeploy. Every other Dockhand write endpoint (deletes, `down`, `exec`,
 `/api/batch`, `check-updates`, `POST /api/stacks`, ...) has no method here, not
 even a dormant one (ADR-013). A write is sent once and never retried.
@@ -37,7 +37,7 @@ class DockhandError(RuntimeError):
 
 class DockhandClient:
     """Client for the Dockhand API (the `/api` surface): reads, plus the gated
-    container and stack actions of ADR-021."""
+    container and stack actions of ADR-023."""
 
     def __init__(
         self,
@@ -125,7 +125,7 @@ class DockhandClient:
     async def list_vulnerabilities(self, container_id: str | None = None) -> list[dict[str, Any]]:
         return self._list(await self._get("vulnerabilities", {"container_id": container_id}))
 
-    # --- gated actions (ADR-021) -----------------------------------------
+    # --- gated actions (ADR-023) -----------------------------------------
 
     async def container_action(
         self, environment_id: str, container_id: str, action: str

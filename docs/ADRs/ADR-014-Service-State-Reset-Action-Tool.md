@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | DRAFT |
-| **Note** | [ADR-021](ADR-021-Dockhand-Gated-Container-And-Stack-Actions.md) now allows math-gated Dockhand restarts through MCP, which changes this sketch's premise that a reset cannot go through Dockhand |
+| **Note** | [ADR-023](ADR-023-Dockhand-Gated-Container-And-Stack-Actions.md) now allows math-gated Dockhand restarts through MCP, which changes this sketch's premise that a reset cannot go through Dockhand |
 | **Companion to** | ADR-002 (Client Interfaces), ADR-008 (MCP Tool Organization), ADR-010 (Dockhand Update Webhook) |
 | **Org** | github.com/TeamCastaldi |
 | **License** | MIT |

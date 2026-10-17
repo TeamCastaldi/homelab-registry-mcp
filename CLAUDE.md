@@ -57,6 +57,7 @@ src/registry_mcp/
 │   ├── adoption.py        # AdoptionDraft, DetectedSecret (Phase 7 brownfield adoption)
 │   ├── deletion.py        # PendingDeletion, DeletionEntityType — the math-gate challenge record
 │   ├── inventory.py       # PendingInventoryWrite — the math gate in front of the inventory write (ADR-015)
+│   ├── dockhand_action.py # PendingDockhandAction — the math gate (and kept audit row) for a Dockhand container/stack action (ADR-023)
 │   └── patch_approval.py  # PatchApproval — a Patchmon alert awaiting its emailed Approve/Cancel (ADR-020)
 ├── registry/
 │   ├── store.py           # SQLite CRUD + event recording
@@ -107,7 +108,7 @@ src/registry_mcp/
 ├── integrations/
 │   ├── traefik/           # httpx client + 7 MCP tools + resource + prompt
 │   ├── authentik/         # httpx client + 10 MCP tools + resource + prompt
-│   ├── dockhand/          # httpx client + 7 MCP tools + resource + prompt (ADR-013, read-only)
+│   ├── dockhand/          # httpx client + 7 read tools + resource + prompt (ADR-013); actions.py + gate.py: 3 gated start/stop/restart/redeploy tools behind DOCKHAND_ALLOW_WRITE (ADR-023)
 │   ├── dozzle/            # MCP client for Dozzle's /api/mcp + 6 read-only log tools + diagnose_service_logs prompt
 │   ├── infisical/         # Universal Auth httpx client + 1 MCP tool (ADR-016, read-only, off by default)
 │   ├── patchmon/          # HTTP Basic Integration API client, host:get only (ADR-020 amended; no tools yet)
@@ -398,8 +399,38 @@ reconciling by `name` against the same `Service` row Docker/Traefik discovery ma
 already have created — this wiring is what makes the integration load-bearing,
 unlike the now-removed Komodo integration (ADR-011), which had no discovery-source
 path and was withdrawn for being "a read-only window onto a system the operator can
-already open directly." No update-triggering or stack-mutating Dockhand endpoint
-(`POST /api/containers/check-updates`, `POST /api/stacks`) is ever exposed as a tool.
+already open directly." The read tools never call a mutating endpoint. The one write
+surface is the gated actions below (ADR-023); `POST /api/containers/check-updates`,
+`POST /api/stacks`, deletes, `down`, `exec`, and `/api/batch` are still never exposed.
+
+**Dockhand gated actions (ADR-023, `integrations/dockhand/actions.py` + `gate.py` +
+`models/dockhand_action.py`):** start/stop/restart of one container and start/stop/restart/
+redeploy of a stack, from a closed allowlist. Off by default (`DOCKHAND_ALLOW_WRITE=false`);
+with it off, or Dockhand unconfigured, the three tools are not registered at all. Setup and
+first-use checks: `docs/SOPs/SOP-009-Enable-Dockhand-Actions.md`.
+- Three tools: `dockhand_container_action_request` and `dockhand_stack_action_request` store
+  exactly what will run and return an `x + y = ?` challenge with the action in words (a stack
+  stop or redeploy also carries a warning); `dockhand_action_confirm(request_id, answer)`
+  runs the stored action once. Confirm takes no target, so nothing can be swapped in after
+  the operator saw the challenge.
+- "Recreate" is the stack `deploy` endpoint with `forceRecreate: true` and `build: false`
+  (`pull` optional), which recreates every container in the stack. There is no documented
+  single-container recreate, and `POST /containers/[id]/update` has no documented body, so
+  neither is used.
+- `DockhandActionGateStore` claims a challenge with a conditional `UPDATE ... WHERE
+  status='pending' AND expires_at > now`, so it expires, dies on a wrong or non-integer
+  answer, and runs at most once even under concurrent confirms. Unlike `PendingDeletion`, the
+  row is kept with its outcome (`executed`/`failed`, a one-line result) as the audit trail.
+- The client sends a write once and never retries it; an ambiguous failure (timeout, dropped
+  connection) says the action may or may not have been applied. Redirects are not followed.
+  Container ids, stack names, and environment ids are validated before they reach a URL.
+  Stack calls send `Accept: application/json` and use `DOCKHAND_ACTION_TIMEOUT_SECONDS`.
+- All three tools refuse in read-only mode (failed startup health check), including a confirm
+  for a challenge issued before it. The request tools are closed-world (they only write this
+  server's SQLite); confirm is open-world and `destructiveHint`.
+- Endpoints, `env` handling, and response bodies come from Dockhand's published API
+  reference and are unverified against the live instance (ADR-023 open item 1). Nothing stops
+  an action on Dockhand's own container or this registry's own (open item 2).
 
 **Dockhand webhook (ADR-010, `webhooks/`):** an opt-in `POST /webhooks/dockhand` route
 that turns Dockhand's outbound update and CVE alerts into staged proposals. Off by default
@@ -570,9 +601,12 @@ closes that gap without ever exposing a value. Off by default (`INFISICAL_ENABLE
 | `AUTHENTIK_TIMEOUT_SECONDS` | `10` | |
 | `AUTHENTIK_RETRIES` | `3` | |
 | `DOCKHAND_API_URL` | unset | Enables Dockhand discovery + `dockhand_*` tools; e.g. `http://dockhand.lan:PORT` |
-| `DOCKHAND_TOKEN` | unset | Dockhand API token (`dh_...`); scope to a read-only role if available |
+| `DOCKHAND_TOKEN` | unset | Dockhand API token (`dh_...`); scope to a read-only role unless `DOCKHAND_ALLOW_WRITE` is on |
 | `DOCKHAND_TIMEOUT_SECONDS` | `10` | |
 | `DOCKHAND_RETRIES` | `3` | |
+| `DOCKHAND_ALLOW_WRITE` | `false` | Registers the three gated container/stack action tools (ADR-023). Also needs `DOCKHAND_API_URL` and `DOCKHAND_TOKEN`; the token must belong to a Dockhand user allowed to control containers and stacks |
+| `DOCKHAND_ACTION_CHALLENGE_TTL_MINUTES` | `5` | How long a Dockhand action's math challenge stays answerable via `dockhand_action_confirm` |
+| `DOCKHAND_ACTION_TIMEOUT_SECONDS` | `120` | Per Dockhand write call; stack redeploys run to completion, so this is longer than `DOCKHAND_TIMEOUT_SECONDS` |
 | `DOCS_MCP_URL` / `DOCS_MCP_TOKEN` | unset | Both enable the read-only `get_service_documentation` tool, a passthrough to a documentation-mcp server (streamable-http, bearer token) for official, version-specific docs |
 | `DOCS_MCP_TIMEOUT_SECONDS` | `30` | |
 | `DOCKER_BASE_URL` | unset | Enables Docker discovery; e.g. `unix:///var/run/docker.sock` |
@@ -678,7 +712,7 @@ Copy `.env.example` to `.env` and fill in the upstream URLs before running local
 - **Curated fields are sacred**: `display_name`, `category`, `tags`, `notes` set by humans are never overwritten by discovery. Discovery only updates provenance fields (`host`, `urls`, `traefik_router`, `authentik_app_slug`, `auth_mode`).
 - **Never hard-delete discovered services**: mark `stale=True` after threshold misses.
 - **Every hard delete is math-gated**: `registry_delete_service` and `hardware-delete-node` only request deletion — they return an `x + y = ?` challenge (`deletion/store.py`'s `DeletionGateStore`) that must be solved and passed to `registry_delete_service_confirm`/`hardware-delete-node-confirm` within `DELETE_CHALLENGE_TTL_MINUTES` before the row is actually removed. Not a security boundary (single digits, shown in the challenge itself) — a deliberate human-in-the-loop friction point against an agent or a fat-fingered id deleting something irreversible; a wrong answer invalidates the challenge rather than allowing retries.
-- **Upstream APIs are read-only**: Traefik, Authentik, Docker, Dockhand, and PatchMon are never modified. PatchMon is read through its Integration API with a `host:get`-only credential; its trigger API, once an exception here, is no longer called (ADR-020's amendment).
+- **Upstream APIs are read-only**: Traefik, Authentik, Docker, Dockhand, and PatchMon are never modified, with one exception: Dockhand's gated container/stack start, stop, restart, and redeploy (ADR-023), off by default (`DOCKHAND_ALLOW_WRITE`), from a closed allowlist, each behind a math challenge. No other Dockhand write endpoint has a client method. PatchMon is read through its Integration API with a `host:get`-only credential; its trigger API, once an exception here, is no longer called (ADR-020's amendment).
 - **The write path writes to Git only**: the proposal layer opens PRs; it never merges them and never writes the filesystem Traefik/Docker watch. The PR + human merge is the safety gate. All write behavior defaults off. The one exception is an emailed patch approval (ADR-020): it runs on exactly one inventory host, and only after a person opens the link and confirms the page.
 - **All patch generation goes through DSPy**: `proposal/generator.py` has no rule-based fallback. Low-confidence or invalid-YAML patches become `rejected` Proposals, never commits.
 - **A normalization rewrite must prove behavior equivalence before it's committed**: `normalization/rules.is_equivalent()` projects both the before and after YAML to a representation-independent form and compares them; a rewrite that changes anything Docker would see differently is never committed, regardless of whether the deterministic formatter or the DSPy escalation produced it. Security patches (`proposal/generator.py`) intentionally change behavior and have no equivalent gate.
@@ -692,9 +726,10 @@ Copy `.env.example` to `.env` and fill in the upstream URLs before running local
 - **LLM calls never run on the event loop**: every `Reasoner` call is a blocking litellm round-trip, so async code reaches it through `asyncio.to_thread` — otherwise every MCP session, the webhook, and the scheduler freeze for the whole call. Tests pin this with `conftest.BlockingCall`.
 - **Never call `dspy.configure()`**: DSPy 3.x lets only the first thread that ever calls it call it again, and a `Reasoner` is reached from both the event loop and `asyncio.to_thread` workers. `Reasoner._ensure()` (lock-guarded) binds every module to its own LM with `set_lm()` instead — after `_load_compiled()`, since `Predict.load_state()` resets `.lm`.
 - **Naming**: snake_case for Python, PascalCase for classes. MCP tool names are mixed, and the
-  names are a public contract, so existing tools are never renamed. 61 are snake_case (the
-  function name FastMCP uses by default: `registry_*`, `events_*`, `secrets_*`, `proposal_*`,
-  and the integrations). 17 are kebab-case via an explicit `name=`: the `hardware-*`,
+  names are a public contract, so existing tools are never renamed. With every optional
+  feature on there are 70 snake_case tools (the function name FastMCP uses by default:
+  `registry_*`, `events_*`, `secrets_*`, `proposal_*`, and the integrations; 67 without
+  `DOCKHAND_ALLOW_WRITE`) and 17 kebab-case via an explicit `name=`: the `hardware-*`,
   `ansible-inventory-*`, and `service-*` families. A new tool follows its family's style; a
   new family uses snake_case, the default.
 - **Log secrets are redacted**: any field whose name contains `token`, `password`, `secret`, `authorization`, or `api_key`, or is `key` / ends in `_key`, is replaced with `***redacted***` before writing to logs, at any depth of nested dicts and lists (`logging/events.py`). `keys` and `key_path` stay visible, since names and paths aren't secrets. Redaction goes by field name only: a secret inside a string value (an error message, a raw payload) is not caught.
@@ -809,6 +844,16 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
 
 ## Current Status
 
+- **ADR-023 accepted and implemented — gated Dockhand container and stack actions**
+  (#195): `dockhand_container_action_request`, `dockhand_stack_action_request`, and
+  `dockhand_action_confirm` start, stop, restart, or redeploy (forced recreate) one container
+  or stack behind an `x + y` challenge, off by default (`DOCKHAND_ALLOW_WRITE`). Amends
+  ADR-013's read-only rule and the "Upstream APIs are read-only" convention. A kept
+  `PendingDockhandAction` row is the audit trail. **Not yet validated against a live
+  Dockhand**: the endpoints come from Dockhand's published API reference; check
+  `/api/docs` and the token's permissions on first use (SOP-009). The read client's
+  endpoints have a related problem (#193): it sends `environment_id` and addresses stacks by
+  id, where the manual documents `?env=` and stack names.
 - **ADR-020 accepted, implemented, and amended (2026-09-27) — Patchmon webhook + email
   approval**: `POST /webhooks/patchmon` verifies PatchMon's real `X-PatchMon-Signature` HMAC
   (401 on failure), accepts the flat patch-alert shape and PatchMon's native body, and emails
@@ -912,8 +957,8 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
   (7 `dockhand_*` tools, a `dockhand://stacks/{stack_id}` resource, a `diagnose_stack`
   prompt) and `discovery/dockhand.py` (`DockhandDiscoverySource`, new `SourceType.dockhand`)
   give the server visibility into Dockhand, which replaced Komodo in the operator's
-  homelab. Off by default (`DOCKHAND_API_URL`/`DOCKHAND_TOKEN` unset). Read-only only — no
-  write/update-triggering tool is exposed, even though Dockhand's API has one;
+  homelab. Off by default (`DOCKHAND_API_URL`/`DOCKHAND_TOKEN` unset). Read-only when it was
+  accepted — the gated write actions came later, in ADR-023;
   discovery-source wiring is what makes this integration load-bearing, addressing the
   exact reason ADR-011 withdrew the read-only-only Komodo integration.
 - **Delete confirmation gate complete**: every hard-delete tool (`registry_delete_service`,
