@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.2](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v2.1.1...v2.1.2) (2026-10-17)
+
+
+### Bug Fixes
+
+* **docs:** report the real cause when documentation-mcp is unreachable ([88db5c1](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/88db5c16bc94be4accc2f87313de9dcd98746b45))
+* **docs:** report the real cause when documentation-mcp is unreachable ([8c5a440](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/8c5a4402f435ba26f9df69353192d1e7f4dbf50b))
+
 ## [2.1.1](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v2.1.0...v2.1.1) (2026-10-10)
 
 
