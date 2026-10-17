@@ -22,6 +22,7 @@ def full_server(tmp_path):
             authentik_token="t",
             dockhand_api_url="http://dockhand.test",
             dockhand_token="t",
+            dockhand_allow_write=True,
             infisical_enabled=True,
             service_deploy_enabled=True,
             adoption_enabled=True,
