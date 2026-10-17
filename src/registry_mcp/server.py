@@ -27,7 +27,11 @@ from registry_mcp.dspy import Reasoner, build_reasoner
 from registry_mcp.hardware import HardwareStore
 from registry_mcp.health import check_health
 from registry_mcp.integrations.authentik import register_authentik_tools
-from registry_mcp.integrations.dockhand import register_dockhand_tools
+from registry_mcp.integrations.dockhand import (
+    DockhandActionGateStore,
+    register_dockhand_action_tools,
+    register_dockhand_tools,
+)
 from registry_mcp.integrations.docs import register_docs_tools
 from registry_mcp.integrations.dozzle import register_dozzle_tools
 from registry_mcp.integrations.infisical import register_infisical_tools
@@ -83,6 +87,8 @@ _CLOSED_WORLD_TOOLS = frozenset(
         "hardware-update-node",
         "hardware-delete-node",
         "hardware-delete-node-confirm",
+        "dockhand_container_action_request",
+        "dockhand_stack_action_request",
         "hardware-link-service",
         "hardware-node-services",
         "hardware-list-unconfirmed",
@@ -241,6 +247,8 @@ def build_app(settings: Settings | None = None) -> tuple[FastMCP, Runtime]:
     deletion_gate.purge_expired()
     inventory_gate = InventoryGateStore(store.engine)
     inventory_gate.purge_expired()
+    dockhand_action_gate = DockhandActionGateStore(store.engine)
+    dockhand_action_gate.purge_expired()
     patch_approvals = PatchApprovalStore(store.engine)
     patch_approvals.purge_expired()
     adoption_generator = AdoptionGenerator(
@@ -267,6 +275,7 @@ def build_app(settings: Settings | None = None) -> tuple[FastMCP, Runtime]:
     register_traefik_tools(mcp, settings)
     register_authentik_tools(mcp, settings, reasoner=reasoner)
     register_dockhand_tools(mcp, settings)
+    register_dockhand_action_tools(mcp, settings, dockhand_action_gate, read_only=read_only)
     register_infisical_tools(mcp, settings, build_notification_provider(settings))
     register_docs_tools(mcp, settings)
     register_dozzle_tools(mcp, settings, store)

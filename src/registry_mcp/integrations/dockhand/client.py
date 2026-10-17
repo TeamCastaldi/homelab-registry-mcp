@@ -133,8 +133,8 @@ class DockhandClient:
         """Start, stop, or restart one container."""
         if action not in CONTAINER_ACTIONS:
             raise DockhandError(f"unsupported container action {action!r}")
-        _check_environment(environment_id)
-        _check_path_id(container_id, "container id")
+        check_environment(environment_id)
+        check_path_id(container_id, "container id")
         return await self._post(f"containers/{container_id}/{action}", environment_id)
 
     async def stack_action(
@@ -144,8 +144,8 @@ class DockhandClient:
         recreated (`redeploy`; `pull` also pulls the images first)."""
         if action not in STACK_ACTIONS:
             raise DockhandError(f"unsupported stack action {action!r}")
-        _check_environment(environment_id)
-        _check_path_id(stack_name, "stack name")
+        check_environment(environment_id)
+        check_path_id(stack_name, "stack name")
         if action == "redeploy":
             body = {"pull": bool(pull), "build": False, "forceRecreate": True}
             return await self._post(f"stacks/{stack_name}/deploy", environment_id, body)
@@ -188,12 +188,14 @@ class DockhandClient:
         return {"status_code": response.status_code, "response": parsed}
 
 
-def _check_environment(environment_id: str) -> None:
+def check_environment(environment_id: str) -> None:
+    """Raise `DockhandError` unless this is a Dockhand environment id (digits)."""
     if not isinstance(environment_id, str) or not _ENVIRONMENT_ID.fullmatch(environment_id):
         raise DockhandError("environment_id must be a Dockhand environment id (digits only)")
 
 
-def _check_path_id(value: str, what: str) -> None:
+def check_path_id(value: str, what: str) -> None:
+    """Raise `DockhandError` unless `value` is safe to put in a URL path."""
     if not isinstance(value, str) or not _PATH_ID.fullmatch(value):
         raise DockhandError(
             f"invalid {what}: letters, digits, '_', '.', '-' only, starting with a letter or digit"
