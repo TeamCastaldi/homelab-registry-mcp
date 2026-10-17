@@ -23,6 +23,20 @@ class DocsMcpError(RuntimeError):
     """Raised when documentation-mcp cannot be reached or returns a malformed result."""
 
 
+def _describe_failure(exc: BaseException) -> str:
+    """Name the real cause of a transport failure.
+
+    `streamablehttp_client` runs in an anyio TaskGroup, so a refused connection,
+    a DNS failure, or a 401 arrives wrapped in an ExceptionGroup whose own text
+    is only "unhandled errors in a TaskGroup (1 sub-exception)". Report each
+    leaf exception by type and message instead.
+    """
+    if isinstance(exc, BaseExceptionGroup):
+        return "; ".join(_describe_failure(sub) for sub in exc.exceptions)
+    detail = str(exc) or repr(exc)
+    return f"{type(exc).__name__}: {detail}"
+
+
 class DocsMcpClient:
     """Client for documentation-mcp's `get_homelab_docs` tool."""
 
@@ -72,7 +86,9 @@ class DocsMcpClient:
             async with self._session_factory() as session:
                 result = await session.call_tool("get_homelab_docs", arguments)
         except Exception as exc:
-            raise DocsMcpError(f"documentation-mcp request failed: {exc}") from exc
+            raise DocsMcpError(
+                f"documentation-mcp request failed: {_describe_failure(exc)}"
+            ) from exc
 
         if result.isError or not result.content:
             raise DocsMcpError("documentation-mcp returned an error or empty result")
