@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
+import httpx
 import pytest
 import uvicorn
 from mcp.server.fastmcp import FastMCP
@@ -105,6 +106,43 @@ async def test_client_wraps_session_factory_failure():
     assert excinfo.value.__cause__ is original
 
 
+async def test_client_names_the_type_of_a_plain_failure():
+    client = DocsMcpClient(
+        "http://docs.test",
+        "tok",
+        session_factory=_raising_factory(ConnectionRefusedError("connection refused")),
+    )
+    with pytest.raises(DocsMcpError) as excinfo:
+        await client.get_homelab_docs("traefik", "3.0")
+    assert str(excinfo.value) == (
+        "documentation-mcp request failed: ConnectionRefusedError: connection refused"
+    )
+
+
+async def test_client_unwraps_a_taskgroup_exception_group():
+    """streamablehttp_client raises its transport failures inside an
+    ExceptionGroup, whose own message names no cause at all."""
+    leaf = httpx.ConnectError("[Errno -2] Name or service not known")
+    group = ExceptionGroup("unhandled errors in a TaskGroup", [ExceptionGroup("inner", [leaf])])
+    client = DocsMcpClient("http://docs.test", "tok", session_factory=_raising_factory(group))
+    with pytest.raises(DocsMcpError) as excinfo:
+        await client.get_homelab_docs("traefik", "3.0")
+    message = str(excinfo.value)
+    assert message == (
+        "documentation-mcp request failed: ConnectError: [Errno -2] Name or service not known"
+    )
+    assert "TaskGroup" not in message
+    assert excinfo.value.__cause__ is group
+
+
+async def test_client_reports_every_sub_exception():
+    group = ExceptionGroup("unhandled errors in a TaskGroup", [ValueError("a"), KeyError("b")])
+    client = DocsMcpClient("http://docs.test", "tok", session_factory=_raising_factory(group))
+    with pytest.raises(DocsMcpError) as excinfo:
+        await client.get_homelab_docs("traefik", "3.0")
+    assert str(excinfo.value) == "documentation-mcp request failed: ValueError: a; KeyError: 'b'"
+
+
 class _CaptureAuthMiddleware:
     """Records the `Authorization` header of every request the ASGI app
     receives — the only way to observe what `_default_session_factory`
@@ -162,6 +200,53 @@ async def test_default_session_factory_sends_bearer_header():
 
     assert captured_auth
     assert "Bearer secret-token" in captured_auth
+
+
+class _RejectAllMiddleware:
+    """Answers every HTTP request 401, as documentation-mcp does for a wrong token."""
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        await send({"type": "http.response.start", "status": 401, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+
+async def test_default_session_factory_reports_a_401_by_status():
+    """A rejected token reaches the caller as a 401, not as an opaque TaskGroup
+    failure, over the real streamablehttp_client transport."""
+    fastmcp = FastMCP("docs-fake")
+    app = fastmcp.streamable_http_app()
+    app.add_middleware(_RejectAllMiddleware)
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+
+    server = uvicorn.Server(uvicorn.Config(app, fd=sock.fileno(), log_level="warning"))
+    serve_task = asyncio.create_task(server.serve())
+    try:
+        for _ in range(200):  # up to ~2s
+            if server.started:
+                break
+            await asyncio.sleep(0.01)
+        assert server.started, "test server never started"
+
+        client = DocsMcpClient(f"http://127.0.0.1:{port}/mcp", "wrong-token")
+        with pytest.raises(DocsMcpError) as excinfo:
+            await client.get_homelab_docs("traefik", "3.0")
+    finally:
+        server.should_exit = True
+        await serve_task
+
+    message = str(excinfo.value)
+    assert "401 Unauthorized" in message
+    assert "TaskGroup" not in message
 
 
 # --- tool ---------------------------------------------------------------
