@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v2.1.2...v2.2.0) (2026-10-19)
+
+
+### Features
+
+* **dockhand:** gated container and stack actions (start, stop, restart, redeploy) ([6b61b13](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/6b61b13100a8ff8639aa2b0ce5c31772c0df1eef))
+
 ## [2.1.2](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v2.1.1...v2.1.2) (2026-10-17)
 
 
