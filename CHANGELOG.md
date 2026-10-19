@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.2.1](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v2.2.0...v2.2.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **dockhand:** scope reads to an environment with ?env= ([9c537db](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/9c537db276831800252399c7166dfde402e50d9c))
+* **dockhand:** scope reads to an environment with ?env= ([2f1f8ac](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/2f1f8ac4ee59affc2dee28db213959b14928af8b)), closes [#193](https://github.com/TeamCastaldi/homelab-registry-mcp/issues/193)
+
 ## [2.2.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v2.1.2...v2.2.0) (2026-10-19)
 
 
