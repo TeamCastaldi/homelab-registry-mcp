@@ -58,31 +58,36 @@ def register_dockhand_tools(mcp: FastMCP, settings: Settings) -> None:
 
     @mcp.tool(annotations=_READ_ONLY)
     async def dockhand_list_stacks(environment_id: str | None = None) -> dict[str, Any]:
-        """List Dockhand stacks (compose projects), optionally filtered to one
-        environment, under `items`."""
+        """List Dockhand stacks (compose projects) under `items`, each tagged
+        with its `environment_id`; every environment unless one is given."""
         return await _call_list("list_stacks", environment_id)
 
     @mcp.tool(annotations=_READ_ONLY)
-    async def dockhand_get_stack(stack_id: str) -> dict[str, Any]:
-        """Fetch a single Dockhand stack by id."""
-        return await _call("get_stack", stack_id)
+    async def dockhand_get_stack(
+        stack_id: str, environment_id: str | None = None
+    ) -> dict[str, Any]:
+        """Fetch a single Dockhand stack by name (`stack_id` is the stack's
+        name). Pass `environment_id` when the name exists in more than one."""
+        return await _call("get_stack", stack_id, environment_id)
 
     @mcp.tool(annotations=_READ_ONLY)
     async def dockhand_list_containers(
         environment_id: str | None = None, stack_id: str | None = None
     ) -> dict[str, Any]:
-        """List Dockhand-visible containers, optionally filtered by environment
-        and/or stack, under `items`."""
+        """List Dockhand-visible containers under `items`, each tagged with its
+        `environment_id`, optionally filtered by environment and/or stack
+        (`stack_id` is the stack's name)."""
         return await _call_list("list_containers", environment_id, stack_id)
 
     @mcp.tool(annotations=_READ_ONLY)
-    async def dockhand_list_pending_updates() -> dict[str, Any]:
-        """List containers with an image update available, under `items`.
+    async def dockhand_list_pending_updates(environment_id: str | None = None) -> dict[str, Any]:
+        """List containers with an image update available under `items`, each
+        tagged with its `environment_id`; every environment unless one is given.
 
         Reads Dockhand's last update check only — this never triggers a new
         check against upstream registries.
         """
-        return await _call_list("list_pending_updates")
+        return await _call_list("list_pending_updates", environment_id)
 
     @mcp.tool(annotations=_READ_ONLY)
     async def dockhand_list_vulnerabilities(container_id: str | None = None) -> dict[str, Any]:
@@ -92,7 +97,7 @@ def register_dockhand_tools(mcp: FastMCP, settings: Settings) -> None:
 
     @mcp.resource("dockhand://stacks/{stack_id}", mime_type="application/json")
     async def dockhand_stack_resource(stack_id: str) -> dict[str, Any]:
-        """Full detail for a single Dockhand stack by id."""
+        """Full detail for a single Dockhand stack by name."""
         return resource_or_raise(await _call("get_stack", stack_id))
 
     @mcp.prompt()

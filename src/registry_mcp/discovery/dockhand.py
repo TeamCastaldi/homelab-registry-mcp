@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from registry_mcp.discovery.base import DiscoveredService
-from registry_mcp.integrations.dockhand.client import DockhandClient
+from registry_mcp.integrations.dockhand.client import DockhandClient, compose_project
 from registry_mcp.models import SourceType
 
 
@@ -26,8 +26,11 @@ class DockhandDiscoverySource:
         self._client = client
 
     async def discover(self) -> list[DiscoveredService]:
-        environments = {e.get("id"): e for e in await self._client.list_environments()}
-        stacks = {s.get("id"): s for s in await self._client.list_stacks()}
+        environments = {str(e.get("id")): e for e in await self._client.list_environments()}
+        # A stack name is unique only within its environment.
+        stacks = {
+            (s.get("environment_id"), s.get("name")): s for s in await self._client.list_stacks()
+        }
         containers = await self._client.list_containers()
 
         discovered: list[DiscoveredService] = []
@@ -44,7 +47,9 @@ class DockhandDiscoverySource:
                     name=name,
                     raw={
                         "container": container,
-                        "stack": stacks.get(container.get("stack_id")),
+                        "stack": stacks.get(
+                            (container.get("environment_id"), compose_project(container))
+                        ),
                         "environment": environments.get(container.get("environment_id")),
                     },
                 )
