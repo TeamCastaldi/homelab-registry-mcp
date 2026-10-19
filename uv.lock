@@ -919,7 +919,7 @@ wheels = [
 
 [[package]]
 name = "homelab-registry-mcp"
-version = "2.1.2"
+version = "2.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "ansible-core" },
