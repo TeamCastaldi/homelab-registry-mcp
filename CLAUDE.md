@@ -402,6 +402,13 @@ path and was withdrawn for being "a read-only window onto a system the operator 
 already open directly." The read tools never call a mutating endpoint. The one write
 surface is the gated actions below (ADR-023); `POST /api/containers/check-updates`,
 `POST /api/stacks`, deletes, `down`, `exec`, and `/api/batch` are still never exposed.
+Containers, stacks, and update checks are per environment: Dockhand takes `?env=<id>` and
+answers an empty list without it (#193), so a read with no `environment_id` asks every
+environment from `GET /api/environments` in turn and tags each item with the
+`environment_id` it came from. Stacks are addressed by name, which is unique only within an
+environment; a container belongs to the stack named by its `com.docker.compose.project`
+label. Confirmed live on v2.2.1 (2026-10-19): container items carry `labels`, and stack
+items carry `name`, `status`, `containers`, `containerDetails`, and update counts.
 
 **Dockhand gated actions (ADR-023, `integrations/dockhand/actions.py` + `gate.py` +
 `models/dockhand_action.py`):** start/stop/restart of one container and start/stop/restart/
@@ -429,8 +436,10 @@ first-use checks: `docs/SOPs/SOP-009-Enable-Dockhand-Actions.md`.
   for a challenge issued before it. The request tools are closed-world (they only write this
   server's SQLite); confirm is open-world and `destructiveHint`.
 - Endpoints, `env` handling, and response bodies come from Dockhand's published API
-  reference and are unverified against the live instance (ADR-023 open item 1). Nothing stops
-  an action on Dockhand's own container or this registry's own (open item 2).
+  reference. Container start/stop/restart is confirmed live (a restart returned HTTP 200
+  with `{"success": true}`, 2026-10-19); the stack endpoints and the `deploy` body are not
+  yet (#201, ADR-023 open item 1). Nothing stops an action on Dockhand's own container or
+  this registry's own (open item 2).
 
 **Dockhand webhook (ADR-010, `webhooks/`):** an opt-in `POST /webhooks/dockhand` route
 that turns Dockhand's outbound update and CVE alerts into staged proposals. Off by default
@@ -851,11 +860,14 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
   ADR-013's read-only rule and the "Upstream APIs are read-only" convention. A kept
   `PendingDockhandAction` row is the audit trail. **Container actions validated live
   (2026-10-19)**: a restart ran once with HTTP 200, and a wrong answer and an expired
-  challenge were both refused. Stack actions are not yet validated (SOP-009). The read
-  client sent `environment_id` and addressed stacks by id, so lists came back empty (#193);
-  it now sends `?env=<id>` (every environment in turn when none is given, each item tagged
-  with its `environment_id`), finds a stack by name, and matches a container to its stack by
-  the Compose project label. Read response shapes beyond environments are still unverified.
+  challenge were both refused. Stack actions are not yet validated (#201, SOP-009).
+- **Dockhand read tools fixed and confirmed live (v2.2.1, #193)**: the read client sent
+  `environment_id` and addressed stacks by id, so container and stack lists came back empty
+  and `dockhand_list_pending_updates` got a 400. It now sends `?env=<id>`, finds a stack by
+  name, and matches containers to stacks by Compose project label. Live on 2026-10-19: 35
+  containers on Heimdall, 49 stacks across five environments, a stack filter returning
+  exactly its container, and no 400 from pending updates (an empty list, not yet
+  cross-checked against Dockhand's UI).
 - **ADR-020 accepted, implemented, and amended (2026-09-27) — Patchmon webhook + email
   approval**: `POST /webhooks/patchmon` verifies PatchMon's real `X-PatchMon-Signature` HMAC
   (401 on failure), accepts the flat patch-alert shape and PatchMon's native body, and emails
