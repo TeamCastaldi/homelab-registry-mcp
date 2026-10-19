@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Accepted and implemented ([#195](https://github.com/TeamCastaldi/homelab-registry-mcp/issues/195)); not yet validated against a live Dockhand |
+| **Status** | Accepted and implemented ([#195](https://github.com/TeamCastaldi/homelab-registry-mcp/issues/195)); container actions validated against the live Dockhand on 2026-10-19, stack actions not yet ([#201](https://github.com/TeamCastaldi/homelab-registry-mcp/issues/201)) |
 | **Amends** | [ADR-013](ADR-013-Dockhand-Read-Only-API-Integration.md) (Dockhand Read-Only API Integration): lifts its "no mutating endpoint is ever a tool" rule for the actions listed here and no others |
 | **Setup** | [SOP-009](../SOPs/SOP-009-Enable-Dockhand-Actions.md) |
 | **Related** | [ADR-014](ADR-014-Service-State-Reset-Action-Tool.md) (draft sketch of a human-confirmed live action, same premise); [ADR-015](ADR-015-Ansible-Inventory-Sync-Tool.md) (the math-gate pattern this copies); [ADR-020](ADR-020-Patchmon-Webhook-Email-Approval.md) (the other amendment to the read-only-upstreams rule) |

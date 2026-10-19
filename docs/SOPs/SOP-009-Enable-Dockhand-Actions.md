@@ -3,7 +3,7 @@
 **Owner:** the maintainer  
 **Frequency:** Once, then again after rotating the Dockhand token  
 **Last Updated:** 2026  
-**Status:** Not yet run against a live Dockhand. Steps 4–5 are the first live check (ADR-023, open item 1)
+**Status:** Steps 3, 5, and 6 run against the live Dockhand on 2026-10-19 for container actions (restart of bentopdf: HTTP 200, ran once; wrong answer and expiry both refused). Stack actions not yet run (#201)
 
 ---
 
