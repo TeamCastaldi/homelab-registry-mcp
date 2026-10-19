@@ -1,9 +1,10 @@
 """Async HTTP client for the Dockhand API, with token auth, timeout, and retry.
 
-Read-only by convention (see CLAUDE.md's "Upstream APIs are read-only" rule and
-ADR-013) — Dockhand's API also exposes update-triggering and stack-mutating
-endpoints (`POST /api/containers/check-updates`, `POST /api/stacks`), but no
-method here ever calls them, not even as a dormant/unused one.
+Reads are the whole of it except for two methods, `container_action` and
+`stack_action` (ADR-023): a closed allowlist of start/stop/restart and a stack
+redeploy. Every other Dockhand write endpoint (deletes, `down`, `exec`,
+`/api/batch`, `check-updates`, `POST /api/stacks`, ...) has no method here, not
+even a dormant one (ADR-013). A write is sent once and never retried.
 
 Endpoint paths beyond `GET /api/containers/check-updates` (confirmed from
 Dockhand's own changelog) are REST-conventional best guesses, unverified
@@ -16,9 +17,18 @@ confirmed.
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any
 
 import httpx
+
+# A container id or a stack name goes straight into a URL path, so it is held to
+# a conservative allowlist: no `/`, `..`, `?`, `#`, whitespace, or `%`.
+_PATH_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+_ENVIRONMENT_ID = re.compile(r"^[0-9]{1,9}$")
+
+CONTAINER_ACTIONS = frozenset({"start", "stop", "restart"})
+STACK_ACTIONS = frozenset({"start", "stop", "restart", "redeploy"})
 
 
 class DockhandError(RuntimeError):
@@ -26,7 +36,8 @@ class DockhandError(RuntimeError):
 
 
 class DockhandClient:
-    """Read-only client for the Dockhand API (the `/api` surface)."""
+    """Client for the Dockhand API (the `/api` surface): reads, plus the gated
+    container and stack actions of ADR-023."""
 
     def __init__(
         self,
@@ -36,6 +47,7 @@ class DockhandClient:
         timeout: float = 10.0,
         retries: int = 3,
         backoff: float = 0.5,
+        action_timeout: float = 120.0,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._base = base_url.rstrip("/")
@@ -43,6 +55,7 @@ class DockhandClient:
         self._timeout = timeout
         self._retries = max(1, retries)
         self._backoff = backoff
+        self._action_timeout = action_timeout
         self._transport = transport
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
@@ -111,3 +124,79 @@ class DockhandClient:
 
     async def list_vulnerabilities(self, container_id: str | None = None) -> list[dict[str, Any]]:
         return self._list(await self._get("vulnerabilities", {"container_id": container_id}))
+
+    # --- gated actions (ADR-023) -----------------------------------------
+
+    async def container_action(
+        self, environment_id: str, container_id: str, action: str
+    ) -> dict[str, Any]:
+        """Start, stop, or restart one container."""
+        if action not in CONTAINER_ACTIONS:
+            raise DockhandError(f"unsupported container action {action!r}")
+        check_environment(environment_id)
+        check_path_id(container_id, "container id")
+        return await self._post(f"containers/{container_id}/{action}", environment_id)
+
+    async def stack_action(
+        self, environment_id: str, stack_name: str, action: str, *, pull: bool = False
+    ) -> dict[str, Any]:
+        """Start, stop, or restart a stack, or redeploy it with every container
+        recreated (`redeploy`; `pull` also pulls the images first)."""
+        if action not in STACK_ACTIONS:
+            raise DockhandError(f"unsupported stack action {action!r}")
+        check_environment(environment_id)
+        check_path_id(stack_name, "stack name")
+        if action == "redeploy":
+            body = {"pull": bool(pull), "build": False, "forceRecreate": True}
+            return await self._post(f"stacks/{stack_name}/deploy", environment_id, body)
+        return await self._post(f"stacks/{stack_name}/{action}", environment_id)
+
+    async def _post(
+        self, path: str, environment_id: str, body: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """One attempt, never retried: a request that reached Dockhand and then
+        failed may still have run, so repeating it could act twice. Redirects
+        are not followed, so the token only ever goes to the configured host."""
+        url = f"{self._base}/api/{path}"
+        headers = {"Authorization": f"Bearer {self._token}", "Accept": "application/json"}
+        try:
+            async with httpx.AsyncClient(
+                timeout=self._action_timeout, transport=self._transport
+            ) as client:
+                response = await client.post(
+                    url, params={"env": environment_id}, headers=headers, json=body
+                )
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise DockhandError(
+                f"Dockhand API returned {exc.response.status_code} for {path}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise DockhandError(
+                f"Dockhand API request to {path} failed ({type(exc).__name__}); "
+                "the action may or may not have been applied"
+            ) from exc
+        try:
+            parsed: Any = response.json()
+        except ValueError:
+            parsed = None
+        if isinstance(parsed, dict) and parsed.get("success") is False:
+            reason = " ".join(str(parsed.get("error") or parsed.get("message") or "").split())
+            raise DockhandError(
+                f"Dockhand reported failure for {path}: {reason[:200] or 'no reason'}"
+            )
+        return {"status_code": response.status_code, "response": parsed}
+
+
+def check_environment(environment_id: str) -> None:
+    """Raise `DockhandError` unless this is a Dockhand environment id (digits)."""
+    if not isinstance(environment_id, str) or not _ENVIRONMENT_ID.fullmatch(environment_id):
+        raise DockhandError("environment_id must be a Dockhand environment id (digits only)")
+
+
+def check_path_id(value: str, what: str) -> None:
+    """Raise `DockhandError` unless `value` is safe to put in a URL path."""
+    if not isinstance(value, str) or not _PATH_ID.fullmatch(value):
+        raise DockhandError(
+            f"invalid {what}: letters, digits, '_', '.', '-' only, starting with a letter or digit"
+        )

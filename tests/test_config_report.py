@@ -26,6 +26,36 @@ def test_a_feature_that_is_on_names_the_settings_it_still_needs():
     assert result["ok"] is False
 
 
+def test_dockhand_actions_on_without_the_api_names_what_is_missing():
+    result = report(dockhand_allow_write=True)
+    assert "Dockhand actions" in result["features_on"]
+    assert result["problems"] == [
+        "Dockhand actions is on but missing DOCKHAND_API_URL, DOCKHAND_TOKEN"
+    ]
+
+
+def test_dockhand_actions_with_the_api_configured_is_ok():
+    result = report(
+        dockhand_allow_write=True,
+        dockhand_api_url="http://dockhand.lan:3000",
+        dockhand_token="dh_x",
+        dockhand_action_timeout_seconds=60.0,
+    )
+    assert result["ok"] is True
+    assert result["features_on"] == ["Dockhand", "Dockhand actions"]
+
+
+def test_dockhand_action_tuning_is_flagged_when_writes_are_off():
+    result = report(
+        dockhand_api_url="http://dockhand.lan:3000",
+        dockhand_token="dh_x",
+        dockhand_action_challenge_ttl_minutes=10,
+    )
+    assert result["for_features_off"] == [
+        {"key": "DOCKHAND_ACTION_CHALLENGE_TTL_MINUTES", "features_off": ["Dockhand actions"]}
+    ]
+
+
 def test_either_of_two_settings_satisfies_an_or_requirement():
     missing = report(secrets_repo_path="/opt/homelab")
     assert missing["problems"] == [

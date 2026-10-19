@@ -23,7 +23,8 @@ query and act on.
 - Read-only tools for Traefik and Authentik (routers, middlewares, applications,
   providers, outposts, policies, the audit log) and for Dockhand (environments,
   stacks, containers, pending updates, vulnerability/CVE findings) plus a
-  curated registry and append-only change and discovery logs.
+  curated registry and append-only change and discovery logs. Opt-in, math-gated
+  start/stop/restart/redeploy of a Dockhand container or stack (off by default).
 - Every hard delete of a service or hardware node is gated behind a solvable
   arithmetic challenge (request, solve, then confirm) — deliberate friction
   against an agent or a fat-fingered id removing something irreversible.
@@ -103,7 +104,7 @@ cp .env.example .env
 # Also set MCP_ALLOWED_HOSTS to every Host clients use to reach /mcp, e.g.
 # registry-mcp.<your-domain>,<LAN_IP>:8765 — any other Host gets HTTP 421.
 # If you run Dockhand, also set DOCKHAND_API_URL/DOCKHAND_TOKEN to enable its
-# read-only tools and discovery source.
+# read-only tools and discovery source (DOCKHAND_ALLOW_WRITE adds the gated actions).
 # To pin the container image to the same release, add REGISTRY_MCP_VERSION=<that tag without its v, e.g. 1.10.1> to .env.
 ```
 
@@ -162,7 +163,9 @@ In Claude Desktop, add an MCP server with the same URL under Settings.
 - [docs/ADRs/ADR-018-Repo-Intake-For-Conversational-Deploy.md](docs/ADRs/ADR-018-Repo-Intake-For-Conversational-Deploy.md) — Phase 1 of the conversational deploy plan: a read-only `service-intake-repo` tool that shallow-clones a foreign repo and extracts its runtime requirements, off by default via `SERVICE_DEPLOY_ENABLED`
 - [docs/ADRs/ADR-019-Compose-Generation-For-Conversational-Deploy.md](docs/ADRs/ADR-019-Compose-Generation-For-Conversational-Deploy.md) — Phase 2 of the conversational deploy plan: a read-only `service-deploy-generate-compose` tool that drafts a homelab-conformant compose file from intake, confidence-gated with no fallback and canonicalized by the normalization formatter
 - [docs/ADRs/ADR-020-Patchmon-Webhook-Email-Approval.md](docs/ADRs/ADR-020-Patchmon-Webhook-Email-Approval.md) — PatchMon alerts arrive HMAC-verified at `POST /webhooks/patchmon` and become emailed, single-use Approve/Cancel links; an approval runs an operator playbook on that one host (amended 2026-09-27: PatchMon's trigger API is no longer called, and its read-only Integration API names hosts and lists pending packages in the email)
+- [docs/ADRs/ADR-023-Dockhand-Gated-Container-And-Stack-Actions.md](docs/ADRs/ADR-023-Dockhand-Gated-Container-And-Stack-Actions.md) — amends ADR-013: math-gated, off-by-default Dockhand container start/stop/restart and stack start/stop/restart/redeploy (forced recreate), from an allowlist
 - [docs/SOPs/SOP-001-Deploy-New-Service.md](docs/SOPs/SOP-001-Deploy-New-Service.md) — runbook for deploying a new service to an onboarded node
+- [docs/SOPs/SOP-009-Enable-Dockhand-Actions.md](docs/SOPs/SOP-009-Enable-Dockhand-Actions.md) — runbook for turning on, verifying, and rolling back the gated Dockhand container/stack actions
 - [docs/SOPs/SOP-002-Connect-Dockhand-Webhook.md](docs/SOPs/SOP-002-Connect-Dockhand-Webhook.md) — runbook for pointing Dockhand at the update webhook
 - [docs/SOPs/SOP-003-Enable-Service-Reset-Action.md](docs/SOPs/SOP-003-Enable-Service-Reset-Action.md) — draft: runbook for standing up the not-yet-implemented service reset action (companion to ADR-014)
 - [docs/SOPs/SOP-004-Verify-Ansible-Control-Plane-Plumbing.md](docs/SOPs/SOP-004-Verify-Ansible-Control-Plane-Plumbing.md) — runbook for verifying `ANSIBLE_CFG_PATH`/`SSH_KEY_PATH`-driven Ansible execution actually works end-to-end

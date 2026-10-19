@@ -94,6 +94,12 @@ _FEATURES = (
         ("dockhand_timeout_seconds", "dockhand_retries", "discovery_dockhand_interval_seconds"),
     ),
     _Feature(
+        "Dockhand actions",
+        lambda s: s.dockhand_allow_write,
+        ("dockhand_api_url", "dockhand_token"),
+        ("dockhand_action_challenge_ttl_minutes", "dockhand_action_timeout_seconds"),
+    ),
+    _Feature(
         "Docker discovery",
         lambda s: bool(s.docker_base_url),
         uses=("discovery_docker_interval_seconds",),
