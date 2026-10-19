@@ -436,9 +436,9 @@ first-use checks: `docs/SOPs/SOP-009-Enable-Dockhand-Actions.md`.
   for a challenge issued before it. The request tools are closed-world (they only write this
   server's SQLite); confirm is open-world and `destructiveHint`.
 - Endpoints, `env` handling, and response bodies come from Dockhand's published API
-  reference. Container start/stop/restart is confirmed live (a restart returned HTTP 200
-  with `{"success": true}`, 2026-10-19); the stack endpoints and the `deploy` body are not
-  yet (#201, ADR-023 open item 1). Nothing stops an action on Dockhand's own container or
+  reference, and all were confirmed live on 2026-10-19 (#201): container restart, and stack
+  restart, stop, start, and redeploy each returned HTTP 200 with `{"success": true}`; the
+  `deploy` body recreated the container on the same image. Nothing stops an action on Dockhand's own container or
   this registry's own (open item 2).
 
 **Dockhand webhook (ADR-010, `webhooks/`):** an opt-in `POST /webhooks/dockhand` route
@@ -858,9 +858,10 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
   `dockhand_action_confirm` start, stop, restart, or redeploy (forced recreate) one container
   or stack behind an `x + y` challenge, off by default (`DOCKHAND_ALLOW_WRITE`). Amends
   ADR-013's read-only rule and the "Upstream APIs are read-only" convention. A kept
-  `PendingDockhandAction` row is the audit trail. **Container actions validated live
-  (2026-10-19)**: a restart ran once with HTTP 200, and a wrong answer and an expired
-  challenge were both refused. Stack actions are not yet validated (#201, SOP-009).
+  `PendingDockhandAction` row is the audit trail. **Validated live (2026-10-19)**: a
+  container restart ran once with HTTP 200, a wrong answer and an expired challenge were both
+  refused, and stack restart, stop, start, and redeploy (`pull=false`, a new container on the
+  same image) all returned HTTP 200 (#201, SOP-009).
 - **Dockhand read tools fixed and confirmed live (v2.2.1, #193)**: the read client sent
   `environment_id` and addressed stacks by id, so container and stack lists came back empty
   and `dockhand_list_pending_updates` got a 400. It now sends `?env=<id>`, finds a stack by
