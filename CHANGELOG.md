@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.2.2](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v2.2.1...v2.2.2) (2026-10-19)
+
+
+### Documentation
+
+* **dockhand:** record the live check of the stack actions ([9905130](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/99051307f547fe9357aa18d9970461ccdb63c8dc))
+* **dockhand:** record the live check of the stack actions ([e11fcfb](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/e11fcfb40792100999c1cb3bc6177d562fd021e9)), closes [#201](https://github.com/TeamCastaldi/homelab-registry-mcp/issues/201)
+* **dockhand:** record the live checks of the read fix and container actions ([f0a34a3](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/f0a34a3f83889782458969a46c23d0301c4ccebf))
+* **dockhand:** record the live checks of the read fix and container actions ([40aecde](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/40aecde9c461904c299067c41678a610f3405738))
+
 ## [2.2.1](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v2.2.0...v2.2.1) (2026-10-19)
 
 
