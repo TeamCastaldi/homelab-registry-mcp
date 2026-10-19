@@ -3,7 +3,7 @@
 **Owner:** the maintainer  
 **Frequency:** Once, then again after rotating the Dockhand token  
 **Last Updated:** 2026  
-**Status:** Steps 3, 5, and 6 run against the live Dockhand on 2026-10-19 for container actions (restart of bentopdf: HTTP 200, ran once; wrong answer and expiry both refused). Stack actions not yet run (#201)
+**Status:** Steps 3, 5, and 6 run against the live Dockhand on 2026-10-19 (restart of the bentopdf container: HTTP 200, ran once; wrong answer and expiry both refused). Stack restart, stop, start, and redeploy (`pull=false`) on the bentopdf stack each returned HTTP 200 the same day (#201)
 
 ---
 

@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Accepted and implemented ([#195](https://github.com/TeamCastaldi/homelab-registry-mcp/issues/195)); container actions validated against the live Dockhand on 2026-10-19, stack actions not yet ([#201](https://github.com/TeamCastaldi/homelab-registry-mcp/issues/201)) |
+| **Status** | Accepted and implemented ([#195](https://github.com/TeamCastaldi/homelab-registry-mcp/issues/195)); container and stack actions validated against the live Dockhand on 2026-10-19 ([#201](https://github.com/TeamCastaldi/homelab-registry-mcp/issues/201)) |
 | **Amends** | [ADR-013](ADR-013-Dockhand-Read-Only-API-Integration.md) (Dockhand Read-Only API Integration): lifts its "no mutating endpoint is ever a tool" rule for the actions listed here and no others |
 | **Setup** | [SOP-009](../SOPs/SOP-009-Enable-Dockhand-Actions.md) |
 | **Related** | [ADR-014](ADR-014-Service-State-Reset-Action-Tool.md) (draft sketch of a human-confirmed live action, same premise); [ADR-015](ADR-015-Ansible-Inventory-Sync-Tool.md) (the math-gate pattern this copies); [ADR-020](ADR-020-Patchmon-Webhook-Email-Approval.md) (the other amendment to the read-only-upstreams rule) |
@@ -187,7 +187,7 @@ role. The SOP written with this change says to verify that on the first call.
 
 | # | Question | Status |
 |---|---|---|
-| 1 | Do the endpoints, `env` handling, and response bodies match the live instance's `/api/docs`? | Open. Check before first use; the client's tests pin the documented shape, not the live one |
+| 1 | Do the endpoints, `env` handling, and response bodies match the live instance's `/api/docs`? | Resolved 2026-10-19 ([#201](https://github.com/TeamCastaldi/homelab-registry-mcp/issues/201)): against Dockhand v1.0.51 through Hawser, `POST /api/containers/{id}/restart?env=` and `POST /api/stacks/{name}/restart`, `/stop`, `/start`, and `/deploy` (`{"pull": false, "build": false, "forceRecreate": true}`) with `?env=` each returned HTTP 200 and `{"success": true, "output": "Stack \"<name>\" <action> completed via Hawser"}` (`deploy` reports `up`). The redeploy replaced the container with a new one on the same image. Container start and stop were not run |
 | 2 | Should the tools refuse to act on Dockhand's own container or this registry's own container? A restart of either drops the connection mid-confirm | Open. Not guarded yet; the SOP warns |
 | 3 | Separate write token (`DOCKHAND_WRITE_TOKEN`) so the read token can stay read-only? | Open. Single token for now |
 | 4 | Should executed actions also be written as `ChangeEvent`s once a container maps to a registry `Service`? | Open. The gate record is the audit trail for now |

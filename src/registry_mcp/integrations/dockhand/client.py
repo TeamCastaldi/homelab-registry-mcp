@@ -9,9 +9,9 @@ even a dormant one (ADR-013). A write is sent once and never retried.
 Containers, stacks, and update checks are per environment: Dockhand takes
 `?env=<id>` and answers an empty list without it (#193), so an unfiltered
 read asks each environment in turn. Environments, containers (with `labels`),
-stacks, and the container restart action are confirmed against a live instance;
-stack actions and the vulnerabilities endpoint are not (`/api/docs` is opt-in
-via Dockhand's own `FEAT_API_DOCS`). Response envelopes are still parsed
+stacks, container restart, and every stack action are confirmed against a live
+instance; the vulnerabilities endpoint is not (`/api/docs` is opt-in via
+Dockhand's own `FEAT_API_DOCS`). Response envelopes are still parsed
 defensively — a bare array or a `results`/`data` wrapper.
 """
 
