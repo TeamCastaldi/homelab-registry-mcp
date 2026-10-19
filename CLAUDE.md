@@ -849,11 +849,13 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
   `dockhand_action_confirm` start, stop, restart, or redeploy (forced recreate) one container
   or stack behind an `x + y` challenge, off by default (`DOCKHAND_ALLOW_WRITE`). Amends
   ADR-013's read-only rule and the "Upstream APIs are read-only" convention. A kept
-  `PendingDockhandAction` row is the audit trail. **Not yet validated against a live
-  Dockhand**: the endpoints come from Dockhand's published API reference; check
-  `/api/docs` and the token's permissions on first use (SOP-009). The read client's
-  endpoints have a related problem (#193): it sends `environment_id` and addresses stacks by
-  id, where the manual documents `?env=` and stack names.
+  `PendingDockhandAction` row is the audit trail. **Container actions validated live
+  (2026-10-19)**: a restart ran once with HTTP 200, and a wrong answer and an expired
+  challenge were both refused. Stack actions are not yet validated (SOP-009). The read
+  client sent `environment_id` and addressed stacks by id, so lists came back empty (#193);
+  it now sends `?env=<id>` (every environment in turn when none is given, each item tagged
+  with its `environment_id`), finds a stack by name, and matches a container to its stack by
+  the Compose project label. Read response shapes beyond environments are still unverified.
 - **ADR-020 accepted, implemented, and amended (2026-09-27) — Patchmon webhook + email
   approval**: `POST /webhooks/patchmon` verifies PatchMon's real `X-PatchMon-Signature` HMAC
   (401 on failure), accepts the flat patch-alert shape and PatchMon's native body, and emails

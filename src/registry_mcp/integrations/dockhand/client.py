@@ -6,12 +6,13 @@ redeploy. Every other Dockhand write endpoint (deletes, `down`, `exec`,
 `/api/batch`, `check-updates`, `POST /api/stacks`, ...) has no method here, not
 even a dormant one (ADR-013). A write is sent once and never retried.
 
-Endpoint paths beyond `GET /api/containers/check-updates` (confirmed from
-Dockhand's own changelog) are REST-conventional best guesses, unverified
-against a live instance's `/api/docs` (Scalar viewer, opt-in via Dockhand's
-own `FEAT_API_DOCS`). Response envelopes are parsed defensively for the same
-reason — the real shape (bare array vs. a `results`/`data` wrapper) isn't
-confirmed.
+Containers, stacks, and update checks are per environment: Dockhand takes
+`?env=<id>` and answers an empty list without it (#193), so an unfiltered
+read asks each environment in turn. `GET /api/environments` and the container
+restart action are confirmed against a live instance; the other read shapes
+are not (`/api/docs` is opt-in via Dockhand's own `FEAT_API_DOCS`). Response
+envelopes are parsed defensively for that reason — the real shape (bare array
+vs. a `results`/`data` wrapper) isn't confirmed.
 """
 
 from __future__ import annotations
@@ -101,26 +102,62 @@ class DockhandClient:
     async def get_environment(self, environment_id: str) -> dict[str, Any]:
         return await self._get(f"environments/{environment_id}")
 
-    async def list_stacks(self, environment_id: str | None = None) -> list[dict[str, Any]]:
-        return self._list(await self._get("stacks", {"environment_id": environment_id}))
+    async def _per_environment(self, path: str, environment_id: str | None) -> list[dict[str, Any]]:
+        """GET a per-environment list: one environment, or every one in turn.
 
-    async def get_stack(self, stack_id: str) -> dict[str, Any]:
-        return await self._get(f"stacks/{stack_id}")
+        Dockhand scopes containers, stacks, and update checks to one
+        environment through `?env=<id>` and answers an empty list without it
+        (#193). Items don't name their environment, so each is tagged with
+        `environment_id`, as a string the way the tools take it.
+        """
+        if environment_id is not None:
+            check_environment(environment_id)
+            env_ids = [environment_id]
+        else:
+            env_ids = [str(e["id"]) for e in await self.list_environments() if "id" in e]
+        items: list[dict[str, Any]] = []
+        for env_id in env_ids:
+            for item in self._list(await self._get(path, {"env": env_id})):
+                if isinstance(item, dict):
+                    items.append({**item, "environment_id": env_id})
+        return items
+
+    async def list_stacks(self, environment_id: str | None = None) -> list[dict[str, Any]]:
+        return await self._per_environment("stacks", environment_id)
+
+    async def get_stack(self, stack_name: str, environment_id: str | None = None) -> dict[str, Any]:
+        """One stack by name, found in the stack list: stacks are addressed by
+        name, and a name is unique only within its environment."""
+        matches = [s for s in await self.list_stacks(environment_id) if s.get("name") == stack_name]
+        if not matches:
+            raise DockhandError(f"no Dockhand stack named {stack_name!r}")
+        if len(matches) > 1:
+            envs = ", ".join(sorted(m["environment_id"] for m in matches))
+            raise DockhandError(
+                f"stack {stack_name!r} exists in environments {envs}: pass environment_id"
+            )
+        return matches[0]
 
     async def list_containers(
         self, environment_id: str | None = None, stack_id: str | None = None
     ) -> list[dict[str, Any]]:
-        return self._list(
-            await self._get("containers", {"environment_id": environment_id, "stack_id": stack_id})
-        )
+        """Containers, optionally only those of the stack named `stack_id`.
 
-    async def list_pending_updates(self) -> list[dict[str, Any]]:
+        Dockhand documents no stack filter on this endpoint, so the stack is
+        matched here by the container's Compose project label.
+        """
+        containers = await self._per_environment("containers", environment_id)
+        if stack_id is None:
+            return containers
+        return [c for c in containers if compose_project(c) == stack_id]
+
+    async def list_pending_updates(self, environment_id: str | None = None) -> list[dict[str, Any]]:
         """Containers with an image update available, per Dockhand's last check.
 
         Reads `GET /api/containers/check-updates` — the confirmed-real read
         variant. Never calls its `POST` twin, which triggers a fresh check.
         """
-        return self._list(await self._get("containers/check-updates"))
+        return await self._per_environment("containers/check-updates", environment_id)
 
     async def list_vulnerabilities(self, container_id: str | None = None) -> list[dict[str, Any]]:
         return self._list(await self._get("vulnerabilities", {"container_id": container_id}))
@@ -192,6 +229,15 @@ def check_environment(environment_id: str) -> None:
     """Raise `DockhandError` unless this is a Dockhand environment id (digits)."""
     if not isinstance(environment_id, str) or not _ENVIRONMENT_ID.fullmatch(environment_id):
         raise DockhandError("environment_id must be a Dockhand environment id (digits only)")
+
+
+def compose_project(container: dict[str, Any]) -> str | None:
+    """The Compose project (Dockhand's stack name) a container belongs to."""
+    labels = container.get("labels") or container.get("Labels")
+    if not isinstance(labels, dict):
+        return None
+    project = labels.get("com.docker.compose.project")
+    return project if isinstance(project, str) else None
 
 
 def check_path_id(value: str, what: str) -> None:

@@ -1,29 +1,31 @@
 """Tests for the Dockhand discovery source and its reconciliation behavior."""
 
-import httpx
-
+from http_fakes import strict_transport
 from registry_mcp.discovery.dockhand import DockhandDiscoverySource
 from registry_mcp.integrations.dockhand.client import DockhandClient
 from registry_mcp.models import SourceType
 
 
 def _transport(routes):
-    def handler(request: httpx.Request) -> httpx.Response:
-        body = routes.get(request.url.path)
-        if body is None:
-            return httpx.Response(404, json={})
-        return httpx.Response(200, json=body)
-
-    return httpx.MockTransport(handler)
+    # Exact path-and-query routes: a list read without `?env=` gets a 404, as
+    # a live Dockhand answers it with nothing (#193).
+    return strict_transport(routes)
 
 
 async def test_dockhand_source_parses_containers_with_stack_and_environment_context():
     routes = {
-        "/api/environments": [{"id": "env1", "name": "homelab-docker"}],
-        "/api/stacks": [{"id": "stack1", "name": "traefik-stack", "environment_id": "env1"}],
-        "/api/containers": [
-            {"id": "c1", "name": "/traefik", "stack_id": "stack1", "environment_id": "env1"}
+        "GET /api/environments": [{"id": 1, "name": "homelab-docker"}, {"id": 7, "name": "other"}],
+        "GET /api/stacks?env=1": [{"name": "traefik-stack"}],
+        # Same stack name in another environment: the container must get its own.
+        "GET /api/stacks?env=7": [{"name": "traefik-stack", "status": "stopped"}],
+        "GET /api/containers?env=1": [
+            {
+                "id": "c1",
+                "name": "/traefik",
+                "labels": {"com.docker.compose.project": "traefik-stack"},
+            }
         ],
+        "GET /api/containers?env=7": [],
     }
     client = DockhandClient("http://d", "t", transport=_transport(routes), backoff=0)
     items = await DockhandDiscoverySource(client).discover()
@@ -32,14 +34,15 @@ async def test_dockhand_source_parses_containers_with_stack_and_environment_cont
     assert items[0].source == SourceType.dockhand
     assert items[0].external_id == "c1"
     assert items[0].raw["stack"]["name"] == "traefik-stack"
+    assert items[0].raw["stack"]["environment_id"] == "1"
     assert items[0].raw["environment"]["name"] == "homelab-docker"
 
 
 async def test_dockhand_source_handles_standalone_container_with_no_stack():
     routes = {
-        "/api/environments": [{"id": "env1", "name": "homelab-docker"}],
-        "/api/stacks": [],
-        "/api/containers": [{"id": "c2", "name": "adhoc", "environment_id": "env1"}],
+        "GET /api/environments": [{"id": 1, "name": "homelab-docker"}],
+        "GET /api/stacks?env=1": [],
+        "GET /api/containers?env=1": [{"id": "c2", "name": "adhoc"}],
     }
     client = DockhandClient("http://d", "t", transport=_transport(routes), backoff=0)
     items = await DockhandDiscoverySource(client).discover()
@@ -50,9 +53,9 @@ async def test_dockhand_source_handles_standalone_container_with_no_stack():
 
 async def test_dockhand_source_skips_containers_with_no_name():
     routes = {
-        "/api/environments": [],
-        "/api/stacks": [],
-        "/api/containers": [{"id": "c3", "name": ""}],
+        "GET /api/environments": [{"id": 1}],
+        "GET /api/stacks?env=1": [],
+        "GET /api/containers?env=1": [{"id": "c3", "name": ""}],
     }
     client = DockhandClient("http://d", "t", transport=_transport(routes), backoff=0)
     items = await DockhandDiscoverySource(client).discover()
@@ -74,10 +77,14 @@ async def test_dockhand_reconciles_against_existing_docker_discovered_service(st
     service_id = services[0].id
 
     routes = {
-        "/api/environments": [{"id": "env1", "name": "homelab-docker"}],
-        "/api/stacks": [{"id": "stack1", "name": "traefik-stack", "environment_id": "env1"}],
-        "/api/containers": [
-            {"id": "c1", "name": "traefik", "stack_id": "stack1", "environment_id": "env1"}
+        "GET /api/environments": [{"id": 1, "name": "homelab-docker"}],
+        "GET /api/stacks?env=1": [{"name": "traefik-stack"}],
+        "GET /api/containers?env=1": [
+            {
+                "id": "c1",
+                "name": "traefik",
+                "labels": {"com.docker.compose.project": "traefik-stack"},
+            }
         ],
     }
     client = DockhandClient("http://d", "t", transport=_transport(routes), backoff=0)
