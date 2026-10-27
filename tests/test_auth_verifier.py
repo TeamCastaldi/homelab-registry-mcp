@@ -10,6 +10,7 @@ import time
 
 import jwt
 import pytest
+import structlog
 from cryptography.hazmat.primitives import serialization
 
 from auth_fakes import AUDIENCE, GROUP, ISSUER, JWKS_URL, FakeAuthentik
@@ -165,9 +166,9 @@ async def test_an_unreachable_jwks_refuses_rather_than_accepts(authentik):
     assert await verifier.verify_token(authentik.token()) is None
 
 
-async def test_a_refusal_never_logs_the_token(authentik, capsys):
+async def test_a_refusal_logs_why_but_never_the_token(authentik):
     token = authentik.token(aud="some-other-client")
-    assert await make_verifier(authentik).verify_token(token) is None
-    out = capsys.readouterr()
-    assert token not in out.out + out.err
-    assert token.split(".")[1] not in out.out + out.err
+    with structlog.testing.capture_logs() as logs:
+        assert await make_verifier(authentik).verify_token(token) is None
+    assert [e["reason"] for e in logs if e["event"] == "mcp_token_refused"] == ["wrong_audience"]
+    assert token.split(".")[1] not in repr(logs)
