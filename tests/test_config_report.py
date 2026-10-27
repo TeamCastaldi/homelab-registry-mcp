@@ -311,3 +311,39 @@ def test_cli_exits_non_zero_when_anything_needs_attention(monkeypatch, capsys, s
         config_report.main()
     assert exited.value.code == code
     assert "setting names only, never values" in capsys.readouterr().out
+
+
+def test_mcp_oauth_on_names_every_setting_it_still_needs():
+    result = report(mcp_auth_enabled=True, mcp_auth_audience="client-id")
+    assert "MCP OAuth" in result["features_on"]
+    assert result["problems"] == [
+        "MCP OAuth is on but missing MCP_AUTH_ISSUER_URL, MCP_AUTH_REQUIRED_GROUP, "
+        "MCP_AUTH_RESOURCE_URL"
+    ]
+
+
+def test_mcp_oauth_fully_configured_is_ok():
+    result = report(
+        mcp_auth_enabled=True,
+        mcp_auth_issuer_url="https://sso.example.com/application/o/registry-mcp/",
+        mcp_auth_audience="client-id",
+        mcp_auth_required_group="registry-mcp-admins",
+        mcp_auth_resource_url="https://registry-mcp.example.com/mcp",
+    )
+    assert result["ok"] is True
+    assert result["features_on"] == ["MCP OAuth"]
+
+
+def test_mcp_oauth_on_stdio_is_flagged_as_doing_nothing():
+    result = report(mcp_transport="stdio", mcp_auth_enabled=True)
+    assert any(
+        p.startswith("MCP_AUTH_ENABLED is on, but MCP_TRANSPORT is stdio")
+        for p in result["problems"]
+    )
+
+
+def test_mcp_oauth_tuning_is_flagged_while_auth_is_off():
+    result = report(mcp_auth_jwks_cache_seconds=60)
+    assert result["for_features_off"] == [
+        {"key": "MCP_AUTH_JWKS_CACHE_SECONDS", "features_off": ["MCP OAuth"]}
+    ]
