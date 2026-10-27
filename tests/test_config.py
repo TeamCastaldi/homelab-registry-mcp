@@ -5,7 +5,7 @@ import base64
 import pytest
 
 from conftest import IsolatedSettings
-from registry_mcp.config import reveal
+from registry_mcp.config import Settings, reveal
 from registry_mcp.gitcrypt import key_bytes
 from registry_mcp.providers.git import build_git_provider
 from registry_mcp.providers.notification import build_notification_provider
@@ -51,3 +51,12 @@ def test_each_consumer_still_gets_the_real_value(settings):
 def test_reveal_passes_an_unset_credential_through_as_none(settings):
     assert reveal(IsolatedSettings().git_token) is None
     assert reveal(settings.git_token) == "leak-git-token"
+
+
+def test_mcp_auth_is_off_until_turned_on(monkeypatch):
+    assert IsolatedSettings().mcp_auth_enabled is False
+    monkeypatch.setenv("MCP_AUTH_ENABLED", "true")
+    monkeypatch.setenv("MCP_AUTH_AUDIENCE", "registry-mcp-client")
+    loaded = Settings(_env_file=None)
+    assert loaded.mcp_auth_enabled is True
+    assert loaded.mcp_auth_audience == "registry-mcp-client"
