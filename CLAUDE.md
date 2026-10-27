@@ -47,6 +47,11 @@ src/registry_mcp/
 ├── config.py              # pydantic Settings (env vars → typed config)
 ├── config_report.py       # config_status tool + registry-mcp-config-check: missing/mistyped/do-nothing settings, names only
 ├── errors.py              # the {"error": ...} convention: reports_error / resource_or_raise
+├── auth/                  # /mcp as an OAuth resource server (ADR-024), off by default
+│   ├── verifier.py        # AuthentikTokenVerifier: JWKS signature, iss/aud/exp/nbf/sub, never logs a token
+│   ├── middleware.py      # RequireGroupMiddleware: 403 when a valid token lacks the required group
+│   ├── routes.py          # RFC 9728 protected-resource metadata, bare and /mcp-suffixed paths
+│   └── setup.py           # build_auth (fail closed) + secure_app (swap metadata route, add group gate)
 ├── gitcrypt.py            # shared git-crypt primitives (secrets tools + adoption's .env write)
 ├── health.py              # startup checks (repo, ansible.cfg, SSH key); any failure → read-only mode
 ├── models/
@@ -596,6 +601,37 @@ closes that gap without ever exposing a value. Off by default (`INFISICAL_ENABLE
   process without looping through Infisical itself) is a deliberately open,
   deployment-specific problem — see ADR-016's Open items.
 
+**OAuth for `/mcp` (ADR-024, `auth/`):** `/mcp` is an OAuth 2.1 resource server, with
+Authentik as the authorization server. Off by default (`MCP_AUTH_ENABLED=false`, logged as
+`mcp_auth_disabled` at startup on HTTP). Setup: `docs/SOPs/SOP-010-Connect-Authentik-OAuth.md`.
+- **The SDK does the mechanics**: `FastMCP(auth=AuthSettings(...), token_verifier=...)` installs
+  its `AuthenticationMiddleware`, its `RequireAuthMiddleware` (401 with `WWW-Authenticate:
+  Bearer resource_metadata="…"`), and its session binding (a session can't be used with another
+  subject's token). This package adds only what the SDK lacks.
+- **Token checks** (`verifier.py`, PyJWT): signature against the issuer's JWKS (from its OpenID
+  discovery document, or `MCP_AUTH_JWKS_URL`); asymmetric algorithms only, and only the one the
+  key declares; `iss` exact, `aud` = the provider's client ID, `exp`/`nbf` with 30s leeway, `sub`
+  required. Any failure is `None`, which the SDK turns into 401. The key set is cached; an unknown
+  key id forces at most one refetch per 30s. A token is never logged, only
+  `mcp_token_refused reason=…`.
+- **Authorization is a group**, not a scope (`middleware.py`): a valid token whose `groups` claim
+  lacks `MCP_AUTH_REQUIRED_GROUP` gets 403 `insufficient_scope`. It's added to
+  `app.user_middleware` after the SDK's auth middleware (not `add_middleware`, which would put
+  it first). Authentik also binds the group to the application; the server doesn't rely on it.
+- **The metadata is ours, not the SDK's** (`routes.py`): the SDK's lists no `scopes_supported`,
+  so Claude would request no scopes and Authentik's token would carry no `groups`. `secure_app`
+  removes it and serves ours at `/.well-known/oauth-protected-resource` and `…/mcp`.
+- **Fail closed**: with auth on, a missing `MCP_AUTH_*` setting, a non-`https://` URL, or
+  `MCP_TRANSPORT=sse` (the group gate covers `/mcp` only) raises `AuthConfigError` at startup.
+- **Only `/health` and the metadata are open.** The webhooks and approval links keep their own
+  credentials and never accept an OAuth token in their place. A webhook's
+  `Authorization: Bearer <secret>` is refused as a token (quietly, `reason=malformed`) and then
+  checked by the webhook as before. Feature switches are unchanged: auth decides who calls,
+  the switches decide which tools exist.
+- One static, **public** Authentik client (PKCE, no secret) serves every client: claude.ai via
+  "Use your own OAuth client", Claude Code via `--client-id`. Authentik 2026.8's DCR needs an
+  authenticated caller and it has no CIMD, so neither automatic path works.
+
 **A source only runs when its upstream env var is set** (e.g., no Traefik discovery if `TRAEFIK_API_URL` is unset).
 
 ## Environment Variables
@@ -625,6 +661,14 @@ closes that gap without ever exposing a value. Off by default (`INFISICAL_ENABLE
 | `MCP_HOST` / `MCP_PORT` | `0.0.0.0` / `8765` | |
 | `MCP_ALLOWED_HOSTS` | loopback names, bare and `:*` | DNS-rebinding protection for `/mcp` (MCP spec: servers must validate `Origin`). Comma-separated `Host` values: `name:*` matches any explicit port, a bare `name` matches default-port (80/443) requests. Must list every way clients reach the server (Traefik hostname, LAN `ip:port`) or they get HTTP 421 |
 | `MCP_ALLOWED_ORIGINS` | unset | Browser `Origin` values accepted on `/mcp`; clients that send no `Origin` (CLI/desktop MCP clients) are unaffected. A foreign `Origin` gets HTTP 403 |
+| `MCP_AUTH_ENABLED` | `false` | ADR-024: `/mcp` requires an Authentik access token (401 without a valid one, 403 outside the group). With it on, every setting below marked required must be set or the server won't start |
+| `MCP_AUTH_ISSUER_URL` | unset | Required with auth. Authentik's per-application issuer, compared exactly, trailing slash included: `https://sso.example.com/application/o/<slug>/`. Must be `https://` |
+| `MCP_AUTH_AUDIENCE` | unset | Required with auth. The `aud` a token must carry: the Authentik provider's client ID |
+| `MCP_AUTH_REQUIRED_GROUP` | unset | Required with auth. Name of the Authentik group the `groups` claim must contain |
+| `MCP_AUTH_RESOURCE_URL` | unset | Required with auth. The public URL clients enter, path included (`https://registry-mcp.example.com/mcp`); the metadata's `resource`, which claude.ai matches exactly |
+| `MCP_AUTH_SCOPES` | `openid profile` | Scopes the metadata tells clients to request (space- or comma-separated); `profile` carries `groups`. Add `offline_access` for refresh tokens |
+| `MCP_AUTH_JWKS_URL` | unset | Override for Authentik's key set; unset reads `jwks_uri` from the issuer's discovery document. Must be `https://` |
+| `MCP_AUTH_JWKS_CACHE_SECONDS` | `300` | How long the key set is cached; an unknown key id still forces one refetch per 30s |
 | `DISCOVERY_TRAEFIK_INTERVAL_SECONDS` | `300` | |
 | `DISCOVERY_DOCKER_INTERVAL_SECONDS` | `300` | |
 | `DISCOVERY_AUTHENTIK_INTERVAL_SECONDS` | `900` | |
@@ -747,8 +791,8 @@ Copy `.env.example` to `.env` and fill in the upstream URLs before running local
 - **All repo-relative paths go through `gitcrypt.check_path`**: every user- or draft-supplied path (`secrets_*` tools, adoption's `.env` write) is validated by the shared helper in `gitcrypt.py` — reject absolute paths, reject `..` traversal, then `.resolve()` + `is_relative_to(repo)` as a final containment check (also catches symlink escapes), and reject anything that resolves inside `.git/` (its config can hold a remote's credentials; its hooks run on the commits these tools make). Never join a repo base with a caller-supplied path without it; `Path(base) / "/etc/passwd"` silently discards `base` and returns `/etc/passwd`. A path that will be written into `.gitattributes` also passes `gitcrypt.check_attr_path` (no whitespace, line breaks, globs, or quotes — a newline could add a rule that turns encryption off), existing entries are matched by exact line (`has_gitattributes_entry`), and every `.env` key/value goes through `check_dotenv_entry` (one line per entry).
 - **A secret never reaches Git through `GitProvider.commit_file()`**: that call is a raw hosting-API content write and bypasses git-crypt's local clean filter entirely. Anything that must land encrypted (the `.env` files `secrets_*` and adoption write) goes through `gitcrypt.py`'s local-clone subprocess helpers instead — see the brownfield adoption entry above.
 - **Structured logs go to stderr + file** — keeps stdio JSON-RPC transport clean.
-- **No HTTP /health endpoint on `/mcp` itself**: Dockerfile still uses a TCP probe on `MCP_PORT` for container health. `FastMCP.custom_route` (available since the pinned `mcp` SDK, 1.29.0) does let the server expose arbitrary Starlette routes alongside `/mcp` — the Dockhand and Patchmon webhooks and the patch approval links (ADR-010, ADR-020) are the only things that use it — but no `/health` HTTP route has been added, and this line describes that gap, not a technical limitation.
-- **ForwardAuth in front of MCP clients breaks them** (clients don't follow redirects). This applies to `/mcp` itself — auth strategy there is deferred; the endpoint is LAN-only. It applies equally to `/webhooks/dockhand` and `/webhooks/patchmon`, which authenticate in-process (a bearer secret, an HMAC signature) rather than sitting behind a redirect-based proxy. The only browser-facing routes on this port are `/patch/approve` and `/patch/cancel` (ADR-020). Their single-use token is the credential, so they too must not sit behind ForwardAuth.
+- **`GET /health` is open and says nothing**: it returns `{"status": "ok"}` with no token, no version, and no configuration, since it is one of only two unauthenticated routes once OAuth is on (ADR-024). The Dockerfile still uses a TCP probe on `MCP_PORT`. Every other `FastMCP.custom_route` (the Dockhand and Patchmon webhooks, the patch approval links) carries its own credential.
+- **ForwardAuth in front of MCP clients breaks them** (clients don't follow redirects). This applies to `/mcp` itself, which authenticates in-process instead: OAuth bearer tokens from Authentik when `MCP_AUTH_ENABLED` is on (ADR-024), and nothing at all when it's off, so keep it LAN-only then. It applies equally to `/webhooks/dockhand` and `/webhooks/patchmon`, which authenticate in-process (a bearer secret, an HMAC signature) rather than sitting behind a redirect-based proxy. The only browser-facing routes on this port are `/patch/approve` and `/patch/cancel` (ADR-020). Their single-use token is the credential, so they too must not sit behind ForwardAuth.
 
 ## Testing
 
@@ -853,6 +897,12 @@ using the self-hosted runner already registered to the caller's repo (ADR-001
 
 ## Current Status
 
+- **ADR-024 accepted and implemented — OAuth resource server for `/mcp`**: `auth/` checks
+  Authentik access tokens (JWKS signature, `iss`, `aud`, expiry) and a required group (403
+  otherwise), serves RFC 9728 metadata, and leaves the webhooks and approval links on their own
+  credentials. Off by default (`MCP_AUTH_ENABLED`); fails closed at startup when on but
+  misconfigured. Adds an open `GET /health`. Not yet validated against the live Authentik
+  2026.8.5 (SOP-010 steps 6 and 13 confirm the `aud` and `groups` claims the tests assume).
 - **ADR-023 accepted and implemented — gated Dockhand container and stack actions**
   (#195): `dockhand_container_action_request`, `dockhand_stack_action_request`, and
   `dockhand_action_confirm` start, stop, restart, or redeploy (forced recreate) one container
