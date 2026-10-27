@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.3.0](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v2.2.1...v2.3.0) (2026-10-27)
+
+
+### Features
+
+* **auth:** add MCP_AUTH_* settings for the /mcp resource server ([c4c1c71](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/c4c1c718e163d8b90bd5160cb08f41ddaeb2e58e))
+* **auth:** add the group gate (403) and protected-resource metadata routes ([834c9f2](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/834c9f2c7e0a69e0f60faa8b6c0f8b9403dae614))
+* **auth:** report missing MCP OAuth settings in config_status ([1263df5](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/1263df5513ceed0490834b6fd752d58ea19d3d53))
+* **auth:** require Authentik tokens on /mcp when MCP_AUTH_ENABLED is on ([47ac053](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/47ac05363005e94b18876674286b2e6637b7d03d))
+* **auth:** verify Authentik access tokens against the issuer's JWKS ([08541d3](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/08541d3b7854a6b011808d473feb0c591b492a4a))
+
+
+### Documentation
+
+* **auth:** ADR-024 and SOP-010 for the /mcp OAuth resource server ([823f7a5](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/823f7a53a222451b5bca8da142825d88485dc5ff))
+* **auth:** document MCP_AUTH_* settings and the /mcp OAuth model ([ec61d28](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/ec61d28bb30712b3bd7280fd5e822222df9a81e2))
+* **dockhand:** record the live check of the stack actions ([9905130](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/99051307f547fe9357aa18d9970461ccdb63c8dc))
+* **dockhand:** record the live check of the stack actions ([e11fcfb](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/e11fcfb40792100999c1cb3bc6177d562fd021e9)), closes [#201](https://github.com/TeamCastaldi/homelab-registry-mcp/issues/201)
+* **dockhand:** record the live checks of the read fix and container actions ([f0a34a3](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/f0a34a3f83889782458969a46c23d0301c4ccebf))
+* **dockhand:** record the live checks of the read fix and container actions ([40aecde](https://github.com/TeamCastaldi/homelab-registry-mcp/commit/40aecde9c461904c299067c41678a610f3405738))
+
 ## [2.2.1](https://github.com/TeamCastaldi/homelab-registry-mcp/compare/v2.2.0...v2.2.1) (2026-10-19)
 
 
