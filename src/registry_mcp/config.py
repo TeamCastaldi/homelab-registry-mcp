@@ -80,6 +80,28 @@ class Settings(BaseSettings):
     )
     mcp_allowed_origins: str = Field(default="")
 
+    # OAuth resource server for /mcp (ADR-024). Off by default so an upgrade
+    # alone never locks out a client that hasn't signed in yet; once on, every
+    # /mcp request needs an Authentik access token whose signature (JWKS), iss,
+    # aud and expiry check out (else 401) and whose `groups` claim holds the
+    # required group (else 403). Nothing here is a secret: the server only
+    # verifies tokens, and the clients use a public client with PKCE.
+    mcp_auth_enabled: bool = Field(default=False)
+    # Authentik's per-application issuer, trailing slash included, e.g.
+    # https://sso.example.com/application/o/registry-mcp/ — compared exactly.
+    mcp_auth_issuer_url: str | None = Field(default=None)
+    # The `aud` a token must carry: the Authentik provider's client ID.
+    mcp_auth_audience: str | None = Field(default=None)
+    mcp_auth_required_group: str | None = Field(default=None)
+    # The public URL clients enter, path included (…/mcp). Protected-resource
+    # metadata names it as `resource`; claude.ai needs an exact match.
+    mcp_auth_resource_url: str | None = Field(default=None)
+    # Unset: read `jwks_uri` from the issuer's OpenID configuration.
+    mcp_auth_jwks_url: str | None = Field(default=None)
+    # Scopes clients are told to request (space- or comma-separated).
+    mcp_auth_scopes: str = Field(default="openid profile")
+    mcp_auth_jwks_cache_seconds: int = Field(default=300)
+
     # Event log retention
     event_retention_days: int = Field(default=90)
 

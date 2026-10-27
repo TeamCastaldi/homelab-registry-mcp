@@ -272,6 +272,17 @@ _FEATURES = (
         ("ssh_default_user",),
     ),
     _Feature(
+        "MCP OAuth",
+        lambda s: s.mcp_auth_enabled,
+        (
+            "mcp_auth_issuer_url",
+            "mcp_auth_audience",
+            "mcp_auth_required_group",
+            "mcp_auth_resource_url",
+        ),
+        ("mcp_auth_jwks_url", "mcp_auth_scopes", "mcp_auth_jwks_cache_seconds"),
+    ),
+    _Feature(
         "Ansible inventory sync",
         lambda s: bool(s.ansible_inventory_path),
         uses=("ansible_inventory_write_challenge_ttl_minutes",),
@@ -323,6 +334,11 @@ def _warnings(settings: Settings, environ: Mapping[str, str]) -> list[str]:
     ):
         warnings.append(
             "Reasoning layer (DSPy) is on, but neither DSPY_API_KEY nor ANTHROPIC_API_KEY is set"
+        )
+    if settings.mcp_auth_enabled and settings.mcp_transport == "stdio":
+        warnings.append(
+            "MCP_AUTH_ENABLED is on, but MCP_TRANSPORT is stdio: tokens are checked only "
+            "on HTTP, so it has no effect"
         )
     if settings.patchmon_webhook_enabled and settings.notification_provider != "smtp":
         warnings.append(

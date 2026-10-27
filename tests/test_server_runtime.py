@@ -12,12 +12,15 @@ import asyncio
 import dataclasses
 from datetime import timedelta
 
+import pytest
+import structlog
 from apscheduler.triggers.cron import CronTrigger
 from sqlmodel import Session, select
 from starlette.testclient import TestClient
 
 from conftest import IsolatedSettings
 from registry_mcp.adoption import AdoptionDraftStore
+from registry_mcp.auth.setup import AuthConfigError
 from registry_mcp.models import AdoptionDraft, AdoptionDraftStatus, DiscoveryStatus, SourceType
 from registry_mcp.models.event import ChangeEvent
 from registry_mcp.models.service import utcnow
@@ -203,3 +206,61 @@ async def test_stdio_runs_scheduler_for_the_session():
 
     assert seen == [True]
     assert not scheduler.running
+
+
+# --- MCP OAuth wiring (ADR-024). End-to-end status codes are in test_mcp_auth.py.
+
+_AUTH = dict(
+    mcp_auth_enabled=True,
+    mcp_auth_issuer_url="https://sso.example.com/application/o/registry-mcp/",
+    mcp_auth_audience="registry-mcp-client-id",
+    mcp_auth_required_group="registry-mcp-admins",
+    mcp_auth_resource_url="https://registry-mcp.example.com/mcp",
+)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        (
+            {"mcp_auth_required_group": None, "mcp_auth_resource_url": None},
+            "missing MCP_AUTH_REQUIRED_GROUP, MCP_AUTH_RESOURCE_URL",
+        ),
+        ({"mcp_auth_issuer_url": "http://sso.example.com/"}, "MCP_AUTH_ISSUER_URL must be"),
+        ({"mcp_auth_jwks_url": "http://sso.example.com/jwks/"}, "MCP_AUTH_JWKS_URL must be"),
+        ({"mcp_transport": "sse"}, "needs MCP_TRANSPORT=streamable-http"),
+    ],
+)
+def test_auth_on_but_unusable_refuses_to_start(overrides, message):
+    with pytest.raises(AuthConfigError, match=message):
+        build_app(_settings(**{**_AUTH, **overrides}))
+
+
+def test_auth_off_on_http_warns_at_startup():
+    with structlog.testing.capture_logs() as logs:
+        build_app(_settings())
+    assert "mcp_auth_disabled" in [e["event"] for e in logs]
+    with structlog.testing.capture_logs() as logs:
+        build_app(_settings(mcp_transport="stdio"))
+    assert "mcp_auth_disabled" not in [e["event"] for e in logs]
+
+
+def test_auth_on_replaces_the_sdks_metadata_route_and_gates_after_authentication():
+    server, runtime = build_app(_settings(**_AUTH))
+    app = http_app(server, runtime, None)
+    well_known = [r for r in app.routes if getattr(r, "path", "").startswith("/.well-known/")]
+    assert [r.path for r in well_known] == [
+        "/.well-known/oauth-protected-resource",
+        "/.well-known/oauth-protected-resource/mcp",
+    ]
+    order = [m.cls.__name__ for m in app.user_middleware]
+    assert order == ["AuthenticationMiddleware", "AuthContextMiddleware", "RequireGroupMiddleware"]
+
+
+@pytest.mark.parametrize("auth", [{}, _AUTH], ids=["auth-off", "auth-on"])
+def test_health_answers_without_a_token_and_says_nothing_else(auth):
+    server, runtime = build_app(_settings(**auth))
+    with TestClient(http_app(server, runtime, None)) as client:
+        response = client.get("/health", headers={"Host": "localhost"})
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}

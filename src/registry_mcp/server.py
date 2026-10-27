@@ -15,9 +15,12 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from registry_mcp import __version__
 from registry_mcp.adoption import AdoptionDraftStore
+from registry_mcp.auth.setup import McpAuth, build_auth, secure_app
 from registry_mcp.config import Settings, get_settings
 from registry_mcp.config_report import build_report, process_environ
 from registry_mcp.deletion import DeletionGateStore
@@ -153,6 +156,7 @@ class Runtime:
     discovery: DiscoveryEngine
     proposals: ProposalEngine
     normalization: NormalizationEngine
+    auth: McpAuth | None = None
 
 
 def build_proposal_engine(
@@ -262,11 +266,14 @@ def build_app(settings: Settings | None = None) -> tuple[FastMCP, Runtime]:
         on_pass_complete=(proposal_engine.after_discovery if proposal_engine.configured else None),
     )
 
+    mcp_auth = build_auth(settings)
     mcp = FastMCP(
         name="homelab-registry-mcp",
         host=settings.mcp_host,
         port=settings.mcp_port,
         transport_security=build_transport_security(settings),
+        auth=mcp_auth.settings if mcp_auth else None,
+        token_verifier=mcp_auth.verifier if mcp_auth else None,
     )
     install_tool_call_logging(mcp)
 
@@ -345,6 +352,12 @@ def build_app(settings: Settings | None = None) -> tuple[FastMCP, Runtime]:
             "timestamp": datetime.now(UTC).isoformat(),
         }
 
+    @mcp.custom_route("/health", methods=["GET"])
+    async def http_health(_request: Request) -> JSONResponse:
+        """Liveness for probes and uptime checks, with no token. Says nothing
+        about configuration or version: it is one of only two open routes."""
+        return JSONResponse({"status": "ok"})
+
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def system_health_check() -> dict[str, Any]:
         """Diagnose control-plane provisioning: Git repo, ansible.cfg, and SSH key.
@@ -381,6 +394,7 @@ def build_app(settings: Settings | None = None) -> tuple[FastMCP, Runtime]:
         discovery=engine,
         proposals=proposal_engine,
         normalization=normalization_engine,
+        auth=mcp_auth,
     )
 
 
@@ -464,6 +478,8 @@ def http_app(server: FastMCP, runtime: Runtime, scheduler: AsyncIOScheduler | No
     """
     if runtime.settings.mcp_transport == "streamable-http":
         app = server.streamable_http_app()
+        if runtime.auth is not None:
+            secure_app(app, runtime.auth, mcp_path=server.settings.streamable_http_path)
     else:
         app = server.sse_app()
     inner = app.router.lifespan_context

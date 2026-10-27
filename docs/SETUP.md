@@ -97,6 +97,30 @@ In VS Code, add it to `.vscode/mcp.json`:
 
 In Claude Desktop, add an MCP server with the same URL under Settings.
 
+### Requiring sign-in (OAuth)
+
+With `MCP_AUTH_ENABLED=false` (the default) `/mcp` answers anyone who can reach
+it, so keep it LAN-only. To put it on the internet, turn on OAuth: `/mcp` then
+accepts only access tokens from your Authentik, for users in one group, and
+clients sign in through their usual OAuth flow (claude.ai's custom connector,
+`claude mcp add --client-id …`). The webhooks and approval links keep their own
+credentials, and `/health` and `/.well-known/oauth-protected-resource` stay
+open. [SOP-010](SOPs/SOP-010-Connect-Authentik-OAuth.md) walks through the
+Authentik provider and each client; [ADR-024](ADRs/ADR-024-OAuth-Resource-Server-For-MCP.md)
+explains the design.
+
+```bash
+MCP_AUTH_ENABLED=true
+MCP_AUTH_ISSUER_URL=https://sso.<your-domain>/application/o/registry-mcp/
+MCP_AUTH_AUDIENCE=<the provider's client ID>
+MCP_AUTH_REQUIRED_GROUP=registry-mcp-admins
+MCP_AUTH_RESOURCE_URL=https://registry-mcp.<your-domain>/mcp
+MCP_AUTH_SCOPES=openid profile offline_access
+```
+
+Don't put Authentik forward-auth (ForwardAuth middleware) in front of any route
+on this port: MCP clients and webhook senders can't follow its redirect.
+
 ## Connecting Traefik and Authentik
 
 Don't guess at the values yourself — ask your MCP client to run
@@ -304,3 +328,5 @@ It needs `NOTIFICATION_PROVIDER=smtp`: the links are sent by email only. Route
   step-by-step runbook for wiring Dockhand up
 - [docs/SOPs/SOP-007-Connect-Patchmon-Webhook.md](SOPs/SOP-007-Connect-Patchmon-Webhook.md) —
   step-by-step runbook for PatchMon's email-approval webhook
+- [docs/SOPs/SOP-010-Connect-Authentik-OAuth.md](SOPs/SOP-010-Connect-Authentik-OAuth.md) —
+  step-by-step runbook for putting `/mcp` behind Authentik OAuth and connecting clients
