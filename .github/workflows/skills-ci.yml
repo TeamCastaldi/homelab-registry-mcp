@@ -23,7 +23,7 @@ jobs:
     name: Shell lint and tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # shellcheck ships on the ubuntu-latest image, so no install step.
       - name: Lint shell scripts
@@ -67,9 +67,9 @@ jobs:
     name: Python lint and tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
