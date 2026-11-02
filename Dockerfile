@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 # ansible-core's forked worker processes crash immediately ("ERROR! A worker
 # was found in a dead state") without a UTF-8 locale, and python:3.12-slim
