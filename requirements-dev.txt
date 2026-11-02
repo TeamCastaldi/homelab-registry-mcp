@@ -7,5 +7,5 @@
 # `pip install --upgrade ruff` turns every upstream release into a surprise
 # red build on a PR that changed no Python at all. Dependabot's pip ecosystem
 # watches this file, so a bump arrives as a reviewable PR instead.
-pytest==9.1.1
-ruff==0.16.10
+pytest==9.2.0
+ruff==0.17.3
